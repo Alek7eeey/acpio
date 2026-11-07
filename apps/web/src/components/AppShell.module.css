@@ -4568,6 +4568,13 @@
   min-height: 0;
 }
 
+/* The code pane is a sibling of the page and can stand on either side. */
+
+
+.splitPane[hidden] {
+  display: none;
+}
+
 .splitPane {
   display: flex;
   flex-direction: column;
@@ -4575,8 +4582,27 @@
   min-width: 0;
 }
 
-.splitPane + .splitPane {
+/* The line between chat and the code pane is the grip that sizes it. */
+.editorSplitter {
+  flex: 0 0 5px;
+  align-self: stretch;
+  border: none;
   border-left: 1px solid var(--border);
+  cursor: col-resize;
+  background: transparent;
+  transition: background 0.12s ease;
+  touch-action: none;
+}
+
+.editorSplitter:hover,
+.editorSplitter:focus-visible,
+.editorSplitter[data-dragging="true"] {
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.content[data-editor-dragging="true"] {
+  cursor: col-resize;
+  user-select: none;
 }
 
 
@@ -5201,4 +5227,17 @@
 /* Right margin for the row time when the “⋯” button is hidden. */
 .treeNoMore .sessionItem {
   padding-right: 10px;
+}
+
+/* One editor per folder; only the focused folder's instance is shown. */
+.editorSlot {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.editorSlot[hidden] {
+  display: none;
 }

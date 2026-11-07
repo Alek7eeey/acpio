@@ -253,6 +253,42 @@
   flex: none;
 }
 
+/* Переключатель вида «Изменений»: дерево папок / плоский список. */
+.changeView {
+  display: flex;
+  gap: 1px;
+  flex: none;
+  margin-left: auto;
+}
+
+.changeViewButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.changeViewButton svg {
+  width: 13px;
+  height: 13px;
+}
+
+.changeViewButton:hover {
+  color: var(--text-primary);
+}
+
+.changeViewButton[aria-pressed="true"] {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
 .treeTab {
   flex: 1;
   padding: 4px 6px;
@@ -283,6 +319,49 @@
   padding: 8px 10px;
   color: var(--text-secondary);
   font-size: 12.5px;
+}
+
+/* Группа «Изменения» / «Неотслеживаемые»: заголовок со счётчиком и дерево. */
+.changeGroup {
+  display: flex;
+  flex-direction: column;
+}
+
+.changeGroupHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-align: left;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.changeGroupHead:hover {
+  color: var(--text);
+}
+
+.changeGroupCount {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+/* Метка «закреплено вверху дерева». */
+.pinMark {
+  flex: none;
+  width: 11px;
+  height: 11px;
+  margin-left: 5px;
+  color: var(--accent);
 }
 
 /* Одна строка изменённого файла: буква статуса, имя, +/−. */
@@ -334,6 +413,54 @@
   min-height: 0;
   min-width: 0;
   display: flex;
+  /* Длинная строка иначе растягивает редактор шире панели. */
+  overflow: hidden;
+}
+
+/* Two views of the same diff: side by side, or one column. Sits over the corner
+   of the code, below the tab row: over the tabs it swallowed their wheel and
+   clicks. */
+.diffMode {
+  position: absolute;
+  top: 28px;
+  right: 18px;
+  z-index: 4;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface, var(--bg)) 88%, transparent);
+  backdrop-filter: blur(6px);
+}
+
+.diffModeButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.diffModeButton svg {
+  width: 14px;
+  height: 14px;
+}
+
+.diffModeButton:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+}
+
+.diffModeButton[aria-pressed="true"] {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
 .mergeHost :global(.cm-mergeView) {
@@ -344,23 +471,68 @@
 }
 
 .mergeHost :global(.cm-mergeViewEditors) {
+  /* flex-grow: without it the pair keeps its shrink-to-fit width (one gutter
+     per half) after a reload, and CodeMirror draws three lines of the file. */
+  flex: 1 1 auto;
+  height: 100%;
   min-height: 0;
+  min-width: 0;
   padding: 0;
 }
 
+/* Обёртка MergeView — блочная: редактор внутри растёт по контенту, и его
+   скроллбар уезжает за панель («висит в воздухе»). Тянем его флексом, как
+   в обычной панели. */
+.mergeHost :global(.cm-mergeViewEditor) {
+  display: flex;
+  flex-direction: column;
+  /* min-width: auto would leave each half at its gutter width (49 px) after a
+     reload, and CodeMirror would draw three lines instead of the file. */
+  min-width: 0;
+  min-height: 0;
+}
+
 .mergeHost :global(.cm-editor) {
-  height: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* A scroller that keeps its content height (one line) makes CodeMirror render
+   three lines of the file after a reload. */
+.mergeHost :global(.cm-scroller) {
+  flex: 1 1 auto;
   min-height: 0;
 }
 
 .tree {
-  width: 260px;
-  min-width: 180px;
+  min-width: 150px;
   flex: none;
-  border-right: 1px solid var(--border);
   overflow: auto;
   font-size: 12.5px;
   background: var(--surface-2);
+}
+
+/* Ширина дерева тянется мышью: 5 px полоса между деревом и редактором. */
+.treeSplitter {
+  flex: 0 0 5px;
+  align-self: stretch;
+  border-left: 1px solid var(--border);
+  cursor: col-resize;
+  background: transparent;
+  transition: background 0.12s ease;
+  touch-action: none;
+}
+
+.treeSplitter:hover,
+.treeSplitter:focus-visible,
+.treeSplitter[data-dragging="true"] {
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.body[data-tree-dragging="true"] {
+  cursor: col-resize;
+  user-select: none;
 }
 
 .treeList {
@@ -371,6 +543,11 @@
 
 /* One row per entry, the way an editor's explorer draws it: guides for depth,
  * a chevron that only folders get, an icon, then the name. */
+/* «Показать в дереве»: a ring that fades out, so the eye finds the row it jumped to. */
+.treeRowRevealed {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
 .treeRow {
   display: flex;
   align-items: center;
@@ -443,6 +620,7 @@
 }
 
 .main {
+  position: relative;
   display: flex;
   flex-direction: column;
   flex: 1;
@@ -570,6 +748,36 @@
   opacity: 0.8;
 }
 
+/* A jump in flight: the bar shows work instead of looking frozen. */
+.barBusy {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.barSpinner {
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: barSpin 0.7s linear infinite;
+}
+
+@keyframes barSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .barSpinner {
+    animation-duration: 2s;
+  }
+}
+
 .barChip {
   display: flex;
   align-items: center;
@@ -650,6 +858,31 @@
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  /* CodeMirror sizes itself to its container, so the container has to give it
+     the whole area — as a block it left the editor a single line tall. */
+  display: flex;
+  flex-direction: column;
+}
+
+.editor[hidden] {
+  display: none;
+}
+
+.editor :global(.cm-editor) {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* No tab open: the pane says so instead of keeping the last file on screen. */
+.noTab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  text-align: center;
 }
 
 .refs {
@@ -690,6 +923,16 @@
   background: var(--surface);
   box-shadow: var(--shadow);
   font-size: 12.5px;
+}
+
+.menuItem:disabled {
+  color: var(--text-secondary);
+  opacity: 0.45;
+  cursor: default;
+}
+
+.menuItem:disabled .menuKey {
+  opacity: 0.6;
 }
 
 .menuItem {

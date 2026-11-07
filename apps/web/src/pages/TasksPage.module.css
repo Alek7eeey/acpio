@@ -112,6 +112,12 @@
   flex-wrap: wrap;
 }
 
+/* The tab row and the job filters share the look; only one of them is up. */
+.filters[hidden],
+.scroll[hidden] {
+  display: none;
+}
+
 .filter {
   border: 1px solid var(--border);
   background: var(--surface);
@@ -197,6 +203,12 @@
   margin: 0;
   font-size: 0.82rem;
   color: var(--text-secondary);
+}
+
+/* Section captions inside the scrolled body follow the rows' own column. */
+.scroll > .hint {
+  max-width: 980px;
+  margin: 0 auto 8px;
 }
 
 .list {

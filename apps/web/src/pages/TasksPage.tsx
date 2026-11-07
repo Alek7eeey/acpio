@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { sortBackgroundJobs, type BackgroundJobDto, type BackgroundJobStatus } from "@acpio/shared";
 import { AppDialog } from "../components/AppDialog";
 import { api } from "../lib/api";
+import { editorApi, type EditorServer } from "../lib/editorApi";
 import { useT } from "../lib/i18n";
 import { formatDuration } from "../lib/partTiming";
 import { useAppStore } from "../lib/store";
@@ -59,6 +60,11 @@ export function TasksPage({ onBack }: { onBack?: () => void }) {
   const forgetJob = useAppStore((s) => s.forgetBackgroundJob);
   const clearFinished = useAppStore((s) => s.clearFinishedBackgroundJobs);
   const selectSession = useAppStore((s) => s.selectSession);
+  const openEditors = useAppStore((s) => s.openEditors);
+  const closeEditor = useAppStore((s) => s.closeEditor);
+  const closeAllEditors = useAppStore((s) => s.closeAllEditors);
+  const [tab, setTab] = useState<"jobs" | "editors">("jobs");
+  const [servers, setServers] = useState<EditorServer[]>([]);
   const [filter, setFilter] = useState<JobFilter>("all");
   const [stopping, setStopping] = useState(false);
   const [output, setOutput] = useState<OutputView | null>(null);
@@ -67,6 +73,23 @@ export function TasksPage({ onBack }: { onBack?: () => void }) {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // What the server holds is read from the server, and it changes while the tab
+  // is open: a project load adds memory, a closed pane gives it back.
+  const refreshServers = useCallback(async () => {
+    try {
+      setServers(await editorApi.servers());
+    } catch {
+      setServers([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (tab !== "editors") return;
+    void refreshServers();
+    const timer = window.setInterval(() => void refreshServers(), 5000);
+    return () => window.clearInterval(timer);
+  }, [tab, refreshServers]);
 
   const rows = useMemo(() => sortBackgroundJobs(jobs), [jobs]);
   const running = rows.filter((job) => job.status === "running").length;
@@ -172,6 +195,20 @@ export function TasksPage({ onBack }: { onBack?: () => void }) {
           <p className={styles.hint}>{t("bg.pageHint")}</p>
         </div>
         <div className={styles.headActions}>
+          {tab === "editors" ? (
+            <button
+              type="button"
+              className={`${styles.button} ${styles.danger}`}
+              disabled={openEditors.length === 0 && servers.length === 0}
+              onClick={() => {
+                closeAllEditors();
+                void editorApi.killServer().then(refreshServers);
+              }}
+            >
+              {t("bg.freeEditors")}
+            </button>
+          ) : (
+            <>
           <span className={styles.counter}>{t("bg.runningCount", { count: running })}</span>
           <button type="button" className={styles.button} onClick={() => void refresh()}>
             {t("bg.refresh")}
@@ -192,10 +229,38 @@ export function TasksPage({ onBack }: { onBack?: () => void }) {
           >
             {t("bg.stopRunningAll")}
           </button>
+            </>
+          )}
         </div>
       </header>
 
-      <div className={styles.filters} role="group" aria-label={t("bg.filterLabel")}>
+      <div className={styles.filters} role="tablist" aria-label={t("bg.tabsLabel")}>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "jobs"}
+          className={`${styles.filter} ${tab === "jobs" ? styles.filterOn : ""}`}
+          onClick={() => setTab("jobs")}
+        >
+          {t("bg.tabJobs", { count: rows.length })}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "editors"}
+          className={`${styles.filter} ${tab === "editors" ? styles.filterOn : ""}`}
+          onClick={() => setTab("editors")}
+        >
+          {t("bg.tabEditors", { count: openEditors.length })}
+        </button>
+      </div>
+
+      <div
+        className={styles.filters}
+        role="group"
+        aria-label={t("bg.filterLabel")}
+        hidden={tab === "editors"}
+      >
         {FILTERS.map((item) => (
           <button
             key={item.id}
@@ -211,7 +276,90 @@ export function TasksPage({ onBack }: { onBack?: () => void }) {
 
       {/* The rows are the only part that grows: they get the vertical scroll of
           their own, so the head and the filter row stay in place above them. */}
-      <div className={styles.scroll}>
+      {tab === "editors" ? (
+        <div className={styles.scroll}>
+          <p className={styles.hint}>{t("bg.serversHint")}</p>
+          {servers.length === 0 ? (
+            <div className={styles.empty}>
+              <p className={styles.emptyTitle}>{t("bg.serversEmpty")}</p>
+            </div>
+          ) : (
+            <ul className={styles.list}>
+              {servers.map((server) => (
+                <li key={server.id} className={styles.row}>
+                  <span className={`${styles.dot} ${styles.dot_running}`} aria-hidden />
+                  <div className={styles.body}>
+                    <div className={styles.rowHead}>
+                      <span className={styles.label} title={server.root}>
+                        {server.root.split(/[\\/]/).filter(Boolean).pop() ?? server.root}
+                        {server.project ? ` / ${server.project}` : ""}
+                      </span>
+                      <span className={styles.status}>
+                        {t("bg.serverMeta", {
+                          pid: server.pid,
+                          memory: `${Math.round(server.rss / (1024 * 1024))} МБ`,
+                        })}
+                      </span>
+                    </div>
+                    <code className={styles.script} title={server.root}>
+                      {server.root}
+                      {server.project ? ` · ${server.project}` : ""}
+                    </code>
+                  </div>
+                  <div className={styles.rowActions}>
+                    <button
+                      type="button"
+                      className={`${styles.button} ${styles.danger}`}
+                      onClick={() => void editorApi.killServer(server.id).then(refreshServers)}
+                    >
+                      {t("bg.freeServer")}
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <p className={styles.hint}>{t("bg.panesHint")}</p>
+          {openEditors.length === 0 ? (
+            <div className={styles.empty}>
+              <p className={styles.emptyTitle}>{t("bg.editorsEmpty")}</p>
+              <p className={styles.emptyHint}>{t("bg.editorsEmptyHint")}</p>
+            </div>
+          ) : (
+            <ul className={styles.list}>
+              {openEditors.map((pane) => (
+                <li key={pane.root} className={styles.row}>
+                  {/* An open pane is neither running nor finished: no status dot. */}
+                  <span className={styles.dot} aria-hidden />
+                  <div className={styles.body}>
+                    <div className={styles.rowHead}>
+                      <span className={styles.label} title={pane.root}>
+                        {pane.root.split(/[\\/]/).filter(Boolean).pop() ?? pane.root}
+                      </span>
+                      <span className={styles.status}>{t("bg.editorTabs", { count: pane.tabs })}</span>
+                    </div>
+                    <code className={styles.script} title={pane.root}>
+                      {pane.root}
+                    </code>
+                  </div>
+                  <div className={styles.rowActions}>
+                    <button
+                      type="button"
+                      className={`${styles.button} ${styles.danger}`}
+                      onClick={() => closeEditor(pane.root)}
+                    >
+                      {t("bg.closeEditor")}
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ) : null}
+
+      <div className={styles.scroll} hidden={tab === "editors"}>
         {rows.length === 0 ? (
           <div className={styles.empty}>
             <p className={styles.emptyTitle}>{t("bg.empty")}</p>

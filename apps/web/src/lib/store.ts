@@ -204,6 +204,9 @@ export type PendingAttachment = {
   path: string;
 };
 
+/** An open code pane: its folder, the chat it belongs to and its tab count. */
+export type OpenEditor = { root: string; sessionId: string | null; tabs: number };
+
 type AppState = {
   settings: AppSettings;
   /** Server OS from /api/health (null until loaded). */
@@ -561,6 +564,16 @@ type AppState = {
    * together — the composer chip filters by chat, the tasks page shows all.
    */
   bgJobs: BackgroundJobDto[];
+  /**
+   * Open code panes, one per folder. Each holds a document set and a language
+   * server, so the tasks page can show them and free them on demand.
+   */
+  openEditors: OpenEditor[];
+  openEditor: (root: string, sessionId: string | null) => void;
+  closeEditor: (root: string) => void;
+  closeAllEditors: () => void;
+  /** The open tab count an editor reports, so the pane list is not a mystery. */
+  setEditorTabs: (root: string, tabs: number) => void;
   refreshBackgroundJobs: () => Promise<void>;
   stopBackgroundJob: (id: string) => Promise<void>;
   forgetBackgroundJob: (id: string) => Promise<void>;
@@ -1977,6 +1990,24 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
   bgJobs: [],
+  openEditors: [],
+  openEditor: (root, sessionId) => {
+    if (!root) return;
+    set((s) => {
+      const open = s.openEditors.some((pane) => pane.root === root);
+      return {
+        openEditors: open
+          ? s.openEditors.map((pane) => (pane.root === root ? { ...pane, sessionId } : pane))
+          : [...s.openEditors, { root, sessionId, tabs: 0 }],
+      };
+    });
+  },
+  closeEditor: (root) => set((s) => ({ openEditors: s.openEditors.filter((pane) => pane.root !== root) })),
+  closeAllEditors: () => set({ openEditors: [] }),
+  setEditorTabs: (root, tabs) =>
+    set((s) => ({
+      openEditors: s.openEditors.map((pane) => (pane.root === root ? { ...pane, tabs } : pane)),
+    })),
   refreshBackgroundJobs: async () => {
     try {
       set({ bgJobs: await api.backgroundJobs() });

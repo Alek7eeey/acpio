@@ -48,6 +48,18 @@ import { TasksPage } from "../pages/TasksPage";
 import styles from "./AppShell.module.css";
 
 const SIDEBAR_WIDTH_KEY = "acpio.sidebarWidth.v2";
+/** Width of the code pane beside the chat, dragged by the divider in between. */
+const EDITOR_WIDTH_KEY = "acpio.editorWidth.v1";
+const CHAT_HIDDEN_KEY = "acpio.chatHidden.v1";
+
+function readFlag(key: string): boolean {
+  if (typeof window === "undefined") return false;
+  return localStorage.getItem(key) === "1";
+}
+const EDITOR_MIN = 320;
+const EDITOR_DEFAULT = 560;
+/** The chat needs this much of the window to stay usable. */
+const EDITOR_CHAT_MIN = 420;
 const SIDEBAR_MIN = 300;
 const SIDEBAR_MAX = 1200;
 const SIDEBAR_DEFAULT = 360;
@@ -86,10 +98,59 @@ function readStoredWidth() {
   return Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, raw));
 }
 
+function readEditorWidth() {
+  if (typeof window === "undefined") return EDITOR_DEFAULT;
+  const raw = Number(localStorage.getItem(EDITOR_WIDTH_KEY));
+  return Number.isFinite(raw) && raw >= EDITOR_MIN ? raw : EDITOR_DEFAULT;
+}
+
 /** `/board/<id>` → that id, decoded; null on every other route. */
 function boardIdFromPath(pathname: string): string | null {
   if (!pathname.startsWith("/board/")) return null;
   return decodeURIComponent(pathname.slice("/board/".length).split("/")[0] ?? "");
+}
+
+/**
+ * Chat panes may look at different folders, so the code pane keeps one editor
+ * per folder it has shown: its own tabs, buffers and language server. Only the
+ * focused pane's folder is visible; the others stay mounted, warm and untouched.
+ */
+function EditorSlot({
+  enabled,
+  chatHidden,
+  onToggleChat,
+}: {
+  enabled: boolean;
+  chatHidden?: boolean;
+  onToggleChat?: () => void;
+}) {
+  const activeSession = useAppStore((s) => s.activeSession);
+  const sessions = useAppStore((s) => s.sessions);
+  const chatPaneIds = useAppStore((s) => s.chatPaneIds);
+  const focusedPaneIndex = useAppStore((s) => s.focusedPaneIndex ?? 0);
+  const knownFolders = useAppStore((s) => s.knownFolders);
+  const multiPane = (chatPaneIds?.length ?? 0) > 1;
+  const focused = multiPane
+    ? (sessions.find((s) => s.id === chatPaneIds?.[focusedPaneIndex]) ?? null)
+    : null;
+  const root = focused?.cwd ?? activeSession?.cwd ?? knownFolders[0] ?? "";
+  const sessionId = focused?.id ?? activeSession?.id ?? null;
+  // The open panes live in the store: the tasks page lists them and frees them.
+  const openEditors = useAppStore((s) => s.openEditors);
+  const openEditor = useAppStore((s) => s.openEditor);
+  // Only a shown pane pulls its folder in: a hidden one keeps what it has.
+  useEffect(() => {
+    if (enabled && root) openEditor(root, sessionId);
+  }, [enabled, openEditor, root, sessionId]);
+  return (
+    <>
+      {openEditors.map((pane) => (
+        <div key={pane.root} className={styles.editorSlot} hidden={pane.root !== root}>
+          <EditorPage root={pane.root} sessionId={pane.sessionId} chatHidden={chatHidden} onToggleChat={onToggleChat} />
+        </div>
+      ))}
+    </>
+  );
 }
 
 /** AppShell renders pages from the pathname (it has no <Outlet/>), so a route's
@@ -101,28 +162,12 @@ function ShellPage({
   pathname: string;
   onBackFromTasks: () => void;
 }) {
-  // The code pane can share the screen with a chat: which half it takes is a
-  // setting, so the same chat is reachable with the editor on either side.
-  const split = useAppStore((state) => state.settings.editorSplit);
+  // The code pane is not a page: the shell keeps it beside whichever page is up.
   const chatPath = pathname === "/" || pathname === "" || pathname.startsWith("/chat");
-  if (chatPath && split !== "off") {
-    const chat = <ChatPage />;
-    const editor = <EditorPage />;
-    const panes = split === "left" ? [editor, chat] : [chat, editor];
-    return (
-      <div className={styles.splitScreen}>
-        {panes.map((pane, index) => (
-          <div key={index} className={styles.splitPane}>
-            {pane}
-          </div>
-        ))}
-      </div>
-    );
-  }
   if (chatPath) return <ChatPage />;
   if (pathname.startsWith("/settings")) return <SettingsPage />;
   if (pathname.startsWith("/tasks")) return <TasksPage onBack={onBackFromTasks} />;
-  if (pathname.startsWith("/editor")) return <EditorPage />;
+  if (pathname.startsWith("/editor")) return null;
   if (pathname.startsWith("/board/")) {
     return <BoardPage boardId={boardIdFromPath(pathname) ?? ""} />;
   }
@@ -274,6 +319,61 @@ export function AppShell() {
   }, [agentTipOpen]);
 
   const isChat = pathname === "/" || pathname.startsWith("/chat");
+  // The code pane shows beside the chat (per the setting) and alone on its own
+  // route; once the user has opened panes they stay mounted on every page.
+  const editorOnlyRoute = pathname.startsWith("/editor");
+  const editorShown = isChat && settings.editorSplit !== "off";
+  const editorPlacement = settings.editorSplit === "left" ? "left" : "right";
+  const openEditorCount = useAppStore((s) => s.openEditors.length);
+  const editorPanesMounted = editorShown || editorOnlyRoute || openEditorCount > 0;
+  // The divider sets how much of the window the code pane takes.
+  const [chatHidden, setChatHidden] = useState(() => readFlag(CHAT_HIDDEN_KEY));
+  useEffect(() => {
+    localStorage.setItem(CHAT_HIDDEN_KEY, chatHidden ? "1" : "0");
+  }, [chatHidden]);
+  // The chat can be put away while the code pane stays, on any width.
+  const chatCollapsed = editorShown && !editorOnlyRoute && chatHidden;
+  const [editorWidth, setEditorWidth] = useState(readEditorWidth);
+  const [editorDragging, setEditorDragging] = useState(false);
+  const editorDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+
+  useEffect(() => {
+    localStorage.setItem(EDITOR_WIDTH_KEY, String(editorWidth));
+  }, [editorWidth]);
+
+  const onEditorSplitterDown = useCallback(
+    (e: ReactPointerEvent) => {
+      e.preventDefault();
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      editorDragRef.current = { startX: e.clientX, startWidth: editorWidth };
+      setEditorDragging(true);
+    },
+    [editorWidth],
+  );
+
+  useEffect(() => {
+    if (!editorDragging) return;
+    const onMove = (e: PointerEvent) => {
+      const drag = editorDragRef.current;
+      if (!drag) return;
+      // A pane on the left grows the other way as the pointer moves right.
+      const delta = (e.clientX - drag.startX) * (editorPlacement === "left" ? 1 : -1);
+      const max = Math.max(EDITOR_MIN, window.innerWidth - EDITOR_CHAT_MIN);
+      setEditorWidth(Math.min(max, Math.max(EDITOR_MIN, drag.startWidth + delta)));
+    };
+    const onUp = () => {
+      editorDragRef.current = null;
+      setEditorDragging(false);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+  }, [editorDragging, editorPlacement]);
   const isSettings = pathname.startsWith("/settings");
   const isBoard = pathname.startsWith("/board/");
   const isTasks = pathname.startsWith("/tasks");
@@ -2179,8 +2279,51 @@ export function AppShell() {
             </div>
           </div>
         </header>
-        <div className={styles.content}>
-          <ShellPage pathname={pathname} onBackFromTasks={leaveTasks} />
+        {/* The code pane outlives every page: leaving the chat to read a task or a
+            setting must not throw away its tabs and its warm language server. */}
+        <div className={styles.content}
+          data-editor={editorPlacement}
+          data-editor-dragging={editorDragging ? "true" : undefined}>
+          <div
+            className={styles.splitPane}
+            hidden={editorOnlyRoute || chatCollapsed}
+            style={{ order: editorPlacement === "left" ? 2 : 0 }}
+          >
+            <ShellPage pathname={pathname} onBackFromTasks={leaveTasks} />
+          </div>
+          {editorPanesMounted ? (
+            <>
+              {editorShown && !editorOnlyRoute && !chatHidden ? (
+                <div
+                  className={styles.editorSplitter}
+                  data-dragging={editorDragging ? "true" : undefined}
+                  role="separator"
+                  aria-orientation="vertical"
+                  aria-label={t("common.resizeEditorHint")}
+                  aria-valuenow={editorWidth}
+                  aria-valuemin={EDITOR_MIN}
+                  title={t("common.resizeEditorHint")}
+                  onPointerDown={onEditorSplitterDown}
+                  onDoubleClick={() => setEditorWidth(EDITOR_DEFAULT)}
+                  style={{ order: 1 }}
+                />
+              ) : null}
+              <div
+                className={styles.splitPane}
+                hidden={!editorShown && !editorOnlyRoute}
+                style={{
+                  order: editorPlacement === "left" ? 0 : 2,
+                  flex: editorOnlyRoute || chatCollapsed ? undefined : `0 0 ${editorWidth}px`,
+                }}
+              >
+                <EditorSlot
+                  enabled={editorShown || editorOnlyRoute}
+                  chatHidden={chatCollapsed}
+                  onToggleChat={editorOnlyRoute ? undefined : () => setChatHidden((prev) => !prev)}
+                />
+              </div>
+            </>
+          ) : null}
         </div>
       </div>
 

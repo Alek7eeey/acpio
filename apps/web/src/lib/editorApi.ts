@@ -19,6 +19,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export type EditorEntry = { name: string; path: string; dir: boolean };
 
+/** A language server the server is keeping alive for one pane. */
+export type EditorServer = {
+  id: number;
+  root: string;
+  project: string;
+  source: "auto" | "project" | "bundled";
+  pid: number;
+  startedAt: number;
+  rss: number;
+};
+
 export type LintItem = {
   line: number;
   col: number;
@@ -99,5 +110,18 @@ export const editorApi = {
       body: JSON.stringify({ root, path }),
     });
     return { items: res.diagnostics.map((d) => ({ ...d, source: "oxlint" })), note: res.note };
+  },
+  /** Language servers the server holds for open panes, with their memory. */
+  servers: async (): Promise<EditorServer[]> => {
+    const res = await request<{ servers: EditorServer[] }>("/api/editor/servers");
+    return res.servers;
+  },
+  /** Free one server's process tree, or all of them when no id is given. */
+  killServer: async (id?: number): Promise<number> => {
+    const res = await request<{ killed: number }>("/api/editor/servers/kill", {
+      method: "POST",
+      body: JSON.stringify(id == null ? {} : { id }),
+    });
+    return res.killed;
   },
 };

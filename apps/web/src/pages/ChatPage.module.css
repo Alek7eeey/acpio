@@ -169,11 +169,17 @@
   }
 }
 
-.splitFab {
+/* The chat's own corner controls: the pane split and the code pane. */
+.fabRow {
   position: absolute;
   top: 10px;
   left: 12px;
   z-index: 6;
+  display: flex;
+  gap: 6px;
+}
+
+.splitFab {
   width: 34px;
   height: 34px;
   display: grid;
@@ -208,7 +214,18 @@
   background: color-mix(in srgb, var(--surface) 94%, transparent);
 }
 
-.splitWorkspace .splitFab {
+/* On: the code pane is open beside this chat. After the hover rules on
+   purpose — a pressed switch must stay highlighted under the cursor. */
+.splitFab[aria-pressed="true"],
+.splitFab[aria-pressed="true"]:hover,
+.splitFab[aria-pressed="true"]:focus-visible {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface));
+}
+
+/* Multi-pane chat has its own chrome; the code-pane switch stays. */
+.splitWorkspace .fabSplit {
   display: none;
 }
 

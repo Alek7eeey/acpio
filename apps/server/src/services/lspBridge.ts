@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
 import path from "node:path";
 
@@ -8,9 +8,50 @@ const require = createRequire(import.meta.url);
 export type LspSocket = {
   send(data: string): void;
   close(): void;
+  /** 1 = open; a pane that left before its tools were read must not spawn one. */
+  readyState?: number;
   on(event: "message", cb: (data: Buffer | string) => void): unknown;
   on(event: "close", cb: () => void): unknown;
 };
+
+/** One language server as the tasks page sees it: what it serves, what it costs. */
+export type EditorServerDto = {
+  id: number;
+  root: string;
+  project: string;
+  source: "auto" | "project" | "bundled";
+  pid: number;
+  startedAt: number;
+};
+
+const running = new Map<number, { dto: EditorServerDto; child: ChildProcess; socket: LspSocket }>();
+let nextId = 1;
+
+/** Everything the server holds for open panes — the number the page frees. */
+export function listEditorServers(): EditorServerDto[] {
+  return [...running.values()].map((entry) => ({ ...entry.dto }));
+}
+
+/** Kill one pane's server tree and drop its socket: the pane sees it go. */
+export function killEditorServer(id: number): boolean {
+  const entry = running.get(id);
+  if (!entry) return false;
+  stopServer(entry.child);
+  running.delete(id);
+  try {
+    entry.socket.close();
+  } catch {
+    // already gone
+  }
+  return true;
+}
+
+export function killAllEditorServers(): number {
+  let killed = 0;
+  // Deleting the current entry is allowed while iterating a Map.
+  for (const id of running.keys()) if (killEditorServer(id)) killed += 1;
+  return killed;
+}
 
 function tslsEntry(): string {
   const pkg = require.resolve("typescript-language-server/package.json");
@@ -49,6 +90,85 @@ function injectTsserver(json: string, tsserverPath: string): string | null {
 }
 
 /**
+ * The language server spawns its own tsserver child, and Windows leaves
+ * grandchildren alive when only the head is killed — so the tree goes.
+ */
+function stopServer(child: ChildProcess): void {
+  if (child.pid == null) return;
+  if (process.platform === "win32") {
+    spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+    return;
+  }
+  child.kill();
+}
+
+/**
+ * Resident bytes of each server and its descendants — the number the tasks page
+ * frees. One process listing per call: a diagnostics read, not a hot path.
+ */
+export async function editorServerMemory(pids: number[]): Promise<Record<number, number>> {
+  if (pids.length === 0) return {};
+  const rows = await processRows();
+  const rss = new Map(rows.map((row) => [row.pid, row.rss]));
+  const children = new Map<number, number[]>();
+  for (const row of rows) children.set(row.parent, [...(children.get(row.parent) ?? []), row.pid]);
+  const out: Record<number, number> = {};
+  for (const pid of pids) {
+    let total = 0;
+    const stack = [pid];
+    for (let current = stack.pop(); current != null; current = stack.pop()) {
+      total += rss.get(current) ?? 0;
+      stack.push(...(children.get(current) ?? []));
+    }
+    out[pid] = total;
+  }
+  return out;
+}
+
+async function processRows(): Promise<{ pid: number; parent: number; rss: number }[]> {
+  const win = process.platform === "win32";
+  const command = win ? "powershell" : "ps";
+  const args = win
+    ? [
+        "-NoProfile",
+        "-Command",
+        "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,WorkingSetSize | ConvertTo-Json -Compress",
+      ]
+    : ["-eo", "pid=,ppid=,rss="];
+  try {
+    const { stdout } = await new Promise<{ stdout: string }>((resolve, reject) => {
+      execFile(
+        command,
+        args,
+        { maxBuffer: 32 * 1024 * 1024, windowsHide: true },
+        (err, out) => (err ? reject(err) : resolve({ stdout: String(out) })),
+      );
+    });
+    if (!win) {
+      return stdout
+        .trim()
+        .split("\n")
+        .map((line) => line.trim().split(/\s+/).map(Number))
+        .filter((parts) => parts.length >= 3)
+        .map(([pid, parent, kb]) => ({ pid, parent, rss: kb * 1024 }));
+    }
+    const parsed: unknown = JSON.parse(stdout || "[]");
+    const list = (Array.isArray(parsed) ? parsed : [parsed]) as {
+      ProcessId: number;
+      ParentProcessId: number;
+      WorkingSetSize: string | number;
+    }[];
+    return list.map((row) => ({
+      pid: row.ProcessId,
+      parent: row.ParentProcessId,
+      rss: Number(row.WorkingSetSize) || 0,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+/**
  * shortcut: one language-server process per pane, killed with the socket. A real
  * editor shares one server per project and multiplexes documents; upgrade when a
  * second pane on the same folder starts costing memory.
@@ -61,6 +181,9 @@ export function attachTypeScriptServer(
   /** Folder of the file's own project, relative to `root`: the server's cwd. */
   project = "",
 ): void {
+  // The tools are read before this call: the pane may be gone by now, and a
+  // server attached to a closed socket would never be told to stop.
+  if (socket.readyState != null && socket.readyState !== 1) return;
   const rootAbs = path.resolve(root);
   const cwd = path.resolve(rootAbs, project);
   // A project folder above the pane root would be a path the pane may not read.
@@ -70,6 +193,19 @@ export function attachTypeScriptServer(
   const child = spawn(process.execPath, [tslsEntry(), "--stdio"], {
     cwd: dir,
     stdio: ["pipe", "pipe", "pipe"],
+  });
+  const id = nextId++;
+  running.set(id, {
+    dto: {
+      id,
+      root: rootAbs,
+      project: dir === rootAbs ? "" : path.relative(rootAbs, dir).replaceAll("\\", "/"),
+      source,
+      pid: child.pid ?? 0,
+      startedAt: Date.now(),
+    },
+    child,
+    socket,
   });
 
   let buf = "";
@@ -88,7 +224,7 @@ export function attachTypeScriptServer(
       try {
         socket.send(body);
       } catch {
-        child.kill();
+        stopServer(child);
         return;
       }
     }
@@ -102,6 +238,7 @@ export function attachTypeScriptServer(
   });
 
   child.on("exit", () => {
+    running.delete(id);
     try {
       socket.close();
     } catch {
@@ -116,5 +253,8 @@ export function attachTypeScriptServer(
     if (patched) json = patched;
     child.stdin.write(frame(json));
   });
-  socket.on("close", () => child.kill());
+  socket.on("close", () => {
+    running.delete(id);
+    stopServer(child);
+  });
 }

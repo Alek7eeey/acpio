@@ -8586,7 +8586,7 @@ function SplitToggleFab() {
   return (
     <button
       type="button"
-      className={styles.splitFab}
+      className={`${styles.splitFab} ${styles.fabSplit}`}
       aria-pressed={false}
       aria-label={t("chat.splitTwo")}
       title={t("chat.splitTwo")}
@@ -8595,6 +8595,36 @@ function SplitToggleFab() {
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
         <rect x="3.5" y="5" width="17" height="14" rx="2.2" stroke="currentColor" strokeWidth="1.7" />
         <path d="M12 5.5v13" stroke="currentColor" strokeWidth="1.7" />
+      </svg>
+    </button>
+  );
+}
+
+/** The code pane belongs to the chat beside it — same session, same folder. This
+ * is its switch, and it lives in the chat view: the sidebar may be hidden. */
+function EditorToggleFab({ enabled }: { enabled: boolean }) {
+  const t = useT();
+  const split = useAppStore((s) => s.settings.editorSplit);
+  const saveSettings = useAppStore((s) => s.saveSettings);
+  if (!enabled) return null;
+  const open = split !== "off";
+  return (
+    <button
+      type="button"
+      className={styles.splitFab}
+      aria-pressed={open}
+      aria-label={t("common.editor")}
+      title={t("common.editor")}
+      onClick={() => void saveSettings({ editorSplit: open ? "off" : "left" })}
+    >
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+        <path
+          d="M9 8 5 12l4 4M15 8l4 4-4 4"
+          stroke="currentColor"
+          strokeWidth="1.7"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
       </svg>
     </button>
   );
@@ -8734,7 +8764,10 @@ export function ChatPage() {
 
   return (
     <div className={split ? styles.splitWorkspace : styles.splitSingle}>
-      <SplitToggleFab />
+      <div className={styles.fabRow}>
+        <SplitToggleFab />
+        <EditorToggleFab enabled={desktop} />
+      </div>
       <div
         className={split ? styles.splitCols : styles.splitColsSingle}
         style={split ? { gridTemplateColumns: `repeat(${paneCount}, minmax(0, 1fr))` } : undefined}

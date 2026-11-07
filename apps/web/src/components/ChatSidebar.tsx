@@ -2122,25 +2122,6 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
             </span>
           </button>
 
-          <button
-            type="button"
-            className={toolbarMinimal ? styles.chatToolbarAction : styles.chatSearchOpen}
-            onClick={() => navigate("/editor")}
-            title={t("common.editor")}
-            aria-label={t("common.editor")}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-              <path
-                d="M9 8 5 12l4 4M15 8l4 4-4 4"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-            {toolbarMinimal ? null : <span>{t("common.editor")}</span>}
-          </button>
-
           {isChatSearchEnabled(settings.chatTreeElements) && onOpenSearch ? (
             <button
               type="button"

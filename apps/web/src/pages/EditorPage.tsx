@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { createPortal } from "react-dom";
 import {
   Compartment,
@@ -37,12 +45,15 @@ import {
 } from "@acpio/shared";
 import { api } from "../lib/api";
 import { editorApi, type EditorEntry, type LintItem, type ToolStatus } from "../lib/editorApi";
+import { toolsForPath } from "../lib/editorTools";
+import { dropBuffer, loadBuffers, requestPersistence, saveBuffer } from "../lib/editorStore";
 import { editorTheme, type EditorScheme } from "../lib/editorTheme";
 import { TsLsp, uriToRelPath, type LspLocation } from "../lib/tsLsp";
-import { MergeView } from "@codemirror/merge";
+import { MergeView, unifiedMergeView } from "@codemirror/merge";
 import type { GitChangedFileDto } from "@acpio/shared";
 import { useAppStore } from "../lib/store";
 import { showToast } from "../lib/toast";
+import { useOutsidePointerClose } from "../lib/useOutsidePointerClose";
 import styles from "./EditorPage.module.css";
 
 // shortcut: spike copy is hardcoded; move it into @acpio/i18n if the pane stays.
@@ -185,6 +196,120 @@ const MENU_MIN_WIDTH = 230;
 /** A file and its diff are two tabs over one document, as in VS Code. */
 type EditorTab = { path: string; kind: "file" | "diff"; pinned: boolean };
 
+/** VS Code offers the same two: changes side by side, or in one column. */
+type DiffMode = "split" | "inline";
+const DIFF_MODE_KEY = "acpio.diffMode.v1";
+
+/** Absolute path as the OS writes it, taken from the pane root. */
+const absOf = (root: string, path: string) => `${root.replace(/[\\/]+$/, "")}/${path}`;
+
+async function copyToClipboard(text: string, label: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text);
+    showToast(`${label} скопирован`, { tone: "info" });
+  } catch {
+    showToast("Не удалось скопировать — браузер закрыл буфер обмена", { tone: "danger" });
+  }
+}
+
+/** The tabs of one folder: small, and needed on the first paint, so localStorage. */
+type EditorWorkspace = {
+  tabs: EditorTab[];
+  active: string | null;
+  /** Unsaved text written by an older build straight into localStorage. */
+  buffers?: Record<string, string>;
+};
+const workspaceKey = (root: string) => `acpio.editor.workspace.v1:${normPath(root)}`;
+
+/** Entries pinned to the top of the file tree, per folder: `["web", "src"]`. */
+const pinsKey = (root: string) => `acpio.editor.pins.v1:${normPath(root)}`;
+
+/** Folders left open in the tree, per folder: `["web", "web/src"]`. */
+const treeOpenKey = (root: string) => `acpio.editor.treeOpen.v1:${normPath(root)}`;
+
+function readTreeOpen(root: string): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw: unknown = JSON.parse(localStorage.getItem(treeOpenKey(root)) ?? "[]");
+    return Array.isArray(raw) ? raw.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeTreeOpen(root: string, paths: string[]): void {
+  try {
+    localStorage.setItem(treeOpenKey(root), JSON.stringify(paths));
+  } catch {
+    // A full quota only costs the open folders; the tree still works.
+  }
+}
+
+/** «Изменения» показываются деревом папок или плоским списком путей. */
+type ChangeView = "tree" | "list";
+const CHANGE_VIEW_KEY = "acpio.editor.changeView.v1";
+
+function readChangeView(): ChangeView {
+  if (typeof window === "undefined") return "tree";
+  return localStorage.getItem(CHANGE_VIEW_KEY) === "list" ? "list" : "tree";
+}
+
+const TREE_WIDTH_KEY = "acpio.editor.treeWidth.v1";
+const TREE_HIDDEN_KEY = "acpio.editor.treeHidden.v1";
+const TREE_MIN = 150;
+const TREE_DEFAULT = 260;
+const TREE_MAX = 700;
+
+function readTreeWidth(): number {
+  if (typeof window === "undefined") return TREE_DEFAULT;
+  const raw = Number(localStorage.getItem(TREE_WIDTH_KEY));
+  return Number.isFinite(raw) && raw >= TREE_MIN ? Math.min(TREE_MAX, raw) : TREE_DEFAULT;
+}
+
+function readPins(root: string): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(pinsKey(root)) ?? "[]");
+    return Array.isArray(parsed)
+      ? parsed.filter((path): path is string => typeof path === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function readWorkspace(root: string): EditorWorkspace | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const parsed = JSON.parse(
+      localStorage.getItem(workspaceKey(root)) ?? "null",
+    ) as Partial<EditorWorkspace> | null;
+    if (!parsed) return null;
+    const tabs = (Array.isArray(parsed.tabs) ? parsed.tabs : []).filter(
+      (tab): tab is EditorTab =>
+        typeof tab?.path === "string" && (tab.kind === "file" || tab.kind === "diff"),
+    );
+    return {
+      tabs,
+      active: typeof parsed.active === "string" ? parsed.active : null,
+      buffers:
+        parsed.buffers && typeof parsed.buffers === "object"
+          ? (parsed.buffers as Record<string, string>)
+          : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeWorkspace(root: string, tabs: EditorTab[], active: string | null): void {
+  try {
+    localStorage.setItem(workspaceKey(root), JSON.stringify({ tabs, active }));
+  } catch {
+    // A full quota must not break editing: the pane still works, the reload forgets.
+  }
+}
+
 const tabKey = (tab: EditorTab) => `${tab.kind}:${tab.path}`;
 const tabTitle = (tab: EditorTab) => tab.path.split("/").pop() ?? tab.path;
 
@@ -217,7 +342,11 @@ function repoToPane(repoRoot: string, paneRoot: string, path: string): string | 
   return path;
 }
 
-const TOOL_SOURCE_LABEL = { project: "проект", bundled: "встроенный", missing: "не настроен" } as const;
+const TOOL_SOURCE_LABEL = {
+  project: "проект",
+  bundled: "встроенный",
+  missing: "не настроен",
+} as const;
 const TOOL_SHORT = { typescript: "ts", oxlint: "oxlint", oxfmt: "oxfmt" } as const;
 const SOURCE_CLASS = {
   project: styles.dotProject,
@@ -289,7 +418,10 @@ const linkField = StateField.define<DecorationSet>({
 const WORD_CHAR = /[\w$]/;
 
 /** The quoted string the offset sits in — `null` when it sits in none. */
-function stringRangeAt(line: Line, offset: number): { from: number; to: number; text: string } | null {
+function stringRangeAt(
+  line: Line,
+  offset: number,
+): { from: number; to: number; text: string } | null {
   const pattern = /(["'`])([^"'`]*)\1/g;
   for (let match = pattern.exec(line.text); match; match = pattern.exec(line.text)) {
     const from = match.index;
@@ -371,32 +503,32 @@ function pointerExtensions(handlers: { current: EditorHandlers }) {
   return [
     linkField,
     EditorView.domEventHandlers({
-    mousemove(event, view) {
-      hoverPoint.set(view, { x: event.clientX, y: event.clientY });
-      if (event.ctrlKey || event.metaKey) syncLink(view, hoverPoint.get(view) ?? null);
-      else if (view.state.field(linkField, false)) syncLink(view, null);
-      return false;
-    },
-    mousedown(event, view) {
-      if (event.button !== 0 || !(event.ctrlKey || event.metaKey)) return false;
-      const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
-      if (pos == null) return false;
-      event.preventDefault();
-      view.dispatch({ selection: { anchor: pos } });
-      handlers.current.goto();
-      return true;
-    },
-    contextmenu(event, view) {
-      const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
-      event.preventDefault();
-      if (pos != null) view.dispatch({ selection: { anchor: pos } });
-      handlers.current.menu({
-        x: event.clientX,
-        y: event.clientY,
-        pos: pos ?? view.state.selection.main.head,
-      });
-      return true;
-    },
+      mousemove(event, view) {
+        hoverPoint.set(view, { x: event.clientX, y: event.clientY });
+        if (event.ctrlKey || event.metaKey) syncLink(view, hoverPoint.get(view) ?? null);
+        else if (view.state.field(linkField, false)) syncLink(view, null);
+        return false;
+      },
+      mousedown(event, view) {
+        if (event.button !== 0 || !(event.ctrlKey || event.metaKey)) return false;
+        const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+        if (pos == null) return false;
+        event.preventDefault();
+        view.dispatch({ selection: { anchor: pos } });
+        handlers.current.goto();
+        return true;
+      },
+      contextmenu(event, view) {
+        const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+        event.preventDefault();
+        if (pos != null) view.dispatch({ selection: { anchor: pos } });
+        handlers.current.menu({
+          x: event.clientX,
+          y: event.clientY,
+          pos: pos ?? view.state.selection.main.head,
+        });
+        return true;
+      },
     }),
   ];
 }
@@ -455,7 +587,9 @@ function toDiagnostic(view: EditorView, item: LintItem): Diagnostic | null {
   if (item.line > view.state.doc.lines) return null;
   const startLine = view.state.doc.line(Math.max(1, item.line));
   const from = Math.min(startLine.to, startLine.from + Math.max(0, item.col - 1));
-  const endLine = view.state.doc.line(Math.min(view.state.doc.lines, Math.max(item.line, item.endLine)));
+  const endLine = view.state.doc.line(
+    Math.min(view.state.doc.lines, Math.max(item.line, item.endLine)),
+  );
   const to = Math.min(endLine.to, endLine.from + Math.max(0, item.endCol - 1));
   return {
     from,
@@ -466,9 +600,26 @@ function toDiagnostic(view: EditorView, item: LintItem): Diagnostic | null {
   };
 }
 
-export function EditorPage() {
-  const root = useAppStore((s) => s.activeSession?.cwd ?? s.knownFolders[0] ?? "");
-  const sessionId = useAppStore((s) => s.activeSessionId);
+/**
+ * One pane, one folder. A caller that keeps an instance per folder passes both
+ * props; on its own the page follows the selected session.
+ */
+export function EditorPage({
+  root: rootProp,
+  sessionId: sessionProp,
+  chatHidden,
+  onToggleChat,
+}: {
+  root?: string;
+  sessionId?: string | null;
+  /** The chat is put away: the button offers to bring it back. */
+  chatHidden?: boolean;
+  onToggleChat?: () => void;
+} = {}) {
+  const storeRoot = useAppStore((s) => s.activeSession?.cwd ?? s.knownFolders[0] ?? "");
+  const storeSession = useAppStore((s) => s.activeSessionId);
+  const root = rootProp ?? storeRoot;
+  const sessionId = sessionProp ?? storeSession;
   const settings = useAppStore((s) => s.settings);
   const saveSettings = useAppStore((s) => s.saveSettings);
 
@@ -498,19 +649,82 @@ export function EditorPage() {
 
   const [tabs, setTabs] = useState<EditorTab[]>([]);
   const [activeKey, setActiveKey] = useState<string | null>(null);
+  /** Unsaved text read back from the last session, used instead of the file. */
+  const restoreBuffers = useRef(new Map<string, string>());
+  const restoredFor = useRef<string | null>(null);
+  /** What each file's stored buffer holds, so a keystroke writes only its own. */
+  const persistedRef = useRef(new Map<string, string>());
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
   const [dirty, setDirty] = useState<Set<string>>(new Set());
   const [refs, setRefs] = useState<LspLocation[]>([]);
   const [status, setStatus] = useState("");
+  /** A jump is in flight: the bar says so instead of looking frozen. */
+  const [busy, setBusy] = useState<null | "definition" | "usages">(null);
+  const [treeWidth, setTreeWidth] = useState(readTreeWidth);
+  const [treeHidden, setTreeHidden] = useState(
+    () => typeof window !== "undefined" && localStorage.getItem(TREE_HIDDEN_KEY) === "1",
+  );
+
+  useEffect(() => {
+    localStorage.setItem(TREE_HIDDEN_KEY, treeHidden ? "1" : "0");
+  }, [treeHidden]);
+  const [treeDragging, setTreeDragging] = useState(false);
+  const treeDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+
+  useEffect(() => {
+    localStorage.setItem(TREE_WIDTH_KEY, String(treeWidth));
+  }, [treeWidth]);
+
+  const onTreeSplitterDown = useCallback(
+    (event: ReactPointerEvent) => {
+      event.preventDefault();
+      (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+      treeDragRef.current = { startX: event.clientX, startWidth: treeWidth };
+      setTreeDragging(true);
+    },
+    [treeWidth],
+  );
+
+  useEffect(() => {
+    if (!treeDragging) return;
+    const onMove = (event: PointerEvent) => {
+      const drag = treeDragRef.current;
+      if (!drag) return;
+      setTreeWidth(
+        Math.min(TREE_MAX, Math.max(TREE_MIN, drag.startWidth + event.clientX - drag.startX)),
+      );
+    };
+    const onUp = () => {
+      treeDragRef.current = null;
+      setTreeDragging(false);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+  }, [treeDragging]);
   const [menu, setMenu] = useState<MenuRequest | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
   const [treeTab, setTreeTab] = useState<"files" | "changes">("files");
+  const [changeView, setChangeView] = useState<ChangeView>(readChangeView);
+
+  useEffect(() => {
+    localStorage.setItem(CHANGE_VIEW_KEY, changeView);
+  }, [changeView]);
   const [changes, setChanges] = useState<{
     repo: boolean;
     root: string;
     files: GitChangedFileDto[];
   } | null>(null);
   const [changeMenu, setChangeMenu] = useState<{ x: number; y: number; path: string } | null>(null);
+  const [tabMenu, setTabMenu] = useState<{ x: number; y: number; tab: EditorTab } | null>(null);
+  // A request to show a path in the tree: `seq` makes a repeated request act.
+  const [reveal, setReveal] = useState<{ path: string; seq: number } | null>(null);
+  const revealSeq = useRef(0);
   /** Revision content of every open diff tab, fetched when the tab opens. */
   const diffBaseRef = useRef<Map<string, string>>(new Map());
   const [problems, setProblems] = useState<Problem[]>([]);
@@ -529,6 +743,20 @@ export function EditorPage() {
   const mainViewRef = useRef<EditorView | null>(null);
   const mergeRef = useRef<MergeView | null>(null);
   const mergeHostRef = useRef<HTMLDivElement | null>(null);
+  /** Diff layout: two columns like VS Code's split view, or one unified column. */
+  const [diffMode, setDiffMode] = useState<DiffMode>(() =>
+    localStorage.getItem(DIFF_MODE_KEY) === "inline" ? "inline" : "split",
+  );
+
+  useEffect(() => {
+    localStorage.setItem(DIFF_MODE_KEY, diffMode);
+  }, [diffMode]);
+
+  // The pane list on the tasks page shows how much each editor holds open.
+  const setEditorTabs = useAppStore((s) => s.setEditorTabs);
+  useEffect(() => {
+    setEditorTabs(root, tabs.length);
+  }, [root, setEditorTabs, tabs.length]);
 
   const activeTab = tabs.find((tab) => tabKey(tab) === activeKey) ?? null;
   const activePath = activeTab?.path ?? null;
@@ -566,7 +794,10 @@ export function EditorPage() {
   const refreshProblems = useCallback(() => {
     const list: Problem[] = [];
     for (const path of new Set([...oxlintRef.current.keys(), ...lspDiagsRef.current.keys()])) {
-      const items = [...(oxlintRef.current.get(path) ?? []), ...(lspDiagsRef.current.get(path) ?? [])];
+      const items = [
+        ...(oxlintRef.current.get(path) ?? []),
+        ...(lspDiagsRef.current.get(path) ?? []),
+      ];
       for (const item of items) {
         list.push({
           path,
@@ -617,7 +848,9 @@ export function EditorPage() {
       await api.prompt(id, `${question}\n\n${path}:${line}`, {});
       showToast("Вопрос отправлен в чат", { tone: "success" });
     } catch (err) {
-      showToast(err instanceof Error ? err.message : "Не удалось отправить вопрос", { tone: "danger" });
+      showToast(err instanceof Error ? err.message : "Не удалось отправить вопрос", {
+        tone: "danger",
+      });
     }
   }, []);
 
@@ -655,10 +888,7 @@ export function EditorPage() {
   const applyEditorConfig = useCallback(
     (view: EditorView) => {
       view.dispatch({
-        effects: [
-          themeSlot.reconfigure(editorTheme(scheme)),
-          keysSlot.reconfigure(cmKeys(keys)),
-        ],
+        effects: [themeSlot.reconfigure(editorTheme(scheme)), keysSlot.reconfigure(cmKeys(keys))],
       });
     },
     [cmKeys, keys, scheme],
@@ -678,48 +908,48 @@ export function EditorPage() {
         cancel: () => viewRef.current?.dispatch({ effects: setAsk.of(null) }),
       };
       return [
-          lineNumbers(),
-          highlightActiveLine(),
-          highlightActiveLineGutter(),
-          drawSelection(),
-          history(),
-          languageFor(path),
-          lintGutter(),
-          askField(handlers),
-          askGutter((pos) => viewRef.current?.dispatch({ effects: setAsk.of(pos) })),
-          pointerExtensions(handlersRef),
-          themeSlot.of(editorTheme(scheme)),
-          keysSlot.of(cmKeys(keys)),
-          EditorView.updateListener.of((update) => {
-            const current = activeRef.current;
-            if (!current) return;
-            if (update.docChanged) {
-              statesRef.current.set(current, update.state);
-              setDirty((prev) => (prev.has(current) ? prev : new Set(prev).add(current)));
-              const next = update.state.doc.toString();
-              window.clearTimeout(syncTimer.current);
-              syncTimer.current = window.setTimeout(() => lspRef.current?.change(current, next), 400);
-              window.clearTimeout(lintTimer.current);
-              lintTimer.current = window.setTimeout(() => {
-                void editorApi.lint(rootPath, current).then(
-                  ({ items, note }) => {
-                    oxlintRef.current.set(current, items);
-                    applyDiagnostics(current);
-                    // No oxlint in this project: say so once, not per keystroke.
-                    if (note) setStatus(note);
-                  },
-                  () => {},
-                );
-              }, 700);
-            } else if (update.selectionSet) {
-              statesRef.current.set(current, update.state);
-            }
-            if (update.selectionSet || update.docChanged) {
-              const head = update.state.selection.main.head;
-              const line = update.state.doc.lineAt(head);
-              setCursorPos({ line: line.number, col: head - line.from + 1 });
-            }
-          }),
+        lineNumbers(),
+        highlightActiveLine(),
+        highlightActiveLineGutter(),
+        drawSelection(),
+        history(),
+        languageFor(path),
+        lintGutter(),
+        askField(handlers),
+        askGutter((pos) => viewRef.current?.dispatch({ effects: setAsk.of(pos) })),
+        pointerExtensions(handlersRef),
+        themeSlot.of(editorTheme(scheme)),
+        keysSlot.of(cmKeys(keys)),
+        EditorView.updateListener.of((update) => {
+          const current = activeRef.current;
+          if (!current) return;
+          if (update.docChanged) {
+            statesRef.current.set(current, update.state);
+            setDirty((prev) => (prev.has(current) ? prev : new Set(prev).add(current)));
+            const next = update.state.doc.toString();
+            window.clearTimeout(syncTimer.current);
+            syncTimer.current = window.setTimeout(() => lspRef.current?.change(current, next), 400);
+            window.clearTimeout(lintTimer.current);
+            lintTimer.current = window.setTimeout(() => {
+              void editorApi.lint(rootPath, current).then(
+                ({ items, note }) => {
+                  oxlintRef.current.set(current, items);
+                  applyDiagnostics(current);
+                  // No oxlint in this project: say so once, not per keystroke.
+                  if (note) setStatus(note);
+                },
+                () => {},
+              );
+            }, 700);
+          } else if (update.selectionSet) {
+            statesRef.current.set(current, update.state);
+          }
+          if (update.selectionSet || update.docChanged) {
+            const head = update.state.selection.main.head;
+            const line = update.state.doc.lineAt(head);
+            setCursorPos({ line: line.number, col: head - line.from + 1 });
+          }
+        }),
       ];
     },
     [applyDiagnostics, cmKeys, keys, scheme, sendQuestion],
@@ -740,6 +970,16 @@ export function EditorPage() {
       const rootPath = rootRef.current;
       if (!rootPath) return false;
       if (statesRef.current.has(path)) return true;
+      // A buffer the reload interrupted opens with what the user had typed.
+      const unsaved = restoreBuffers.current.get(path);
+      if (unsaved != null) {
+        restoreBuffers.current.delete(path);
+        await primeLanguage(path);
+        statesRef.current.set(path, makeState(path, unsaved, rootPath));
+        lspRef.current?.open(path, unsaved);
+        setDirty((prev) => new Set(prev).add(path));
+        return true;
+      }
       try {
         // Before the state exists: highlighting must be there on the first paint.
         await primeLanguage(path);
@@ -765,7 +1005,9 @@ export function EditorPage() {
         }
         return true;
       } catch (err) {
-        showToast(err instanceof Error ? err.message : "Не удалось открыть файл", { tone: "danger" });
+        showToast(err instanceof Error ? err.message : "Не удалось открыть файл", {
+          tone: "danger",
+        });
         return false;
       }
     },
@@ -795,6 +1037,8 @@ export function EditorPage() {
           selection: { anchor: pos },
           effects: EditorView.scrollIntoView(pos, { y: "center" }),
         });
+        // setState swaps the document without an update event: the bar must be told.
+        setCursorPos({ line: target.number, col: pos - target.from + 1 });
       }
       view.focus();
     },
@@ -804,7 +1048,6 @@ export function EditorPage() {
   const addTab = useCallback((tab: EditorTab) => {
     setTabs((prev) => (prev.some((t) => tabKey(t) === tabKey(tab)) ? prev : [...prev, tab]));
   }, []);
-
   const openFile = useCallback(
     async (path: string, line?: number, col?: number) => {
       if (!(await ensureDocument(path))) return;
@@ -820,6 +1063,7 @@ export function EditorPage() {
   const closeTab = useCallback(
     (tab: EditorTab) => {
       if (tab.pinned) return;
+      const wasActive = tabKey(tab) === activeKey;
       if (tab.kind === "diff") {
         closeDiff();
         diffBaseRef.current.delete(tab.path);
@@ -831,9 +1075,55 @@ export function EditorPage() {
           return next;
         });
       }
-      setTabs((prev) => prev.filter((t) => tabKey(t) !== tabKey(tab)));
+      const rest = tabs.filter((t) => tabKey(t) !== tabKey(tab));
+      setTabs(rest);
+      if (!wasActive) return;
+      // Closing the tab on screen hands the pane to its neighbour, as VS Code does;
+      // with no tabs left the document goes away with the tab.
+      const index = tabs.findIndex((t) => tabKey(t) === tabKey(tab));
+      const next = rest[index] ?? rest[index - 1] ?? null;
+      if (next) {
+        activateTab(next);
+        return;
+      }
+      activeRef.current = null;
+      setActiveKey(null);
+      setRefs([]);
+      showToast("Все вкладки закрыты", { tone: "info" });
     },
-    [closeDiff],
+    [activateTab, activeKey, closeDiff, tabs],
+  );
+
+  /** Close every tab the predicate does not keep; the pane takes the first kept one. */
+  const closeTabs = useCallback(
+    (keep: (tab: EditorTab) => boolean) => {
+      const kept = tabs.filter(keep);
+      const removed = tabs.filter((tab) => !keep(tab));
+      if (removed.length === 0) return;
+      for (const tab of removed) {
+        if (tab.kind === "diff") {
+          closeDiff();
+          diffBaseRef.current.delete(tab.path);
+        } else {
+          statesRef.current.delete(tab.path);
+        }
+      }
+      const keptFiles = new Set(kept.filter((tab) => tab.kind === "file").map((tab) => tab.path));
+      setDirty((prev) => new Set([...prev].filter((path) => keptFiles.has(path))));
+      setTabs(kept);
+      const current = tabs.find((tab) => tabKey(tab) === activeKey);
+      if (current && !removed.includes(current)) return;
+      const next = kept[0];
+      if (next) {
+        activateTab(next);
+        return;
+      }
+      activeRef.current = null;
+      setActiveKey(null);
+      setRefs([]);
+      showToast("Все вкладки закрыты", { tone: "info" });
+    },
+    [activateTab, activeKey, closeDiff, tabs],
   );
 
   const togglePin = useCallback((tab: EditorTab) => {
@@ -900,8 +1190,32 @@ export function EditorPage() {
     [addTab, changes, openFile, root, sessionId, tabs],
   );
 
-  const saveActive = useCallback(async () => {
-    const path = activeRef.current;
+  /** Bring a path on screen: the file tree, its folders open, the row visible. */
+  const revealInTree = useCallback((path: string) => {
+    setTreeTab("files");
+    setTreeHidden(false);
+    revealSeq.current += 1;
+    setReveal({ path, seq: revealSeq.current });
+  }, []);
+
+  // A tab restored from the last session has no document yet: open it the way
+  // the tree does, or the pane shows an empty file.
+  const selectTab = useCallback(
+    (tab: EditorTab) => {
+      if (tab.kind === "diff" && !diffBaseRef.current.has(tab.path)) {
+        void openDiff(tab.path);
+        return;
+      }
+      if (tab.kind === "file" && !statesRef.current.has(tab.path)) {
+        void openFile(tab.path);
+        return;
+      }
+      activateTab(tab);
+    },
+    [activateTab, openDiff, openFile],
+  );
+
+  const saveActive = useCallback(async () => {    const path = activeRef.current;
     if (!path) return;
     const state = statesRef.current.get(path);
     if (!state) return;
@@ -916,7 +1230,9 @@ export function EditorPage() {
       // A save changes what git reports: the «Изменения» tab must not be stale.
       void loadChanges();
     } catch (err) {
-      showToast(err instanceof Error ? err.message : "Не удалось сохранить файл", { tone: "danger" });
+      showToast(err instanceof Error ? err.message : "Не удалось сохранить файл", {
+        tone: "danger",
+      });
     }
   }, [loadChanges]);
 
@@ -972,41 +1288,131 @@ export function EditorPage() {
     }
   }, []);
 
+  // A reload hands back the tabs it had, and the text of every file whose edits
+  // never reached the disk. Restoring the active one opens it as a click would.
+  useEffect(() => {
+    if (!root || restoredFor.current === root) return;
+    restoredFor.current = root;
+    requestPersistence();
+    const workspace = readWorkspace(root);
+    const tabs = workspace?.tabs ?? [];
+    setTabs(tabs);
+    setActiveKey(workspace?.active ?? null);
+    const reopen = async () => {
+      const legacy = Object.entries(workspace?.buffers ?? {});
+      if (legacy.length > 0) {
+        // Written by a build that kept the text in localStorage: move it across.
+        for (const [path, text] of legacy) await saveBuffer(root, path, text);
+        writeWorkspace(root, tabs, workspace?.active ?? null);
+        restoreBuffers.current = new Map(legacy);
+      } else {
+        const paths = tabs.filter((tab) => tab.kind === "file").map((tab) => tab.path);
+        restoreBuffers.current = await loadBuffers(root, paths);
+      }
+      const last = tabs.find((tab) => tabKey(tab) === workspace?.active);
+      if (!last) return;
+      if (last.kind === "diff") void openDiff(last.path);
+      else void openFile(last.path);
+    };
+    void reopen();
+  }, [openDiff, openFile, root]);
+
+  // The restored diff tab is open before the git status it needs has arrived;
+  // until the base is fetched the pane holds nothing, so retry once it lands.
+  useEffect(() => {
+    const active = tabs.find((tab) => tabKey(tab) === activeKey);
+    if (!active || active.kind !== "diff" || !sessionId || !changes) return;
+    if (diffBaseRef.current.has(active.path)) return;
+    void openDiff(active.path);
+  }, [activeKey, changes, openDiff, sessionId, tabs]);
+
+  useEffect(() => {
+    if (!root) return;
+    // Debounced, and per file: typing in one buffer never rewrites the others.
+    const timer = window.setTimeout(() => {
+      writeWorkspace(root, tabs, activeKey);
+      const writes: Array<Promise<void>> = [];
+      for (const path of dirty) {
+        const text = statesRef.current.get(path)?.doc.toString();
+        if (text == null || persistedRef.current.get(path) === text) continue;
+        persistedRef.current.set(path, text);
+        writes.push(saveBuffer(root, path, text));
+      }
+      // Dropping the current entry is allowed while iterating a Map.
+      for (const path of persistedRef.current.keys()) {
+        if (dirty.has(path)) continue;
+        persistedRef.current.delete(path);
+        writes.push(dropBuffer(root, path));
+      }
+      void Promise.all(writes);
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [activeKey, dirty, root, tabs]);
+
+  // A reload or a closed tab gives no time for the debounce: write now.
+  useEffect(() => {
+    if (!root) return;
+    const flush = () => {
+      writeWorkspace(root, tabs, activeKey);
+      for (const path of dirty) {
+        const text = statesRef.current.get(path)?.doc.toString();
+        if (text != null) void saveBuffer(root, path, text);
+      }
+    };
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", flush);
+    };
+  }, [activeKey, dirty, root, tabs]);
+
   const gotoDefinition = useCallback(async () => {
     const view = viewRef.current;
     const path = activeRef.current;
     if (!view || !path || !lspRef.current) return;
     const head = view.state.selection.main.head;
     const line = view.state.doc.lineAt(head);
+    setBusy("definition");
     try {
-      const ask = () => lspRef.current!.definition(path, line.number - 1, head - line.from);
-      // While the server loads a project it answers nothing: a click must not
-      // wait for it, so the compiler path below takes over after a moment.
-      const silence = new Promise<LspLocation[]>((done) => setTimeout(() => done([]), 1200));
-      const locations = await Promise.race([ask().catch(() => []), silence]);
-      const first = locations[0];
-      const rel = first ? relOf(first.uri) : null;
-      if (first && rel && rel !== path) {
-        await openFile(rel, first.line, first.col);
-        return;
-      }
-      // A click on the specifier itself needs no name: open what it points at.
-      const clicked = importSpecAt(view, head);
-      const pointed = clicked ? await editorApi.resolve(rootRef.current, path, clicked).catch(() => null) : null;
-      if (pointed) {
-        await openFile(pointed);
-        return;
-      }
-      // Silence, or «this very file's import line»: the project's compiler knows
-      // the specifier and where the name is declared, with no server involved.
-      const answerLine = first && rel === path ? first.line : line.number;
-      const at = view.state.doc.line(Math.min(answerLine, view.state.doc.lines)).text;
+      const root = rootRef.current;
       const name = wordAt(line.text, head - line.from);
-      const spec = /from\s*["']([^"']+)["']/.exec(at)?.[1] ?? specForName(view.state.doc.toString(), name);
-      const found =
-        spec && name
-          ? await editorApi.declaration(rootRef.current, path, spec, name).catch(() => null)
+      // Both answers are asked for at once: a warm language server replies in
+      // tens of milliseconds, a silent one never does, and the project's compiler
+      // answers on its own. The first real answer wins, so a click never waits
+      // for either of them to give up.
+      const fromServer = lspRef.current
+        .definition(path, line.number - 1, head - line.from)
+        .then((locations) => {
+          const hit = locations[0];
+          const rel = hit ? relOf(hit.uri) : null;
+          // Pointing back into this very file is no answer — the compiler knows better.
+          return rel && rel !== path ? { path: rel, line: hit.line, col: hit.col } : null;
+        })
+        .catch(() => null);
+      const fromCompiler = (async () => {
+        // A click on the specifier itself needs no name: open what it points at.
+        const clicked = importSpecAt(view, head);
+        const pointed = clicked
+          ? await editorApi.resolve(root, path, clicked).catch(() => null)
           : null;
+        if (pointed) return { path: pointed };
+        const spec =
+          /from\s*["']([^"']+)["']/.exec(line.text)?.[1] ??
+          specForName(view.state.doc.toString(), name);
+        // No import means the name may still be declared here, next to its use.
+        return name ? await editorApi.declaration(root, path, spec ?? "", name).catch(() => null) : null;
+      })();
+      type Target = { path: string; line?: number; col?: number };
+      const found = await Promise.any<Target>(
+        [fromServer as Promise<Target | null>, fromCompiler as Promise<Target | null>].map(
+          (answer) =>
+            answer.then((value) => {
+              if (!value) throw new Error("empty");
+              return value;
+            }),
+        ),
+      ).catch(() => null);
       if (found) {
         await openFile(found.path, found.line, found.col);
         return;
@@ -1014,6 +1420,8 @@ export function EditorPage() {
       setStatus("definition: не найдено");
     } catch (err) {
       showToast(err instanceof Error ? err.message : "definition failed", { tone: "danger" });
+    } finally {
+      setBusy(null);
     }
   }, [openFile, relOf]);
 
@@ -1023,12 +1431,15 @@ export function EditorPage() {
     if (!view || !path || !lspRef.current) return;
     const head = view.state.selection.main.head;
     const line = view.state.doc.lineAt(head);
+    setBusy("usages");
     try {
       const locations = await lspRef.current.references(path, line.number - 1, head - line.from);
       setRefs(locations.filter((loc) => relOf(loc.uri)));
       setStatus(`references: ${locations.length}`);
     } catch (err) {
       showToast(err instanceof Error ? err.message : "references failed", { tone: "danger" });
+    } finally {
+      setBusy(null);
     }
   }, [relOf]);
 
@@ -1046,7 +1457,10 @@ export function EditorPage() {
   // find nothing to attach to and never run again.
   useEffect(() => {
     if (!root || !hostRef.current) return;
-    const view = new EditorView({ state: EditorState.create({ doc: "" }), parent: hostRef.current });
+    const view = new EditorView({
+      state: EditorState.create({ doc: "" }),
+      parent: hostRef.current,
+    });
     viewRef.current = view;
     mainViewRef.current = view;
     // A fresh view starts blank: put back whatever tab was open.
@@ -1067,7 +1481,36 @@ export function EditorPage() {
     const main = mainViewRef.current;
     const rootPath = rootRef.current;
     if (!diff || !host || !main || !rootPath) return;
-    const state = statesRef.current.get(diff.path) ?? makeState(diff.path, "", rootPath);
+    // No placeholder here: an empty state stored for the path would stick and
+    // every later open would show the file as an empty document.
+    const state = statesRef.current.get(diff.path);
+    if (!state) return;
+    if (diffMode === "inline") {
+      // One column: deletions sit in place with the insertions right below them.
+      const view = new EditorView({
+        doc: state.doc.toString(),
+        extensions: [
+          ...docExtensions(diff.path, rootPath),
+          unifiedMergeView({ original: diff.base, highlightChanges: true, gutter: true }),
+        ],
+        parent: host,
+      });
+      viewRef.current = view;
+      statesRef.current.set(diff.path, view.state);
+      // A pane restored from the last session is laid out after the view is
+      // built: without a nudge CodeMirror keeps the one-line viewport it
+      // measured and the diff looks empty.
+      const observer = new ResizeObserver(() => view.requestMeasure());
+      observer.observe(host);
+      applyEditorConfig(view);
+      applyDiagnostics(diff.path);
+      return () => {
+        observer.disconnect();
+        statesRef.current.set(diff.path, view.state);
+        view.destroy();
+        viewRef.current = main;
+      };
+    }
     const merge = new MergeView({
       a: {
         doc: diff.base,
@@ -1076,7 +1519,9 @@ export function EditorPage() {
           EditorState.readOnly.of(true),
           EditorView.editable.of(false),
           themeSlot.of(editorTheme(scheme)),
-          EditorView.lineWrapping,
+          // No wrapping here: both halves must lay out the same way, or the right
+          // side scrolls sideways against a wrapped left side and the columns
+          // stop matching line by line.
         ],
       },
       b: { doc: state.doc.toString(), extensions: docExtensions(diff.path, rootPath) },
@@ -1086,6 +1531,11 @@ export function EditorPage() {
     });
     mergeRef.current = merge;
     viewRef.current = merge.b;
+    const observer = new ResizeObserver(() => {
+      merge.a.requestMeasure();
+      merge.b.requestMeasure();
+    });
+    observer.observe(host);
     // The merge view owns the document from now on: its state is the live one.
     statesRef.current.set(diff.path, merge.b.state);
     applyEditorConfig(merge.b);
@@ -1094,12 +1544,13 @@ export function EditorPage() {
     // opening a diff stops at the diff. Upgrade when edits have to be undoable
     // through the tab view as one history.
     return () => {
+      observer.disconnect();
       statesRef.current.set(diff.path, merge.b.state);
       merge.destroy();
       mergeRef.current = null;
       viewRef.current = main;
     };
-  }, [applyDiagnostics, applyEditorConfig, diff, docExtensions, makeState, scheme]);
+  }, [applyDiagnostics, applyEditorConfig, diff, diffMode, docExtensions, makeState, scheme]);
 
   // Pressing or releasing Ctrl without moving the mouse: the underline follows it.
   useEffect(() => {
@@ -1133,7 +1584,13 @@ export function EditorPage() {
   useEffect(() => {
     if (!root || !activePath) return;
     void editorApi.tools(root, activePath).then(setTools, () => setTools(null));
-  }, [root, activePath, settings.editorToolOxfmt, settings.editorToolOxlint, settings.editorToolTypescript]);
+  }, [
+    root,
+    activePath,
+    settings.editorToolOxfmt,
+    settings.editorToolOxlint,
+    settings.editorToolTypescript,
+  ]);
 
   // The language server is per project root: reconnect when the folder changes.
   useEffect(() => {
@@ -1160,44 +1617,56 @@ export function EditorPage() {
     };
   }, [applyDiagnostics, root]);
 
-  // Both menus close the way a native one does.
-  const anyMenu = menu != null || changeMenu != null;
+  // Every menu closes the way a native one does.
+  const anyMenu = menu != null || changeMenu != null || tabMenu != null;
+  const closeMenus = useCallback(() => {
+    setMenu(null);
+    setChangeMenu(null);
+    setTabMenu(null);
+  }, []);
+  useOutsidePointerClose(anyMenu, closeMenus);
   useEffect(() => {
     if (!anyMenu) return;
-    const close = () => {
-      setMenu(null);
-      setChangeMenu(null);
-    };
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") close();
+      if (event.key === "Escape") closeMenus();
     };
-    window.addEventListener("pointerdown", close, true);
+    const onResize = () => closeMenus();
     // Capture: the editor's own keymap sees Escape first and stops it bubbling.
     window.addEventListener("keydown", onKey, true);
-    window.addEventListener("resize", close);
+    window.addEventListener("resize", onResize);
     return () => {
-      window.removeEventListener("pointerdown", close, true);
       window.removeEventListener("keydown", onKey, true);
-      window.removeEventListener("resize", close);
+      window.removeEventListener("resize", onResize);
     };
-  }, [anyMenu]);
+  }, [anyMenu, closeMenus]);
 
   const commitKey = (action: keyof EditorKeys) => {
     const raw = draftKeys[action].trim();
     const fallback = keys[action];
     if (!isEditorKeyCombo(raw)) {
       setDraftKeys(keys);
-      showToast("Такой хоткей не подойдёт — формат: Mod-s, Shift-F12, Ctrl-Alt-k", { tone: "danger" });
+      showToast("Такой хоткей не подойдёт — формат: Mod-s, Shift-F12, Ctrl-Alt-k", {
+        tone: "danger",
+      });
       return;
     }
     if (raw === fallback) return;
     void saveSettings({ [KEY_SETTING[action]]: raw });
   };
 
-  const menuItem = (label: string, combo: string, run: () => void) => (
+  // The menu shows the whole vocabulary but greys out what this file and this
+  // spot cannot do — a JSON has no definitions, an unmodified buffer no save.
+  const menuTools = activePath ? toolsForPath(activePath) : [];
+  const menuWord = menu
+    ? wordAt((viewRef.current ?? mainViewRef.current)?.state.doc.toString() ?? "", menu.pos)
+    : "";
+  const menuCode = menuTools.includes("typescript");
+
+  const menuItem = (label: string, combo: string, run: () => void, enabled = true) => (
     <button
       type="button"
       className={styles.menuItem}
+      disabled={!enabled}
       onClick={() => {
         setMenu(null);
         run();
@@ -1209,6 +1678,15 @@ export function EditorPage() {
   );
 
   const changeCount = changes?.repo ? changes.files.length : 0;
+  // Source-control reads in two groups: what git tracks, and what it has never seen.
+  const untrackedChanges = useMemo(
+    () => (changes?.files ?? []).filter((file) => file.index === "?" || file.worktree === "?"),
+    [changes],
+  );
+  const trackedChanges = useMemo(
+    () => (changes?.files ?? []).filter((file) => !(file.index === "?" || file.worktree === "?")),
+    [changes],
+  );
   const changedPaths = useMemo(() => {
     const set = new Set<string>();
     for (const file of changes?.files ?? []) {
@@ -1218,7 +1696,8 @@ export function EditorPage() {
     return set;
   }, [changes, root]);
 
-  if (!root) return <div className={styles.page}>Нет папки проекта — откройте сессию с рабочей папкой.</div>;
+  if (!root)
+    return <div className={styles.page}>Нет папки проекта — откройте сессию с рабочей папкой.</div>;
 
   return (
     <div
@@ -1229,155 +1708,224 @@ export function EditorPage() {
       {/* Всё, что раньше жило в шапке, — хоткеи, правый клик и статус-бар: строку
           на кнопки не тратим, высота нужна документу. */}
       <div className={styles.headerTools}>
-          {panelOpen ? (
-            <div className={styles.popover} role="dialog" aria-label="Настройки редактора">
-              <label className={styles.field}>
-                <span>Тема редактора</span>
-                <select
-                  value={settings.editorTheme}
-                  onChange={(event) =>
-                    void saveSettings({ editorTheme: event.target.value as EditorThemeChoice })
-                  }
-                >
-                  <option value="auto">Как в приложении</option>
-                  <option value="light">Светлая</option>
-                  <option value="dark">Тёмная</option>
-                </select>
-              </label>
-              <label className={styles.field}>
-                <span>Положение рядом с чатом</span>
-                <select
-                  value={settings.editorSplit}
-                  onChange={(event) =>
-                    void saveSettings({ editorSplit: event.target.value as EditorSplit })
-                  }
-                >
-                  <option value="off">Только редактор по /editor</option>
-                  <option value="left">Слева от чата</option>
-                  <option value="right">Справа от чата</option>
-                </select>
-              </label>
-              <div className={styles.field}>
-                <span>Откуда брать инструменты</span>
-                {([
-                  ["typescript", "TypeScript", settings.editorToolTypescript, "editorToolTypescript"],
+        {panelOpen ? (
+          <div className={styles.popover} role="dialog" aria-label="Настройки редактора">
+            <label className={styles.field}>
+              <span>Тема редактора</span>
+              <select
+                value={settings.editorTheme}
+                onChange={(event) =>
+                  void saveSettings({ editorTheme: event.target.value as EditorThemeChoice })
+                }
+              >
+                <option value="auto">Как в приложении</option>
+                <option value="light">Светлая</option>
+                <option value="dark">Тёмная</option>
+              </select>
+            </label>
+            <label className={styles.field}>
+              <span>Положение рядом с чатом</span>
+              <select
+                value={settings.editorSplit}
+                onChange={(event) =>
+                  void saveSettings({ editorSplit: event.target.value as EditorSplit })
+                }
+              >
+                <option value="off">Только редактор по /editor</option>
+                <option value="left">Слева от чата</option>
+                <option value="right">Справа от чата</option>
+              </select>
+            </label>
+            <div className={styles.field}>
+              <span>Откуда брать инструменты</span>
+              {(
+                [
+                  [
+                    "typescript",
+                    "TypeScript",
+                    settings.editorToolTypescript,
+                    "editorToolTypescript",
+                  ],
                   ["oxlint", "oxlint", settings.editorToolOxlint, "editorToolOxlint"],
                   ["oxfmt", "oxfmt", settings.editorToolOxfmt, "editorToolOxfmt"],
-                ] as const).map(([tool, label, value, key]) => (
-                  <label key={tool} className={styles.keyRow}>
-                    <span>{label}</span>
-                    <select
-                      value={value}
-                      onChange={(event) =>
-                        void saveSettings({
-                          [key]: event.target.value as EditorToolSource,
-                        } as Partial<AppSettings>)
-                      }
-                    >
-                      <option value="auto">Авто (проект, иначе встроенный)</option>
-                      <option value="project">Только из проекта</option>
-                      <option value="bundled">Только встроенный</option>
-                    </select>
-                  </label>
-                ))}
-              </div>
-              <div className={styles.field}>
-                <span>Хоткеи</span>
-                {(Object.keys(KEY_LABELS) as Array<keyof EditorKeys>).map((action) => (
-                  <label key={action} className={styles.keyRow}>
-                    <span>{KEY_LABELS[action]}</span>
-                    <input
-                      value={draftKeys[action]}
-                      spellCheck={false}
-                      onChange={(event) =>
-                        setDraftKeys((prev) => ({ ...prev, [action]: event.target.value }))
-                      }
-                      onBlur={() => commitKey(action)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          event.preventDefault();
-                          commitKey(action);
-                        }
-                      }}
-                    />
-                  </label>
-                ))}
-                <span className={styles.hint}>
-                  Формат CodeMirror: <code>Mod-s</code>, <code>Shift-F12</code>, <code>Ctrl-Alt-k</code>.
-                </span>
-              </div>
+                ] as const
+              ).map(([tool, label, value, key]) => (
+                <label key={tool} className={styles.keyRow}>
+                  <span>{label}</span>
+                  <select
+                    value={value}
+                    onChange={(event) =>
+                      void saveSettings({
+                        [key]: event.target.value as EditorToolSource,
+                      } as Partial<AppSettings>)
+                    }
+                  >
+                    <option value="auto">Авто (проект, иначе встроенный)</option>
+                    <option value="project">Только из проекта</option>
+                    <option value="bundled">Только встроенный</option>
+                  </select>
+                </label>
+              ))}
             </div>
-          ) : null}
+            <div className={styles.field}>
+              <span>Хоткеи</span>
+              {(Object.keys(KEY_LABELS) as Array<keyof EditorKeys>).map((action) => (
+                <label key={action} className={styles.keyRow}>
+                  <span>{KEY_LABELS[action]}</span>
+                  <input
+                    value={draftKeys[action]}
+                    spellCheck={false}
+                    onChange={(event) =>
+                      setDraftKeys((prev) => ({ ...prev, [action]: event.target.value }))
+                    }
+                    onBlur={() => commitKey(action)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        commitKey(action);
+                      }
+                    }}
+                  />
+                </label>
+              ))}
+              <span className={styles.hint}>
+                Формат CodeMirror: <code>Mod-s</code>, <code>Shift-F12</code>,{" "}
+                <code>Ctrl-Alt-k</code>.
+              </span>
+            </div>
+          </div>
+        ) : null}
       </div>
 
-      <div className={styles.body}>
-        <aside className={styles.tree}>
-          <div className={styles.treeTabs}>
-            <button
-              type="button"
-              className={`${styles.treeTab} ${treeTab === "files" ? styles.treeTabActive : ""}`}
-              onClick={() => setTreeTab("files")}
-            >
-              Файлы
-            </button>
-            <button
-              type="button"
-              className={`${styles.treeTab} ${treeTab === "changes" ? styles.treeTabActive : ""}`}
-              onClick={() => setTreeTab("changes")}
-            >
-              Изменения
-              {changeCount > 0 ? ` (${changeCount})` : ""}
-            </button>
-          </div>
-          {treeTab === "files" ? (
-            <Tree
-              root={root}
-              onOpen={(path) => void openFile(path)}
-              active={activePath}
-              changed={changedPaths}
-            />
-          ) : (
-            <div className={styles.treeList}>
-              {changes && !changes.repo ? (
-                <span className={styles.treeNote}>Папка не под git.</span>
-              ) : null}
-              {changes && changes.repo && changeCount === 0 ? (
-                <span className={styles.treeNote}>Изменений нет.</span>
-              ) : null}
-              {(changes?.files ?? []).map((file) => {
-                const path = changes ? repoToPane(changes.root, root, file.path) : null;
-                const where = path == null ? null : path;
-                const letter = (file.index !== " " && file.index !== "?" ? file.index : file.worktree) || "?";
-                return (
+      <div className={styles.body} data-tree-dragging={treeDragging}>
+        {treeHidden ? null : (
+          <aside className={styles.tree} style={{ width: treeWidth }}>
+            <div className={styles.treeTabs}>
+              <button
+                type="button"
+                className={`${styles.treeTab} ${treeTab === "files" ? styles.treeTabActive : ""}`}
+                onClick={() => setTreeTab("files")}
+              >
+                Файлы
+              </button>
+              <button
+                type="button"
+                className={`${styles.treeTab} ${treeTab === "changes" ? styles.treeTabActive : ""}`}
+                onClick={() => setTreeTab("changes")}
+              >
+                Изменения
+                {changeCount > 0 ? ` (${changeCount})` : ""}
+              </button>
+              {treeTab === "changes" ? (
+                <div className={styles.changeView} role="group" aria-label="Вид списка изменений">
                   <button
                     type="button"
-                    key={file.path}
-                    title={where ? file.path : `${file.path} — вне корня панели`}
-                    className={`${styles.treeRow} ${styles.changeRow}`}
-                    onClick={() => where && void openDiff(where)}
-                    onContextMenu={(event) => {
-                      if (!where) return;
-                      event.preventDefault();
-                      setChangeMenu({ x: event.clientX, y: event.clientY, path: where });
-                    }}
+                    className={styles.changeViewButton}
+                    aria-pressed={changeView === "tree"}
+                    title="Дерево папок"
+                    onClick={() => setChangeView("tree")}
                   >
-                    <span className={`${styles.changeBadge} ${letterClass(letter)}`}>{letter}</span>
-                    <span className={`${styles.label} ${where ? styles.labelChanged : ""}`}>
-                      {file.path.split("/").pop()}
-                    </span>
-                    <span className={styles.changeStat}>
-                      {file.additions > 0 ? `+${file.additions}` : ""}
-                      {file.deletions > 0 ? ` −${file.deletions}` : ""}
-                    </span>
+                    <svg viewBox="0 0 16 16" aria-hidden>
+                      <path
+                        d="M2.5 3h4M2.5 8h4M2.5 13h4M9 8h4M9 13h3"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.3"
+                        strokeLinecap="round"
+                      />
+                    </svg>
                   </button>
-                );
-              })}
+                  <button
+                    type="button"
+                    className={styles.changeViewButton}
+                    aria-pressed={changeView === "list"}
+                    title="Плоский список"
+                    onClick={() => setChangeView("list")}
+                  >
+                    <svg viewBox="0 0 16 16" aria-hidden>
+                      <path
+                        d="M2.5 3.5h11M2.5 8h11M2.5 12.5h11"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.3"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  </button>
+                </div>
+              ) : null}
             </div>
-          )}
-        </aside>
+            {treeTab === "files" ? (
+              <Tree
+                root={root}
+                onOpen={(path) => void openFile(path)}
+                active={activePath}
+                changed={changedPaths}
+                reveal={reveal}
+              />
+            ) : (
+              <div className={styles.treeList}>
+                {changes && !changes.repo ? (
+                  <span className={styles.treeNote}>Папка не под git.</span>
+                ) : null}
+                {changes && changes.repo && changeCount === 0 ? (
+                  <span className={styles.treeNote}>Изменений нет.</span>
+                ) : null}
+                {changes?.repo ? (
+                  <>
+                    <ChangeGroup
+                      title="Изменения"
+                      files={trackedChanges}
+                      repoRoot={changes.root}
+                      paneRoot={root}
+                      view={changeView}
+                      onOpen={(path) => void openDiff(path)}
+                      onMenu={(event, path) =>
+                        setChangeMenu({ x: event.clientX, y: event.clientY, path })
+                      }
+                    />
+                    <ChangeGroup
+                      title="Неотслеживаемые"
+                      files={untrackedChanges}
+                      repoRoot={changes.root}
+                      paneRoot={root}
+                      view={changeView}
+                      onOpen={(path) => void openDiff(path)}
+                      onMenu={(event, path) =>
+                        setChangeMenu({ x: event.clientX, y: event.clientY, path })
+                      }
+                    />
+                  </>
+                ) : null}
+              </div>
+            )}
+          </aside>
+        )}
+        {treeHidden ? null : (
+          <span
+            className={styles.treeSplitter}
+            role="separator"
+            aria-orientation="vertical"
+            aria-valuenow={treeWidth}
+            data-dragging={treeDragging}
+            title="Потяните, чтобы изменить ширину дерева; двойной клик — сброс"
+            onPointerDown={onTreeSplitterDown}
+            onDoubleClick={() => setTreeWidth(TREE_DEFAULT)}
+          />
+        )}
 
         <main className={styles.main}>
-          <div className={styles.tabs} role="tablist">
+          <div
+            className={styles.tabs}
+            role="tablist"
+            // A wheel over a row that scrolls sideways does nothing by itself:
+            // map the vertical detent onto it, as every editor's tab bar does.
+            onWheel={(event) => {
+              const strip = event.currentTarget;
+              if (strip.scrollWidth <= strip.clientWidth) return;
+              strip.scrollLeft += event.deltaY + event.deltaX;
+            }}
+          >
             {tabs.map((tab, index) => (
               <div
                 key={tabKey(tab)}
@@ -1387,9 +1935,13 @@ export function EditorPage() {
                 draggable
                 title={tab.path}
                 className={`${styles.tab} ${tabKey(tab) === activeKey ? styles.tabActive : ""}`}
-                onClick={() => activateTab(tab)}
+                onClick={() => selectTab(tab)}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  setTabMenu({ x: event.clientX, y: event.clientY, tab });
+                }}
                 onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") activateTab(tab);
+                  if (event.key === "Enter" || event.key === " ") selectTab(tab);
                 }}
                 onAuxClick={(event) => {
                   if (event.button === 1) closeTab(tab);
@@ -1439,9 +1991,66 @@ export function EditorPage() {
               </div>
             ))}
           </div>
-          <div className={styles.editor} ref={hostRef} hidden={diff != null} />
+          <div className={styles.editor} ref={hostRef} hidden={diff != null || !activePath} />
+          {!activePath && !diff ? (
+            <div className={styles.noTab}>
+              <span>Файл не открыт — выберите его в дереве слева</span>
+            </div>
+          ) : null}
           {/* MergeView mounts here: revision on the left, editable copy on the right. */}
           {diff ? <div className={styles.mergeHost} ref={mergeHostRef} /> : null}
+          {diff ? (
+            <div className={styles.diffMode} role="group" aria-label="Вид изменений">
+              <button
+                type="button"
+                className={styles.diffModeButton}
+                aria-pressed={diffMode === "split"}
+                title="Две колонки — было и стало"
+                onClick={() => setDiffMode("split")}
+              >
+                <svg viewBox="0 0 16 16" aria-hidden>
+                  <rect
+                    x="1.5"
+                    y="2.5"
+                    width="5.5"
+                    height="11"
+                    rx="1"
+                    fill="none"
+                    stroke="currentColor"
+                  />
+                  <rect
+                    x="9"
+                    y="2.5"
+                    width="5.5"
+                    height="11"
+                    rx="1"
+                    fill="none"
+                    stroke="currentColor"
+                  />
+                </svg>
+              </button>
+              <button
+                type="button"
+                className={styles.diffModeButton}
+                aria-pressed={diffMode === "inline"}
+                title="Одна колонка — изменения внутри текста"
+                onClick={() => setDiffMode("inline")}
+              >
+                <svg viewBox="0 0 16 16" aria-hidden>
+                  <rect
+                    x="1.5"
+                    y="2.5"
+                    width="13"
+                    height="11"
+                    rx="1"
+                    fill="none"
+                    stroke="currentColor"
+                  />
+                  <path d="M4 6.5h8M4 9.5h8" stroke="currentColor" strokeWidth="1.2" />
+                </svg>
+              </button>
+            </div>
+          ) : null}
           {refs.length > 0 ? (
             <div className={styles.refs}>
               {refs.map((loc, index) => {
@@ -1502,16 +2111,76 @@ export function EditorPage() {
           {problems.length > 0 ? problemCountLabel(problems) : "0"}
         </button>
         <span className={styles.barText} title={activePath ?? ""}>
-          {activePath ? `${tabTitle(activeTab ?? { path: activePath, kind: "file", pinned: false })}${activeTab?.kind === "diff" ? " (изменения)" : ""}` : "—"}
+          {activePath
+            ? `${tabTitle(activeTab ?? { path: activePath, kind: "file", pinned: false })}${activeTab?.kind === "diff" ? " (изменения)" : ""}`
+            : "—"}
         </span>
         <span className={styles.barText}>
           Ln {cursorPos.line}, Col {cursorPos.col}
         </span>
         <span className={styles.spacer} />
+        {busy ? (
+          <span className={`${styles.barText} ${styles.barBusy}`} role="status">
+            <span className={styles.barSpinner} aria-hidden />
+            {busy === "definition" ? "переход к определению…" : "ищу использования…"}
+          </span>
+        ) : null}
         {status ? (
           <span className={`${styles.barText} ${styles.barNote}`} title={status}>
             {status}
           </span>
+        ) : null}
+        <button
+          type="button"
+          className={`${styles.barChip} ${styles.barAction}`}
+          aria-pressed={treeHidden}
+          title={treeHidden ? "Показать дерево файлов" : "Скрыть дерево файлов"}
+          aria-label={treeHidden ? "Показать дерево" : "Скрыть дерево"}
+          onClick={() => setTreeHidden((prev) => !prev)}
+        >
+          <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden>
+            <path
+              d={
+                treeHidden ? "M2 3.5h12v9H2zM4 6.5h3M4 9h3M9 6.5h3M9 9h3" : "M2 3.5h12v9H2zM6 3.5v9"
+              }
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.3"
+              strokeLinecap="round"
+            />
+          </svg>
+        </button>
+        {onToggleChat ? (
+          <button
+            type="button"
+            className={`${styles.barChip} ${styles.barAction}`}
+            aria-pressed={Boolean(chatHidden)}
+            title={chatHidden ? "Показать чат" : "Скрыть чат — редактор на всю ширину"}
+            aria-label={chatHidden ? "Показать чат" : "Скрыть чат"}
+            onClick={onToggleChat}
+          >
+            <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden>
+              {chatHidden ? (
+                <path
+                  d="M2 3.5h12v9H2zM6 3.5v9M4 6.5l-1.5 1L4 8.5"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.3"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              ) : (
+                <path
+                  d="M2 3.5h12v9H2zM10 3.5v9M8 7.5l2 1-2 1"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.3"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              )}
+            </svg>
+          </button>
         ) : null}
         <button
           type="button"
@@ -1545,7 +2214,7 @@ export function EditorPage() {
           </svg>
         </button>
         {tools
-          ? (["typescript", "oxlint", "oxfmt"] as const).map((name) => {
+          ? toolsForPath(activePath).map((name) => {
               const tool = tools.tools[name];
               return (
                 <span
@@ -1559,6 +2228,83 @@ export function EditorPage() {
             })
           : null}
       </footer>
+
+      {tabMenu
+        ? createPortal(
+            <div
+              className={styles.menu}
+              role="menu"
+              style={{ left: Math.min(tabMenu.x, window.innerWidth - MENU_MIN_WIDTH - 8), top: tabMenu.y }}
+              onPointerDown={(event) => event.stopPropagation()}
+            >
+              <button
+                type="button"
+                className={styles.menuItem}
+                onClick={() => {
+                  const path = tabMenu.tab.path;
+                  setTabMenu(null);
+                  void copyToClipboard(absOf(root, path), "Путь");
+                }}
+              >
+                <span>Копировать полный путь</span>
+              </button>
+              <button
+                type="button"
+                className={styles.menuItem}
+                onClick={() => {
+                  const path = tabMenu.tab.path;
+                  setTabMenu(null);
+                  void copyToClipboard(path, "Относительный путь");
+                }}
+              >
+                <span>Копировать относительный путь</span>
+              </button>
+              <button
+                type="button"
+                className={styles.menuItem}
+                onClick={() => {
+                  const path = tabMenu.tab.path;
+                  setTabMenu(null);
+                  revealInTree(path);
+                }}
+              >
+                <span>Показать файл в дереве</span>
+              </button>
+              <button
+                type="button"
+                className={styles.menuItem}
+                onClick={() => {
+                  setTabMenu(null);
+                  closeTabs(() => false);
+                }}
+              >
+                <span>Закрыть все</span>
+              </button>
+              <button
+                type="button"
+                className={styles.menuItem}
+                onClick={() => {
+                  const keep = tabMenu.tab;
+                  setTabMenu(null);
+                  closeTabs((tab) => tabKey(tab) === tabKey(keep));
+                }}
+              >
+                <span>Закрыть все, кроме этой</span>
+              </button>
+              <button
+                type="button"
+                className={styles.menuItem}
+                onClick={() => {
+                  setTabMenu(null);
+                  closeTabs((tab) => Boolean(tab.pinned));
+                }}
+              >
+                <span>Закрыть все, кроме закреплённых</span>
+              </button>
+            </div>,
+            document.body,
+          )
+        : null}
 
       {changeMenu
         ? createPortal(
@@ -1592,6 +2338,39 @@ export function EditorPage() {
                 <span>Открыть файл</span>
                 <span className={styles.menuKey}>edit</span>
               </button>
+              <button
+                type="button"
+                className={styles.menuItem}
+                onClick={() => {
+                  const path = changeMenu.path;
+                  setChangeMenu(null);
+                  void copyToClipboard(absOf(root, path), "Путь");
+                }}
+              >
+                <span>Копировать полный путь</span>
+              </button>
+              <button
+                type="button"
+                className={styles.menuItem}
+                onClick={() => {
+                  const path = changeMenu.path;
+                  setChangeMenu(null);
+                  void copyToClipboard(path, "Относительный путь");
+                }}
+              >
+                <span>Копировать относительный путь</span>
+              </button>
+              <button
+                type="button"
+                className={styles.menuItem}
+                onClick={() => {
+                  const path = changeMenu.path;
+                  setChangeMenu(null);
+                  revealInTree(path);
+                }}
+              >
+                <span>Показать файл в дереве</span>
+              </button>
             </div>,
             document.body,
           )
@@ -1608,18 +2387,47 @@ export function EditorPage() {
               }}
               onPointerDown={(event) => event.stopPropagation()}
             >
-              {menuItem("К определению", keys.definition, () => void gotoDefinition())}
-              {menuItem("Найти использования", keys.usages, () => void findReferences())}
-              {menuItem("Спросить про эту строку", keys.ask, () =>
-                viewRef.current?.dispatch({ effects: setAsk.of(menu.pos) }),
+              {menuItem(
+                "К определению",
+                keys.definition,
+                () => void gotoDefinition(),
+                menuCode && menuWord !== "",
               )}
-              {menuItem("Форматировать файл", keys.format, () => void formatActive())}
-              {menuItem("Сохранить файл", keys.save, () => void saveActive())}
-              {menuItem(`Сохранить все${dirty.size > 1 ? ` (${dirty.size})` : ""}`, "", () => void saveAll())}
+              {menuItem(
+                "Найти использования",
+                keys.usages,
+                () => void findReferences(),
+                menuCode && menuWord !== "",
+              )}
+              {menuItem(
+                "Спросить про эту строку",
+                keys.ask,
+                () => viewRef.current?.dispatch({ effects: setAsk.of(menu.pos) }),
+                activePath != null,
+              )}
+              {menuItem(
+                "Форматировать файл",
+                keys.format,
+                () => void formatActive(),
+                menuTools.includes("oxfmt"),
+              )}
+              {menuItem(
+                "Сохранить файл",
+                keys.save,
+                () => void saveActive(),
+                activePath != null && dirty.has(activePath),
+              )}
+              {menuItem(
+                `Сохранить все${dirty.size > 1 ? ` (${dirty.size})` : ""}`,
+                "",
+                () => void saveAll(),
+                dirty.size > 0,
+              )}
               {menuItem(
                 `Проблемы${problems.length > 0 ? ` (${problems.length})` : ""}`,
                 "",
                 () => setProblemsOpen((open) => !open),
+                problems.length > 0,
               )}
               {menuItem("Настройки редактора", "", () => setPanelOpen(true))}
             </div>,
@@ -1672,27 +2480,45 @@ function TreeGlyph({ name, dir, open }: { name: string; dir: boolean; open: bool
   );
 }
 
-function Tree({
+// Exported for its own test: the reveal behaviour (open folders, ring, scroll).
+export function Tree({
   root,
   onOpen,
   active,
   changed,
+  reveal,
 }: {
   root: string;
   onOpen: (path: string) => void;
   active: string | null;
   /** Files git reports as changed: coloured the way a VS Code tree does it. */
   changed: Set<string>;
+  /** A path to bring on screen, with the folders above it opened. */
+  reveal?: { path: string; seq: number } | null;
 }) {
   const [expanded, setExpanded] = useState<Record<string, EditorEntry[]>>({});
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const [revealed, setRevealed] = useState<string | null>(null);
+  const [pins, setPins] = useState<string[]>(() => readPins(root));
+  const [pinMenu, setPinMenu] = useState<{ x: number; y: number; entry: EditorEntry } | null>(null);
 
   const load = useCallback(
     async (path: string) => {
       try {
         const res = await editorApi.tree(root, path);
-        setExpanded((prev) => ({ ...prev, [path]: res.entries }));
+        setExpanded((prev) => {
+          // Keyed by the normalised path: git and the listing may disagree on case.
+          const next = { ...prev, [normPath(path)]: res.entries };
+          writeTreeOpen(
+            root,
+            Object.keys(next).filter((item) => item !== ""),
+          );
+          return next;
+        });
       } catch (err) {
-        showToast(err instanceof Error ? err.message : "Не удалось прочитать папку", { tone: "danger" });
+        showToast(err instanceof Error ? err.message : "Не удалось прочитать папку", {
+          tone: "danger",
+        });
       }
     },
     [root],
@@ -1700,29 +2526,127 @@ function Tree({
 
   useEffect(() => {
     setExpanded({});
+    setPins(readPins(root));
     void load("");
-  }, [load]);
+    // A reload hands back the folders that were open, in the order they were.
+    for (const path of readTreeOpen(root)) void load(path);
+  }, [load, root]);
+
+  const togglePin = (path: string) => {
+    setPins((prev) => {
+      const next = prev.includes(path) ? prev.filter((item) => item !== path) : [path, ...prev];
+      try {
+        localStorage.setItem(pinsKey(root), JSON.stringify(next));
+      } catch {
+        // A full quota only costs the pins; the tree still works.
+      }
+      return next;
+    });
+  };
+
+  useOutsidePointerClose(pinMenu != null, () => setPinMenu(null));
+
+  // «Показать в дереве»: open the folders above the path, then scroll to its row.
+  // The row may need a few frames to exist: the folders above it are loading.
+  const select = (path: string, tries = 60): void => {
+    // git and the file tree spell a path differently (case, separators), so match
+    // on the normalised form or the row is never found.
+    const want = normPath(path);
+    const row = Array.from(listRef.current?.querySelectorAll("[title]") ?? []).find(
+      (el) => normPath(el.getAttribute("title") ?? "") === want,
+    );
+    if (row) {
+      row.scrollIntoView({ block: "center" });
+      return;
+    }
+    if (tries > 0) {
+      window.setTimeout(() => select(path, tries - 1), 60);
+      return;
+    }
+    showToast(`В дереве нет файла: ${path}`, { tone: "danger" });
+  };
+  const revealedSeq = useRef(0);
+  useEffect(() => {
+    if (!reveal || reveal.seq === revealedSeq.current) return;
+    revealedSeq.current = reveal.seq;
+    setRevealed(reveal.path);
+    const parts = reveal.path.split("/");
+    const dirs = parts.slice(0, -1).map((_, index) => parts.slice(0, index + 1).join("/"));
+    const opened = new Set(Object.keys(expanded));
+    void (async () => {
+      for (const dir of dirs) {
+        if (opened.has(dir)) continue;
+        await load(dir);
+        opened.add(dir);
+      }
+      select(reveal.path);
+    })();
+    // The ring is a pointer, not a state: it fades out on its own.
+    const timer = window.setTimeout(
+      () => setRevealed((prev) => (prev === reveal.path ? null : prev)),
+      2500,
+    );
+    return () => window.clearTimeout(timer);
+  }, [expanded, load, reveal]);
+
+  // A pinned entry keeps its place above its siblings, in the order it was pinned.
+  const rank = (path: string) => {
+    const index = pins.indexOf(path);
+    return index < 0 ? pins.length : index;
+  };
+  const ordered = (entries: EditorEntry[]) =>
+    entries.length < 2 ? entries : [...entries].sort((a, b) => rank(a.path) - rank(b.path));
 
   const rows: Array<{ entry: EditorEntry; depth: number }> = [];
   const walk = (dir: string, depth: number) => {
-    for (const entry of expanded[dir] ?? []) {
+    for (const entry of ordered(expanded[normPath(dir)] ?? [])) {
       rows.push({ entry, depth });
-      if (entry.dir && expanded[entry.path]) walk(entry.path, depth + 1);
+      if (entry.dir && expanded[normPath(entry.path)]) walk(entry.path, depth + 1);
     }
   };
   walk("", 0);
 
   return (
-    <div className={styles.treeList}>
+    <div className={styles.treeList} ref={listRef}>
       {rows.map(({ entry, depth }) => {
-        const open = entry.dir ? Boolean(expanded[entry.path]) : false;
+        const open = entry.dir ? Boolean(expanded[normPath(entry.path)]) : false;
         return (
           <button
             type="button"
             key={entry.path}
             title={entry.path}
-            className={`${styles.treeRow} ${entry.path === active ? styles.treeRowActive : ""}`}
-            onClick={() => (entry.dir ? void load(entry.path) : onOpen(entry.path))}
+            className={`${styles.treeRow} ${entry.path === active ? styles.treeRowActive : ""} ${normPath(entry.path) === normPath(revealed ?? "") ? styles.treeRowRevealed : ""}`}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              setPinMenu({ x: event.clientX, y: event.clientY, entry });
+            }}
+            onClick={() => {
+              setRevealed(null);
+              if (!entry.dir) {
+                onOpen(entry.path);
+                return;
+              }
+              // Second click on a folder folds it, the way a tree should.
+              if (expanded[normPath(entry.path)]) {
+                setExpanded((prev) => {
+                  // Folding a folder folds what was open inside it, as VS Code does;
+                  // otherwise the children would pop open again on the next expand.
+                  const next = { ...prev };
+                  const self = normPath(entry.path);
+                  const prefix = `${self}/`;
+                  for (const key of Object.keys(next)) {
+                    if (key === self || key.startsWith(prefix)) delete next[key];
+                  }
+                  writeTreeOpen(
+                    root,
+                    Object.keys(next).filter((item) => item !== ""),
+                  );
+                  return next;
+                });
+                return;
+              }
+              void load(entry.path);
+            }}
           >
             {Array.from({ length: depth }, (_, level) => (
               <span key={level} className={styles.guide} aria-hidden />
@@ -1730,17 +2654,246 @@ function Tree({
             <span className={`${styles.chevron} ${open ? styles.chevronOpen : ""}`} aria-hidden>
               {entry.dir ? (
                 <svg viewBox="0 0 16 16">
-                  <path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" strokeWidth="1.4" />
+                  <path
+                    d="M6 3.5 10.5 8 6 12.5"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.4"
+                  />
                 </svg>
               ) : null}
             </span>
             <TreeGlyph name={entry.name} dir={entry.dir} open={open} />
-            <span className={`${styles.label} ${changed.has(entry.path) ? styles.labelChanged : ""}`}>
+            <span
+              className={`${styles.label} ${changed.has(entry.path) ? styles.labelChanged : ""}`}
+            >
               {entry.name}
             </span>
+            {pins.includes(entry.path) ? (
+              <svg className={styles.pinMark} viewBox="0 0 16 16" aria-label="Закреплено">
+                <path
+                  d="M9.5 1.5 14.5 6.5 12 7l-.6 2.9L8 7.6 3.6 12l-.4-.4 4.4-4.4L5.4 4.6 8.3 4z"
+                  fill="currentColor"
+                />
+              </svg>
+            ) : null}
           </button>
         );
       })}
+      {pinMenu
+        ? createPortal(
+            <div
+              className={styles.menu}
+              role="menu"
+              style={{
+                left: Math.min(pinMenu.x, window.innerWidth - MENU_MIN_WIDTH - 8),
+                top: pinMenu.y,
+              }}
+              onPointerDown={(event) => event.stopPropagation()}
+            >
+              <button
+                type="button"
+                className={styles.menuItem}
+                onClick={() => {
+                  togglePin(pinMenu.entry.path);
+                  setPinMenu(null);
+                }}
+              >
+                <span>{pins.includes(pinMenu.entry.path) ? "Открепить" : "Закрепить вверху"}</span>
+                <span className={styles.menuKey} />
+              </button>
+              <button
+                type="button"
+                className={styles.menuItem}
+                onClick={() => {
+                  const path = pinMenu.entry.path;
+                  setPinMenu(null);
+                  void copyToClipboard(absOf(root, path), "Путь");
+                }}
+              >
+                <span>Копировать полный путь</span>
+              </button>
+              <button
+                type="button"
+                className={styles.menuItem}
+                onClick={() => {
+                  const path = pinMenu.entry.path;
+                  setPinMenu(null);
+                  void copyToClipboard(path, "Относительный путь");
+                }}
+              >
+                <span>Копировать относительный путь</span>
+              </button>
+            </div>,
+            document.body,
+          )
+        : null}
+    </div>
+  );
+}
+
+/** A folder or file of the «Изменения» view: git paths are flat, the view is not. */
+type ChangeNode = {
+  name: string;
+  path: string;
+  dir: boolean;
+  file?: GitChangedFileDto;
+  children: ChangeNode[];
+};
+
+function changeTreeOf(files: GitChangedFileDto[]): ChangeNode[] {
+  const roots: ChangeNode[] = [];
+  const byPath = new Map<string, ChangeNode>();
+  const node = (path: string, dir: boolean, file?: GitChangedFileDto): ChangeNode => {
+    const known = byPath.get(path);
+    if (known) {
+      if (file) known.file = file;
+      return known;
+    }
+    const created: ChangeNode = {
+      name: path.slice(path.lastIndexOf("/") + 1),
+      path,
+      dir,
+      file,
+      children: [],
+    };
+    byPath.set(path, created);
+    const cut = path.lastIndexOf("/");
+    if (cut < 0) roots.push(created);
+    else node(path.slice(0, cut), true).children.push(created);
+    return created;
+  };
+  for (const file of files) node(file.path, false, file);
+  const sort = (nodes: ChangeNode[]) => {
+    nodes.sort((a, b) => (a.dir === b.dir ? a.name.localeCompare(b.name) : a.dir ? -1 : 1));
+    for (const child of nodes) sort(child.children);
+  };
+  sort(roots);
+  return roots;
+}
+
+/**
+ * One git group as a tree, the way the source-control view reads: a heading with
+ * its own fold state, folders that fold, files that open their diff.
+ */
+function ChangeGroup({
+  title,
+  files,
+  repoRoot,
+  paneRoot,
+  view,
+  onOpen,
+  onMenu,
+}: {
+  title: string;
+  files: GitChangedFileDto[];
+  repoRoot: string;
+  paneRoot: string;
+  view: ChangeView;
+  onOpen: (path: string) => void;
+  onMenu: (event: ReactMouseEvent, path: string) => void;
+}) {
+  const [open, setOpen] = useState(true);
+  const [folded, setFolded] = useState<Record<string, boolean>>({});
+  const rows = useMemo(() => {
+    // A flat list is the same files with the whole path as the name: no folders
+    // to fold, nothing to hunt for in a deep tree.
+    if (view === "list") {
+      return [...files]
+        .sort((a, b) => a.path.localeCompare(b.path))
+        .map((file) => ({
+          node: { name: file.path, path: file.path, dir: false, file, children: [] } as ChangeNode,
+          depth: 0,
+        }));
+    }
+    const out: Array<{ node: ChangeNode; depth: number }> = [];
+    const walk = (nodes: ChangeNode[], depth: number) => {
+      for (const node of nodes) {
+        out.push({ node, depth });
+        if (node.dir && !folded[node.path]) walk(node.children, depth + 1);
+      }
+    };
+    walk(changeTreeOf(files), 0);
+    return out;
+  }, [files, folded, view]);
+  if (files.length === 0) return null;
+  return (
+    <div className={styles.changeGroup}>
+      <button
+        type="button"
+        className={styles.changeGroupHead}
+        aria-expanded={open}
+        onClick={() => setOpen((prev) => !prev)}
+      >
+        <span className={`${styles.chevron} ${open ? styles.chevronOpen : ""}`} aria-hidden>
+          <svg viewBox="0 0 16 16">
+            <path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" strokeWidth="1.4" />
+          </svg>
+        </span>
+        <span className={styles.changeGroupTitle}>{title}</span>
+        <span className={styles.changeGroupCount}>{files.length}</span>
+      </button>
+      {open
+        ? rows.map(({ node, depth }) => {
+            const where = repoToPane(repoRoot, paneRoot, node.path);
+            const letter = node.file
+              ? (node.file.index !== " " && node.file.index !== "?"
+                  ? node.file.index
+                  : node.file.worktree) || "?"
+              : "";
+            return (
+              <button
+                type="button"
+                key={node.path}
+                title={node.dir ? node.path : where ? node.path : `${node.path} — вне корня панели`}
+                className={`${styles.treeRow} ${styles.changeRow}`}
+                onClick={() => {
+                  if (node.dir) {
+                    setFolded((prev) => ({ ...prev, [node.path]: !prev[node.path] }));
+                    return;
+                  }
+                  if (where) onOpen(where);
+                }}
+                onContextMenu={(event) => {
+                  if (node.dir || !where) return;
+                  event.preventDefault();
+                  onMenu(event, where);
+                }}
+              >
+                {Array.from({ length: depth }, (_, level) => (
+                  <span key={level} className={styles.guide} aria-hidden />
+                ))}
+                <span
+                  className={`${styles.chevron} ${node.dir && !folded[node.path] ? styles.chevronOpen : ""}`}
+                  aria-hidden
+                >
+                  {node.dir ? (
+                    <svg viewBox="0 0 16 16">
+                      <path
+                        d="M6 3.5 10.5 8 6 12.5"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.4"
+                      />
+                    </svg>
+                  ) : (
+                    <span className={`${styles.changeBadge} ${letterClass(letter)}`}>{letter}</span>
+                  )}
+                </span>
+                {node.dir ? <TreeGlyph name={node.name} dir open={!folded[node.path]} /> : null}
+                <span className={`${styles.label} ${where ? styles.labelChanged : ""}`}>
+                  {node.name}
+                </span>
+                {node.file ? (
+                  <span className={styles.changeStat}>
+                    {node.file.additions > 0 ? `+${node.file.additions}` : ""}
+                    {node.file.deletions > 0 ? ` −${node.file.deletions}` : ""}
+                  </span>
+                ) : null}
+              </button>
+            );
+          })
+        : null}
     </div>
   );
 }

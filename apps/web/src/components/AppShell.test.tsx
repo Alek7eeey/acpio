@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { BrowserRouter } from "react-router-dom";
 import { DEFAULT_SETTINGS, type BoardDto, type SessionDto } from "@acpio/shared";
@@ -18,6 +18,11 @@ vi.mock("../pages/SettingsPage", () => ({
   SettingsPage: () => <div data-testid="settings-page" />,
 }));
 vi.mock("../pages/TasksPage", () => ({ TasksPage: () => <div data-testid="tasks-page" /> }));
+// The code pane is asked which folder it was given: one instance per folder is
+// the point, and the real page brings editors and language servers with it.
+vi.mock("../pages/EditorPage", () => ({
+  EditorPage: ({ root }: { root?: string }) => <div data-testid="editor-page" data-root={root ?? ""} />,
+}));
 
 // jsdom has no matchMedia, and modules the shell imports read it in their own
 // bodies — so it is in place before those imports run, not after them.
@@ -153,6 +158,37 @@ describe("the brand chip's way home", () => {
 
     expect(window.location.pathname).toBe("/board/b1");
     expect(screen.getByTestId("board-page")).toBeTruthy();
+  });
+
+  // Two panes on different folders: the folder you leave keeps its code pane —
+  // tab, buffers and all — and only the focused one is on screen.
+  it("keeps one editor per folder and shows the focused pane's", () => {
+    const other = { ...chat, id: "s3", cwd: "E:/other" };
+    useAppStore.setState({
+      settings: { ...DEFAULT_SETTINGS, locale: "ru" as const, editorSplit: "right" as const },
+      sessions: [chat, other],
+      chatPaneIds: [chat.id, other.id],
+      focusedPaneIndex: 0,
+    });
+    window.history.replaceState(null, "", "/chat");
+    const { container } = render(
+      <BrowserRouter>
+        <I18nProvider>
+          <AppShell />
+        </I18nProvider>
+      </BrowserRouter>,
+    );
+    const slots = () => Array.from(container.querySelectorAll<HTMLElement>(`.${styles.editorSlot}`));
+    expect(slots().map((slot) => slot.querySelector<HTMLElement>("[data-testid=editor-page]")?.dataset.root)).toEqual([
+      "E:/proj",
+    ]);
+
+    act(() => useAppStore.setState({ focusedPaneIndex: 1 }));
+
+    expect(slots()).toHaveLength(2);
+    const shown = slots().filter((slot) => !slot.hidden);
+    expect(shown).toHaveLength(1);
+    expect(shown[0].querySelector<HTMLElement>("[data-testid=editor-page]")?.dataset.root).toBe("E:/other");
   });
 
   // No board is lit: the chip is still the way to the chat.

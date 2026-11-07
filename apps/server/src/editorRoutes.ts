@@ -13,7 +13,13 @@ import {
   type ToolPreference,
 } from "./services/editorFs.js";
 import { getSettings } from "./services/settings.js";
-import { attachTypeScriptServer } from "./services/lspBridge.js";
+import {
+  attachTypeScriptServer,
+  editorServerMemory,
+  killAllEditorServers,
+  killEditorServer,
+  listEditorServers,
+} from "./services/lspBridge.js";
 
 const treeQuery = z.object({ root: z.string().min(1), path: z.string().default("") });
 const fileQuery = z.object({ root: z.string().min(1), path: z.string().min(1) });
@@ -27,7 +33,8 @@ const resolveBody = z.object({
 const declarationBody = z.object({
   root: z.string().min(1),
   path: z.string().min(1),
-  spec: z.string().min(1),
+  // Empty: the name is not imported, so it must be declared in this very file.
+  spec: z.string(),
   name: z.string().min(1),
 });
 
@@ -151,6 +158,23 @@ export async function registerEditorRoutes(app: FastifyInstance): Promise<void> 
     } catch (err) {
       return fail(reply, err);
     }
+  });
+
+  // What the server holds for open panes: the memory a closed pane gives back —
+  // including the panes of windows that are gone.
+  app.get("/api/editor/servers", async (_req, reply) => {
+    const servers = listEditorServers();
+    const memory = await editorServerMemory(servers.map((server) => server.pid));
+    return reply.send({
+      servers: servers.map((server) => ({ ...server, rss: memory[server.pid] ?? 0 })),
+    });
+  });
+
+  app.post("/api/editor/servers/kill", async (req, reply) => {
+    const parsed = z.object({ id: z.number().int().optional() }).safeParse(req.body ?? {});
+    if (!parsed.success) return reply.status(400).send({ error: "id must be a number" });
+    const killed = parsed.data.id == null ? killAllEditorServers() : Number(killEditorServer(parsed.data.id));
+    return reply.send({ killed });
   });
 
   app.get("/ws/editor/lsp", { websocket: true }, (socket, req) => {
