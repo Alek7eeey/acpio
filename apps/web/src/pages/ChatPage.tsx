@@ -5288,11 +5288,11 @@ function ChatThread() {
     });
   }, [slashCommands, slashCtx]);
   const slashLoading = slashListStillLoading(activeSession?.slashCommands);
-  // A parked question is not a running turn: the agent is not reading the
-  // composer, so the menu belongs to the reader choosing a skill to answer with.
+  // The composer stays open during a turn and queues what is typed into it, so
+  // the menu belongs to whatever the reader is writing — the queued prompt asks
+  // for a skill the same way a parked question does.
   const slashMenuOpen =
     !slashMenuDismissed &&
-    (!turnBusy || questionParked) &&
     slashCtx != null &&
     (slashLoading || filteredSlashCommands.length > 0);
 

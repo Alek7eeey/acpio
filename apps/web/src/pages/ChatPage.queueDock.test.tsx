@@ -7,6 +7,7 @@
 // it rides inside it and stays on the line right above the input.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { cleanup, render } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { DEFAULT_SETTINGS, type SessionDetailDto } from "@acpio/shared";
 import { useAppStore } from "../lib/store";
@@ -127,5 +128,39 @@ describe("the prompt queue of an empty chat", () => {
     const composer = container.querySelector("textarea")?.closest("form");
     expect(composer).toBeTruthy();
     expect(composer!.contains(queue!)).toBe(true);
+  }, 20_000);
+});
+
+// A prompt typed while the agent answers goes into the queue rather than to the
+// turn, so the composer has to offer what the queued prompt may name — a skill
+// chosen from the slash menu. The menu was shut for the whole turn, which left
+// `/` as dead text until the answer finished.
+describe("a prompt typed into the queue mid-turn", () => {
+  it("opens the slash menu like any other draft", async () => {
+    const running: SessionDetailDto = {
+      ...emptyChat(),
+      status: "running",
+      slashCommands: [{ name: "ponytail", description: "Ленивый режим (project skill)" }],
+    };
+    useAppStore.setState({
+      sessions: [running],
+      activeSession: running,
+      sessionDetails: { s1: running },
+      inflightBySession: { s1: 1 },
+    });
+    const { container } = render(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <I18nProvider>
+          <ChatPage />
+        </I18nProvider>
+      </MemoryRouter>,
+    );
+    const input = container.querySelector("textarea");
+    expect(input).toBeTruthy();
+    await userEvent.type(input!, "/");
+
+    // The menu is a portal on the body, not a child of the composer.
+    const menu = document.querySelector('[role="listbox"]');
+    expect(menu?.textContent).toContain("/ponytail");
   }, 20_000);
 });
