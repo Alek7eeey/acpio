@@ -150,12 +150,17 @@ const RULES: ReadonlyArray<{ id: string; text: string }> = [
   // list in its answer makes the reader read the same steps twice. The plan is a
   // file (`.acpio/plan.md`) and two stages: `draft` is what the reader is still
   // reading, `applying` is what they approved — and only an approved plan is
-  // work the turn owes.
+  // work the turn owes. It is also gated on a trigger: a plan for every task of
+  // more than one step is a plan the reader scrolls past, so the rule names the
+  // three cases that call for one and leaves the rest of the work alone.
   {
     id: "plan",
     text:
-      "A task longer than a couple of steps goes into the plan file `.acpio/plan.md` before the " +
-      "first step: a title, an `## Overview` of a line or two, the steps as `- [ ]` lines under " +
+      "A plan is made in three cases only: the user asks for one, the `plan` skill is invoked " +
+      "(`/plan <task>`), or the change is large — many files, or the steps are not clear yet — " +
+      "and you say so before starting. With none of the three, do the work straight away and " +
+      "publish no plan. Otherwise the plan goes into the file `.acpio/plan.md` before the first " +
+      "step: a title, an `## Overview` of a line or two, the steps as `- [ ]` lines under " +
       "`## Шаги` (`- [~]` while you work one, `- [x]` when it lands), then the files, the " +
       "reasoning and how it will be checked in the sections after them. Write it with the `plan` " +
       "tool, or with `write`/`edit` and then `plan` with no arguments to republish it; call " +

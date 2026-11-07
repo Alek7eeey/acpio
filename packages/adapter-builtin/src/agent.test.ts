@@ -165,6 +165,15 @@ describe("system prompt rules", () => {
     expect(build([], "", false)).toContain("Make the smallest change that fully solves the task.");
   });
 
+  it("asks for a plan on a trigger, not for every task of more than one step", () => {
+    const prompt = build([]);
+    expect(prompt).toContain("A plan is made in three cases only");
+    expect(prompt).toContain("the user asks for one");
+    expect(prompt).toContain("`/plan <task>`");
+    expect(prompt).toContain("many files");
+    expect(prompt).toContain("publish no plan");
+  });
+
   it("names rules a skill's `supersedes` may refer to", () => {
     expect(RULE_IDS).toContain("smallest-change");
     expect(new Set(RULE_IDS).size).toBe(RULE_IDS.length);

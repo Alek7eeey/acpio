@@ -1,11 +1,23 @@
 ---
 name: plan
-description: Plan a task before touching code — the turn ends with a plan the reader approves, not with a half-done implementation. Use for "/plan", "plan it first", "plan only", "no code yet", "break it into steps", or any request to design an approach before anything is changed.
+description: Plan a task before touching code — the turn ends with a plan the reader approves, not with a half-done implementation. Use for "/plan", "plan it first", "plan only", "no code yet", "break it into steps", any request to design an approach before anything is changed, or a change you judge too large to start without one.
 ---
 
 # Plan
 
-The deliverable of the turn is the plan. Reading, searching and running read-only commands are the work; edits, writes outside the plan file, and anything that changes the project are not — nothing has been approved yet.
+## When
+
+A plan is made in three cases only:
+
+- the user asks for one — «составь план», "plan it first", "сначала план";
+- the skill is invoked — `/plan <task>`;
+- you find the change large: many files, or the steps are not clear yet — and you say so before starting.
+
+With none of the three the work is done straight away and nothing goes to the panel: a plan nobody asked for is a plan the reader scrolls past.
+
+## The turn
+
+Once a trigger holds, the deliverable of the turn is the plan. Reading, searching and running read-only commands are the work; edits, writes outside the plan file, and anything that changes the project are not — nothing has been approved yet.
 
 ## The plan itself
 
