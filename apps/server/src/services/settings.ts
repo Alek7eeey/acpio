@@ -701,7 +701,7 @@ function stripSecrets(bag: Record<string, unknown>): Record<string, unknown> {
   for (const key of SECRET_SETTING_KEYS) delete out[key];
   // Typed drafts are one user's own text, not a setting anyone inherits.
   delete out.composerDrafts;
-  // Providers (the endpoints, their models and the key each pays with) are the
+  // Providers (the endpoints, their models and the keys they pay with) are the
   // machine's own setup: they are neither written into a file nor taken from
   // one, so an import leaves the local list exactly as it was.
   delete out.builtinProviders;

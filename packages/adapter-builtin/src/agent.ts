@@ -22,6 +22,7 @@ import {
   type BuiltinModelSelection,
 } from "./config.js";
 import { createHostRpc } from "./host.js";
+import { providerFetch } from "./keys.js";
 import {
   OffloadStore,
   offloadToolResults,
@@ -313,7 +314,7 @@ export function fillReasoningEcho(messages: unknown, thinking = false): unknown 
 }
 
 /**
- * Endpoint client for one provider: its URL, key and headers, plus any extra
+ * Endpoint client for one provider: its URL, its keys and headers, plus any extra
  * request body the provider configures (Settings → Built-in agent). The extra
  * object merges over the built body, so a provider-specific knob the
  * OpenAI-compatible schema has no field for — MiMo's `thinking`, an
@@ -333,7 +334,10 @@ function builtinEndpoint(
   return createOpenAICompatible({
     name: `builtin:${provider.id}`,
     baseURL: provider.url,
-    apiKey: provider.apiKey || undefined,
+    // No `apiKey` here: the provider may carry several (Settings → Built-in
+    // agent → Providers), so `providerFetch` puts one on every request and, on a
+    // key that cannot pay, sends the same request again on the next one.
+    fetch: providerFetch(provider),
     // Most OpenAI-compatible servers only report usage when asked to.
     includeUsage: true,
     headers: builtinProviderHeaders(provider.headers, sessionId),

@@ -465,14 +465,14 @@ describe("Built-in providers", () => {
     id: "p1",
     name: "Ollama",
     url: "http://localhost:11434/v1",
-    apiKey: "",
+    apiKeys: [],
     models: [{ id: "qwen", label: "Qwen", contextWindow: 32_000 }],
   };
   const providerB = {
     id: "p2",
     name: "OpenRouter",
     url: "https://openrouter.ai/api/v1",
-    apiKey: "sk-x",
+    apiKeys: ["sk-x"],
     models: [],
   };
 
@@ -530,6 +530,42 @@ describe("Built-in providers", () => {
     expect(rows[0]).toMatchObject({ id: "p1", name: "Ollama", url: "http://localhost:11434/v2" });
     expect(rows[0]?.models).toEqual(providerA.models);
     expect(rows[1]).toMatchObject({ id: expect.any(String), name: "", url: "" });
+  });
+
+  it("holds a pool of keys and the mode that spends it", async () => {
+    const user = userEvent.setup();
+    const { container } = renderProviders();
+    await user.click(cardSummary(providerCards(container)[0]!));
+
+    // No key yet: a local endpoint needs none, so the list starts empty.
+    expect(screen.queryByLabelText("Ollama · API keys 1")).toBeNull();
+    const addKey = () => user.click(screen.getAllByRole("button", { name: /\+ Add key/ })[0]!);
+
+    await addKey();
+    await user.type(screen.getByLabelText("Ollama · API keys 1"), "sk-1");
+    // One key has nothing to choose between; the mode appears with the second.
+    expect(screen.queryByRole("button", { name: "Switch on exhaustion" })).toBeNull();
+
+    await addKey();
+    await user.type(screen.getByLabelText("Ollama · API keys 2"), "sk-2");
+
+    const rotate = screen.getByRole("button", { name: "Rotate every request" });
+    const exhaust = screen.getByRole("button", { name: "Switch on exhaustion" });
+    // A list of keys is there to be spread, so that is what it defaults to.
+    expect(rotate.getAttribute("aria-pressed")).toBe("true");
+    await user.click(exhaust);
+    expect(exhaust.getAttribute("aria-pressed")).toBe("true");
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(apiMock.updateSettings).toHaveBeenCalled());
+    const patch = apiMock.updateSettings.mock.calls.at(-1)?.[0] as {
+      builtinProviders?: Array<{ id: string; apiKeys?: string[]; apiKeyMode?: string }>;
+    };
+    expect(patch.builtinProviders?.[0]).toMatchObject({
+      id: "p1",
+      apiKeys: ["sk-1", "sk-2"],
+      apiKeyMode: "exhausted",
+    });
   });
 
   // The leaf used to paint the name, endpoint, key, headers and model rows of
@@ -706,7 +742,7 @@ describe("Chat title from a model", () => {
     id: "p1",
     name: "Ollama",
     url: "http://localhost:11434/v1",
-    apiKey: "",
+    apiKeys: [],
     models: [{ id: "qwen", label: "Qwen", contextWindow: 32_000 }],
   };
 

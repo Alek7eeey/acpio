@@ -207,6 +207,8 @@ export function settingsSearchIndex(
       t("settings.builtinUrlHint"),
       t("settings.builtinKeyTitle"),
       t("settings.builtinKeyHint"),
+      t("settings.builtinKeysAdd"),
+      t("settings.builtinKeyMode"),
       t("settings.builtinHeadersTitle"),
       t("settings.builtinHeadersHint"),
       t("settings.builtinBodyTitle"),
@@ -455,6 +457,9 @@ function settingsRowHints(t: TranslateFn): Record<SettingsLeaf, string[]> {
     providers: [
       t("settings.builtinUrlHint"),
       t("settings.builtinKeyHint"),
+      t("settings.builtinKeyModeHint"),
+      t("settings.builtinKeyModeRotate"),
+      t("settings.builtinKeyModeExhausted"),
       t("settings.builtinHeadersHint", { sessionId: "{{sessionId}}" }),
       t("settings.builtinModelsHint"),
       t("settings.builtinProvidersHint"),

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_SETTINGS,
   builtinProviderHeaders,
+  builtinProviderKeys,
   normalizeBuiltinProviders,
 } from "./index.js";
 import {
@@ -356,7 +357,7 @@ describe("mergeClientAppSettings", () => {
         id: "legacy",
         name: "Default",
         url: "http://localhost:11434/v1",
-        apiKey: "",
+        apiKeys: [],
         models: [{ id: "m1", label: "m1", contextWindow: 128_000 }],
       },
     ]);
@@ -379,7 +380,7 @@ describe("normalizeBuiltinProviders", () => {
         id: "legacy",
         name: "Основной",
         url: "http://localhost:11434/v1",
-        apiKey: "sk-test",
+        apiKeys: ["sk-test"],
         models: [{ id: "qwen", label: "qwen", contextWindow: 128_000 }],
       },
     ]);
@@ -444,7 +445,7 @@ describe("normalizeBuiltinProviders", () => {
       ],
     };
     expect(normalizeBuiltinProviders(raw)).toEqual([
-      { id: "p1", name: "http://a/v1", url: "http://a/v1", apiKey: "", models: [] },
+      { id: "p1", name: "http://a/v1", url: "http://a/v1", apiKeys: [], models: [] },
     ]);
   });
 
@@ -469,7 +470,7 @@ describe("normalizeBuiltinProviders", () => {
             "junk",
           ],
         },
-        { id: "p2", name: "Bare", url: "http://a/v1", apiKey: "", models: [] },
+        { id: "p2", name: "Bare", url: "http://a/v1", apiKeys: [], models: [] },
       ],
     };
     expect(normalizeBuiltinProviders(raw)).toEqual([
@@ -477,12 +478,56 @@ describe("normalizeBuiltinProviders", () => {
         id: "p1",
         name: "OpenCode",
         url: "https://opencode.ai/v1",
-        apiKey: "",
+        apiKeys: [],
         models: [],
         headers: [{ name: "x-opencode-session", value: "{{sessionId}}" }],
       },
-      { id: "p2", name: "Bare", url: "http://a/v1", apiKey: "", models: [] },
+      { id: "p2", name: "Bare", url: "http://a/v1", apiKeys: [], models: [] },
     ]);
+  });
+});
+
+describe("normalizeBuiltinProviders: keys", () => {
+  it("keeps a key list, its order and its mode", () => {
+    const raw = {
+      builtinProviders: [
+        {
+          id: "p1",
+          name: "Pooled",
+          url: "https://api.example/v1",
+          apiKeys: [" sk-a ", "sk-b", "sk-a", "", 7],
+          apiKeyMode: "exhausted",
+          models: [],
+        },
+      ],
+    };
+    expect(normalizeBuiltinProviders(raw)[0]).toMatchObject({
+      apiKeys: ["sk-a", "sk-b"],
+      apiKeyMode: "exhausted",
+    });
+  });
+
+  it("drops the default mode and an unknown one", () => {
+    const rows = [
+      { id: "a", url: "http://a/v1", apiKeys: ["k"], apiKeyMode: "rotate", models: [] },
+      { id: "b", url: "http://b/v1", apiKeys: ["k"], apiKeyMode: "sometimes", models: [] },
+    ];
+    const [a, b] = normalizeBuiltinProviders({ builtinProviders: rows });
+    expect("apiKeyMode" in a).toBe(false);
+    expect("apiKeyMode" in b).toBe(false);
+  });
+
+  it("folds a legacy single key into the list and reads it back", () => {
+    const [row] = normalizeBuiltinProviders({
+      builtinProviders: [{ id: "p1", url: "http://a/v1", apiKey: "sk-old", models: [] }],
+    });
+    expect(row.apiKeys).toEqual(["sk-old"]);
+    expect("apiKey" in row).toBe(false);
+    // Whatever shape a row is in, the reader takes the list, then the legacy key.
+    expect(builtinProviderKeys(row)).toEqual(["sk-old"]);
+    expect(builtinProviderKeys({ apiKey: "sk-plugin" })).toEqual(["sk-plugin"]);
+    expect(builtinProviderKeys({ apiKeys: ["sk-list"], apiKey: "sk-old" })).toEqual(["sk-list"]);
+    expect(builtinProviderKeys({})).toEqual([]);
   });
 });
 

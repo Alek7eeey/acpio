@@ -6,7 +6,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "./db/client.js";
 import { messages, messageParts, sessions } from "./db/schema.js";
 import { defaultSessionTitle, errorMessage } from "@acpio/i18n";
-import { BUILD_INFO, EDITOR_SPLITS, EDITOR_THEMES, EDITOR_TOOL_SOURCES, CONSOLE_TERMINAL_LIMITS, CUSTOM_AGENT_MAX, BUILTIN_MAX_OUTPUT_TOKENS_MAX, BUILTIN_TURN_RETRY_ATTEMPTS_MIN, BUILTIN_TURN_RETRY_ATTEMPTS_MAX, BUILTIN_THINKING_LIMIT_MAX, BUILTIN_BASH_TIMEOUT_SEC_MIN, BUILTIN_BASH_TIMEOUT_SEC_MAX, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MIN, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MAX, BUILTIN_KEEP_RECENT_PERCENT_MIN, BUILTIN_KEEP_RECENT_PERCENT_MAX, BUILTIN_MAX_SUMMARY_TOKENS_MAX, BUILTIN_PRUNE_TOOL_RESULTS_KEEP_LAST_MAX, CHAT_TITLE_MAX_LEN_MIN, CHAT_TITLE_MAX_LEN_MAX, isShellSession, canonicalCwd, normalizeBuiltinSubagents, normalizeSkillModes, BUILTIN_PRESET_MAX, normalizeBuiltinPresets, SHELL_SESSION_PROVIDER, titleFromTaskDescription, titleFromUserText, titleFromSlashCommand } from "@acpio/shared";
+import { BUILD_INFO, EDITOR_SPLITS, EDITOR_THEMES, EDITOR_TOOL_SOURCES, CONSOLE_TERMINAL_LIMITS, CUSTOM_AGENT_MAX, BUILTIN_MAX_OUTPUT_TOKENS_MAX, BUILTIN_TURN_RETRY_ATTEMPTS_MIN, BUILTIN_TURN_RETRY_ATTEMPTS_MAX, BUILTIN_THINKING_LIMIT_MAX, BUILTIN_BASH_TIMEOUT_SEC_MIN, BUILTIN_BASH_TIMEOUT_SEC_MAX, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MIN, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MAX, BUILTIN_KEEP_RECENT_PERCENT_MIN, BUILTIN_KEEP_RECENT_PERCENT_MAX, BUILTIN_MAX_SUMMARY_TOKENS_MAX, BUILTIN_PRUNE_TOOL_RESULTS_KEEP_LAST_MAX, CHAT_TITLE_MAX_LEN_MIN, CHAT_TITLE_MAX_LEN_MAX, isShellSession, canonicalCwd, normalizeBuiltinSubagents, normalizeSkillModes, BUILTIN_PRESET_MAX, normalizeBuiltinPresets, SHELL_SESSION_PROVIDER, titleFromTaskDescription, titleFromUserText, titleFromSlashCommand, builtinProviderKeys, BUILTIN_MAX_PROVIDER_KEYS, BUILTIN_MAX_KEY_LENGTH } from "@acpio/shared";
 import {
   buildSettingsFile,
   forgetMcpFolderConfig,
@@ -258,7 +258,14 @@ const settingsSchema = z.object({
         id: z.string().min(1).max(64),
         name: z.string().max(120).optional(),
         url: z.string().max(500).optional(),
-        apiKey: z.string().max(500).optional(),
+        // The pool a provider is called with, in rotation order (Settings →
+        // Built-in agent → Providers). `apiKey` is the single-key row every
+        // install had before the list existed: still accepted, so a client that
+        // has not been updated cannot silently drop a configured key — healing
+        // folds both into `apiKeys`.
+        apiKeys: z.array(z.string().max(BUILTIN_MAX_KEY_LENGTH)).max(BUILTIN_MAX_PROVIDER_KEYS).optional(),
+        apiKeyMode: z.enum(["rotate", "exhausted"]).optional(),
+        apiKey: z.string().max(BUILTIN_MAX_KEY_LENGTH).optional(),
         enabled: z.boolean().optional(),
         models: z
           .array(
@@ -802,7 +809,12 @@ export async function registerRoutes(app: FastifyInstance) {
     const settings = await getSettings();
     const fallback = settings.builtinProviders[0];
     const url = body.url !== undefined ? body.url : (fallback?.url ?? "");
-    const apiKey = body.apiKey !== undefined ? body.apiKey : (fallback?.apiKey ?? "");
+    const apiKey =
+      body.apiKey !== undefined
+        ? body.apiKey
+        : // A probe is one call: it uses the pool's first key rather than
+          // spending a turn of the rotation on a health check.
+          (fallback ? (builtinProviderKeys(fallback)[0] ?? "") : "");
     const headers = body.headers !== undefined ? body.headers : fallback?.headers;
     const result = await fetchBuiltinModelCatalog(url, apiKey, { headers });
     if (result.ok) return result;

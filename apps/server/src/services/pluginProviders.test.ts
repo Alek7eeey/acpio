@@ -80,7 +80,7 @@ describe("a provider a plugin ships", () => {
       id: "plugin:e2e:zen",
       name: "Zen",
       url: "https://zen.example/v1",
-      apiKey: "",
+      apiKeys: [],
       apiKeyHint: "https://zen.example/keys",
       pluginId: "e2e:zen",
     });
@@ -96,7 +96,7 @@ describe("a provider a plugin ships", () => {
   it("turns on as soon as the user's key is there", async () => {
     await updateSettings({ pluginProviders: { "e2e:zen": { apiKey: "sk-test" } } });
     const row = await providerRow();
-    expect(row?.apiKey).toBe("sk-test");
+    expect(row?.apiKeys).toEqual(["sk-test"]);
     expect(row?.enabled).toBe(true);
   });
 

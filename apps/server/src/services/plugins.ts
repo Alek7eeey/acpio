@@ -193,7 +193,10 @@ export function pluginProviders(settings: AppSettings): BuiltinProviderConfig[] 
       id: pluginProviderRowId(p.pluginId, p.providerId),
       name: p.label,
       url: user?.urlOverride?.trim() || p.baseUrl,
-      apiKey,
+      // One key: a plugin ships an endpoint, and what pays for it is the user's
+      // own — the pool is a feature of the rows the user configures himself
+      // (Settings → Built-in agent → Providers).
+      apiKeys: apiKey ? [apiKey] : [],
       enabled: user?.enabled ?? (p.apiKeyOptional === true || Boolean(apiKey)),
       models: mergeProviderModels(p.models, user?.models),
       ...(p.headers?.length ? { headers: p.headers } : {}),

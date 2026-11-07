@@ -1480,8 +1480,23 @@ export interface BuiltinProviderConfig {
   name: string;
   /** Base URL of an OpenAI-compatible API; empty = provider switched off. */
   url: string;
-  /** Sent as a Bearer token ("" for local endpoints that need no key). */
-  apiKey: string;
+  /**
+   * The keys this provider may be called with, in the order they are used
+   * (Settings → Built-in agent → Providers). Sent as a Bearer token; empty = no
+   * key, which is what a local endpoint needs.
+   */
+  apiKeys: string[];
+  /**
+   * How the list above is spent: `"rotate"` (the default) takes the next key on
+   * every request, `"exhausted"` keeps one until the endpoint says it is spent.
+   */
+  apiKeyMode?: BuiltinKeyMode;
+  /**
+   * The single key rows were written with before the list existed — read-only.
+   * Healing folds it into {@link apiKeys}, and a provider a plugin ships carries
+   * its one key here; nothing writes it back (see `builtinProviderKeys`).
+   */
+  apiKey?: string;
   /**
    * Whether this provider's models are offered in pickers. Absent = enabled
    * (rows written before this flag existed). A switched-off provider keeps its
@@ -1509,6 +1524,65 @@ export interface BuiltinProviderConfig {
   pluginId?: string;
   /** Where the user gets a key for a plugin's provider. */
   apiKeyHint?: string;
+}
+
+/**
+ * What a provider does with several keys (Settings → Built-in agent →
+ * Providers). `"rotate"` spreads every request over the list, so a set of keys
+ * behaves as one bigger quota; `"exhausted"` stays on one key — the cached
+ * prefix, the bill, the raise all stay in one place — and moves on only when
+ * the endpoint answers that the key is out.
+ */
+export type BuiltinKeyMode = "rotate" | "exhausted";
+
+export const BUILTIN_KEY_MODES: readonly BuiltinKeyMode[] = ["rotate", "exhausted"];
+
+/** Absent `apiKeyMode` means rotate: a list of keys is there to be spread. */
+export const BUILTIN_KEY_MODE_DEFAULT: BuiltinKeyMode = "rotate";
+
+/** A provider's key list ceiling — enough to pool a team's quota, not a vault. */
+export const BUILTIN_MAX_PROVIDER_KEYS = 20;
+
+/** Same cap a single key has been stored with; longer is a paste, not a key. */
+export const BUILTIN_MAX_KEY_LENGTH = 500;
+
+/** `apiKeyMode` as stored/sent — anything unknown falls back to the default. */
+export function normalizeBuiltinKeyMode(mode: unknown): BuiltinKeyMode {
+  const word = typeof mode === "string" ? mode.trim().toLowerCase() : "";
+  return (BUILTIN_KEY_MODES as readonly string[]).includes(word)
+    ? (word as BuiltinKeyMode)
+    : BUILTIN_KEY_MODE_DEFAULT;
+}
+
+/**
+ * A key list as stored: trimmed, empties and duplicates dropped, capped. A bare
+ * string is the legacy single key (and how a plugin's provider comes in).
+ */
+export function normalizeBuiltinKeyList(raw: unknown): string[] {
+  const rows = typeof raw === "string" ? [raw] : Array.isArray(raw) ? raw : [];
+  const out: string[] = [];
+  for (const row of rows) {
+    if (typeof row !== "string") continue;
+    const key = row.trim().slice(0, BUILTIN_MAX_KEY_LENGTH);
+    if (!key || out.includes(key)) continue;
+    out.push(key);
+    if (out.length >= BUILTIN_MAX_PROVIDER_KEYS) break;
+  }
+  return out;
+}
+
+/**
+ * The keys a provider is called with, whichever shape the row is in: the list,
+ * else the legacy single key. Every reader goes through this so a row written
+ * before the list existed — or a provider a plugin ships — keeps working.
+ */
+export function builtinProviderKeys(provider: {
+  apiKeys?: unknown;
+  apiKey?: string;
+}): string[] {
+  const keys = normalizeBuiltinKeyList(provider.apiKeys);
+  if (keys.length) return keys;
+  return normalizeBuiltinKeyList(provider.apiKey);
 }
 
 /** What the user changed in a provider a plugin ships, keyed `<pluginId>:<providerId>`. */
@@ -1624,7 +1698,7 @@ export function normalizeBuiltinProviders(settings: unknown): BuiltinProviderCon
           id: "legacy",
           name: raw.locale === "ru" ? "Основной" : "Default",
           url: url.slice(0, 500),
-          apiKey: apiKey.slice(0, 500),
+          apiKeys: apiKey ? [apiKey.slice(0, BUILTIN_MAX_KEY_LENGTH)] : [],
           models,
         },
       ];
@@ -1659,8 +1733,16 @@ export function healBuiltinProviders(raw: unknown): BuiltinProviderConfig[] {
       id,
       name: name || url || id,
       url,
-      apiKey: typeof r.apiKey === "string" ? r.apiKey.trim().slice(0, 500) : "",
+      // A row written before the list existed carries one `apiKey` — same key,
+      // same behaviour, one shape from here on.
+      apiKeys: normalizeBuiltinKeyList(
+        Array.isArray(r.apiKeys) && r.apiKeys.length ? r.apiKeys : r.apiKey,
+      ),
       models: normalizeBuiltinModelRows(r.models),
+      // Conditional: the default (rotate) is what an absent field means.
+      ...(normalizeBuiltinKeyMode(r.apiKeyMode) === BUILTIN_KEY_MODE_DEFAULT
+        ? {}
+        : { apiKeyMode: normalizeBuiltinKeyMode(r.apiKeyMode) }),
       // Conditional: a row written before the switch existed stays enabled.
       ...(r.enabled === false ? { enabled: false as const } : {}),
       // Conditional: settings written before headers existed keep their shape.

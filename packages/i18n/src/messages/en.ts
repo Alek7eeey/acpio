@@ -563,8 +563,16 @@ export const en = {
     builtinUrlTitle: "Endpoint",
     builtinUrlHint:
       "Base URL of an OpenAI-compatible API, e.g. https://api.openai.com/v1 or http://localhost:11434/v1. Empty switches this provider off.",
-    builtinKeyTitle: "API key",
-    builtinKeyHint: "Sent as a Bearer token. Leave empty for local endpoints that need no key.",
+    builtinKeyTitle: "API keys",
+    builtinKeyHint:
+      "Sent as a Bearer token. Several keys may be listed — the row order is the order they are used. Leave empty for local endpoints that need no key.",
+    builtinKeysAdd: "Add key",
+    builtinKeysRemove: "Remove key",
+    builtinKeyMode: "Key mode",
+    builtinKeyModeHint:
+      "Rotate: every new request takes the next key, so a set of keys works as one bigger quota. Switch on exhaustion: the same key stays in use until the endpoint answers that it is spent (401/402/403/429) — then the same request is resent with the next key.",
+    builtinKeyModeRotate: "Rotate every request",
+    builtinKeyModeExhausted: "Switch on exhaustion",
     builtinHeadersTitle: "Extra HTTP headers",
     builtinHeadersHint:
       "Sent with every agent request to this provider. {{sessionId}} in a value is replaced with the chat's session id; rows carrying it are skipped for the model-list probe.",

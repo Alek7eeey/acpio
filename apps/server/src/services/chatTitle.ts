@@ -12,6 +12,7 @@ import {
 import {
   builtinModelOptions,
   initialModelId,
+  nextProviderKey,
   resolveBuiltinModel,
   type BuiltinModelSelection,
 } from "@acpio/adapter-builtin";
@@ -160,11 +161,11 @@ export async function generateChatTitle(
   const base = selection.provider.url.trim().replace(/\/+$/, "");
   if (!base) return null;
 
-  const headers: Record<string, string> = { "content-type": "application/json" };
-  const key = selection.provider.apiKey.trim();
-  if (key) headers.Authorization = `Bearer ${key}`;
+  const baseHeaders: Record<string, string> = { "content-type": "application/json" };
   // Header rows may carry {{sessionId}} — resolve it the way the agent does.
-  Object.assign(headers, builtinProviderHeaders(selection.provider.headers, sessionId));
+  Object.assign(baseHeaders, builtinProviderHeaders(selection.provider.headers, sessionId));
+  // A provider that sets Authorization itself pays with that, not with a key.
+  const ownAuth = Object.keys(baseHeaders).some((name) => name.toLowerCase() === "authorization");
 
   const locale = settings.locale === "en" ? "en" : "ru";
   const maxLen = normalizeChatTitleMaxLen(settings.chatTitleMaxLen);
@@ -185,6 +186,10 @@ export async function generateChatTitle(
 
   /** One attempt: the answer, or `retry` when only another try can help. */
   const ask = async (): Promise<{ answer?: string; retry?: boolean }> => {
+    // A key per attempt, from the provider's pool: the rotation the agent's own
+    // requests follow, so a title never keeps knocking with a refused key.
+    const key = ownAuth ? "" : nextProviderKey(selection.provider);
+    const headers = key ? { ...baseHeaders, Authorization: `Bearer ${key}` } : baseHeaders;
     let res: Response;
     try {
       res = await fetch(`${base}/chat/completions`, {

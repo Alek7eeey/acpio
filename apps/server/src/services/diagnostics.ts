@@ -42,7 +42,10 @@ function redactSettings(settings: AppSettings): Record<string, unknown> {
     // never its key; a header value is a credential as often as not.
     builtinProviders: builtinProviders.map((p) => ({
       ...p,
-      apiKey: p.apiKey ? "[set]" : "",
+      // Every key of the pool, masked one by one — a dump says whether a key is
+      // configured, never what it is.
+      apiKeys: (p.apiKeys ?? []).map((key) => (key ? "[set]" : "")),
+      ...(p.apiKey === undefined ? {} : { apiKey: p.apiKey ? "[set]" : "" }),
       ...(p.headers?.length
         ? {
             headers: p.headers.map((h) => ({ name: h.name, value: h.value ? "[set]" : "" })),

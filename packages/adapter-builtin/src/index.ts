@@ -65,6 +65,14 @@ export {
 } from "./config.js";
 
 /**
+ * The key pool of a provider (Settings → Built-in agent → Providers). The server
+ * needs the same pick outside the agent: a chat title and the model-catalog
+ * probe are calls to the same endpoint, and neither may keep hammering a key the
+ * endpoint has already refused.
+ */
+export { nextProviderKey, providerFetch, resetProviderKeyCursors } from "./keys.js";
+
+/**
  * Built-in harness: the agent runs inside the server instead of being spawned,
  * so there is no CLI to install and no `command`/`args` to configure. Everything
  * user-facing lives in Settings → Built-in agent: one or more OpenAI-compatible

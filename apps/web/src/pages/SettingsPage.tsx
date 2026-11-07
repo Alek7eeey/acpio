@@ -19,6 +19,7 @@ import {
   type AgentProvider,
   type AppSettings,
   type AttachSource,
+  type BuiltinKeyMode,
   type BuiltinProviderConfig,
   type BuiltinSubagentsSetting,
   type ChatActionId,
@@ -54,6 +55,7 @@ import {
   BUILTIN_BASH_TIMEOUT_SEC_MIN,
   BUILTIN_BASH_TIMEOUT_SEC_MAX,
   normalizeBuiltinBashTimeoutSec,
+  normalizeBuiltinKeyMode,
   normalizeBuiltinMaxOutputTokens,
   normalizeBuiltinThinkingLimit,
   normalizeBuiltinTurnRetryAttempts,
@@ -85,6 +87,7 @@ import { highlightText, matchAny, SearchGate, SettingsSearchProvider, settingsSe
 import { useT } from "../lib/i18n";
 import { cachedModelsFor, useAppStore } from "../lib/store";
 import { ModelPicker } from "../components/ModelPicker";
+import { BuiltinApiKeysEditor } from "../components/BuiltinApiKeysEditor";
 import { BuiltinHeadersEditor } from "../components/BuiltinHeadersEditor";
 import { BuiltinModelsEditor } from "../components/BuiltinModelsEditor";
 import { OptionPicker } from "../components/OptionPicker";
@@ -3613,6 +3616,7 @@ export function SettingsPage() {
                 const urlLabel = `${displayName} · ${t("settings.builtinUrlTitle")}`;
                 const keyLabel = `${displayName} · ${t("settings.builtinKeyTitle")}`;
                 const modelsLabel = `${displayName} · ${t("settings.builtinModelsTitle")}`;
+                const keys = provider.apiKeys ?? [];
                 const on = provider.enabled !== false;
                 const open =
                   providerSearchActive || openProviderCards.includes(provider.id);
@@ -3713,16 +3717,49 @@ export function SettingsPage() {
                           layout="stack"
                           label={keyLabel}
                           hint={t("settings.builtinKeyHint")}
+                          terms={keys}
                         >
-                          <input
-                            type="password"
-                            autoComplete="off"
-                            value={provider.apiKey}
-                            onChange={(e) => update({ apiKey: e.target.value })}
-                            placeholder="sk-…"
-                            aria-label={keyLabel}
+                          <BuiltinApiKeysEditor
+                            label={displayName}
+                            value={keys}
+                            onChange={(apiKeys) => update({ apiKeys })}
                           />
                         </SettingRow>
+                        {/* The mode only means something once there is a second
+                            key to move to, so the row appears with it. */}
+                        {keys.length > 1 ? (
+                          <SettingRow
+                            layout="stack"
+                            label={`${displayName} · ${t("settings.builtinKeyMode")}`}
+                            hint={t("settings.builtinKeyModeHint")}
+                            terms={[
+                              t("settings.builtinKeyModeRotate"),
+                              t("settings.builtinKeyModeExhausted"),
+                            ]}
+                          >
+                            <div className={styles.actionChips}>
+                              {(
+                                [
+                                  ["rotate", t("settings.builtinKeyModeRotate")],
+                                  ["exhausted", t("settings.builtinKeyModeExhausted")],
+                                ] as const satisfies readonly (readonly [BuiltinKeyMode, string])[]
+                              ).map(([mode, label]) => {
+                                const on = normalizeBuiltinKeyMode(provider.apiKeyMode) === mode;
+                                return (
+                                  <button
+                                    key={mode}
+                                    type="button"
+                                    className={`${styles.actionChip}${on ? ` ${styles.actionChipOn}` : ""}`}
+                                    aria-pressed={on}
+                                    onClick={() => update({ apiKeyMode: mode })}
+                                  >
+                                    {label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </SettingRow>
+                        ) : null}
                         <SettingRow
                           layout="stack"
                           label={`${displayName} · ${t("settings.builtinHeadersTitle")}`}
@@ -3758,7 +3795,9 @@ export function SettingsPage() {
                         >
                           <BuiltinModelsEditor
                             endpointUrl={provider.url}
-                            apiKey={provider.apiKey}
+                            // The probe is one call: it uses the first key of the
+                            // pool rather than spending a turn on the rotation.
+                            apiKey={keys[0] ?? ""}
                             headers={provider.headers}
                             value={provider.models}
                             onChange={(models) => update({ models })}

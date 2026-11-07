@@ -232,7 +232,14 @@ nothing to `npm i -g` and no separate login — the only requirement is an OpenA
 endpoint it can reach.
 
 - **Settings → Built-in agent** — the providers: add as many OpenAI-compatible
-  endpoints as you like (name + URL + API key), each with its own models. The model editor
+  endpoints as you like (name + URL + one or more API keys), each with its own models.
+  Several keys on one provider are a pool, and the row picks how it is spent:
+  **Rotate every request** takes the next key for every new request, so a handful of keys
+  works as one bigger quota, while **Switch on exhaustion** keeps one key in use — one
+  bill, one warmed prompt prefix — until the endpoint answers that the key is spent
+  (401/402/403/429), and then resends the same request with the next key. A spent key is
+  skipped for the rest of the server's run: the cursor lives in memory, so a restart
+  starts from the first key again. The model editor
   per provider pulls that endpoint's `GET /models` list, so you tick the models the agent
   may use, rename one or set its context window, search a long catalog, and add by hand
   whatever the API does not advertise. A model's context window comes from the endpoint
