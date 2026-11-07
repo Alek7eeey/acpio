@@ -6857,15 +6857,33 @@ function ChatThread() {
   const scrollRafRef = useRef(0);
   const threadInnerRef = useRef<HTMLDivElement>(null);
 
+  /**
+   * Counts the reader taking the thread away. A pin carries the count it was
+   * made with, because its second half lands a frame later: the stream writes a
+   * token, the reader's wheel arrives inside that same frame, and the frame's
+   * follow-up used to scroll back down and re-arm the pin over the reader's
+   * intent. With a thinking model writing every few milliseconds there is
+   * almost always such a pin in flight, so a reader scrolling up to re-read a
+   * reasoning block was dragged back to the bottom on nearly every attempt.
+   */
+  const readerTakeoversRef = useRef(0);
+
   const scrollThreadToEnd = () => {
     const thread = threadRef.current;
     if (!thread) return;
+    const takeovers = readerTakeoversRef.current;
     suppressScrollWatchRef.current = true;
     stickToBottomRef.current = true;
     setScrolledAway(false);
     thread.scrollTop = thread.scrollHeight;
     window.requestAnimationFrame(() => {
       const node = threadRef.current;
+      // The reader took the thread after this pin was made: it is stale, and
+      // neither scrolling nor re-arming it is theirs to lose.
+      if (readerTakeoversRef.current !== takeovers) {
+        suppressScrollWatchRef.current = false;
+        return;
+      }
       if (node) node.scrollTop = node.scrollHeight;
       suppressScrollWatchRef.current = false;
       stickToBottomRef.current = true;
@@ -6879,6 +6897,7 @@ function ChatThread() {
    * latches it again, which is what keeps the window open the whole way.
    */
   const releaseStickToBottom = () => {
+    readerTakeoversRef.current += 1;
     stickToBottomRef.current = false;
     stickEchoUntilRef.current = Date.now() + STICK_ECHO_MS;
   };
