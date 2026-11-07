@@ -2348,6 +2348,10 @@ function ToolOutputView({ text }: { text: string }) {
 
 const TOOL_OUTPUT_CAP = 20000;
 
+/** Call text this long no longer fits the one-line header, so the row keeps the
+ *  whole call in its body (measured in characters — width varies with the font). */
+const TOOL_TITLE_INLINE_CAP = 48;
+
 // Expand/collapse state survives virtualization remounts: message rows unmount
 // when scrolled out of the virtual window, so local useState would lose which
 // tool outputs / thought spoilers / steps blocks the user opened.
@@ -2391,6 +2395,11 @@ function ToolCallRow({ part, streaming, durationMs, ttftMs }: { part: MessagePar
   // The header is a one-line row, so it shows the call's first line. OMP sends
   // the whole command/code as the title — the rest stays readable in the body.
   const titleLine = title.split("\n")[0].trim() || title;
+  // A long one-line call (a shell command with `&&`, a list of paths) clips at
+  // the same ellipsis as a multi-line one, so the body has to carry the whole
+  // call too — otherwise the command a row stands for is never readable.
+  const fullTitle = title.trim();
+  const titleClipped = fullTitle !== titleLine || fullTitle.length > TOOL_TITLE_INLINE_CAP;
   const status = String(part.payload.status ?? "").toLowerCase();
   const statusActive =
     status === "in_progress" || status === "pending" || status === "running";
@@ -2437,10 +2446,16 @@ function ToolCallRow({ part, streaming, durationMs, ttftMs }: { part: MessagePar
   // show, and the header ellipsized it away. Fall back to the failure, then to
   // the call's own full text, so the spoiler always has the whole story.
   if (!shown.trim()) {
-    shown = errorText.trim() ? errorText : isGenericToolTitle(title) ? "" : title;
+    shown = errorText.trim()
+      ? errorText
+      : isGenericToolTitle(title) || titleClipped
+        ? ""
+        : title;
   }
 
-  const expandable = !busy && shown.trim().length > 0;
+  // A clipped call stays openable even while it runs: reading the command is
+  // exactly what the reader wants from a row that has been busy for minutes.
+  const expandable = titleClipped || (!busy && shown.trim().length > 0);
   const truncated = shown.length > TOOL_OUTPUT_CAP;
   const displayed = truncated ? shown.slice(0, TOOL_OUTPUT_CAP) : shown;
   const toggle = () => {
@@ -2489,6 +2504,7 @@ function ToolCallRow({ part, streaming, durationMs, ttftMs }: { part: MessagePar
       </button>
       {open ? (
         <div className={styles.toolBody}>
+          {titleClipped ? <ToolOutputView text={fullTitle} /> : null}
           {!hintCoveredByMeta && detail ? (
             path ? (
               <PathLink path={path} className={styles.toolDetail}>

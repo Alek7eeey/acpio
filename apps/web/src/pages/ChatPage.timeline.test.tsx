@@ -3,7 +3,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { DEFAULT_SETTINGS, type MessagePartDto, type SessionDetailDto } from "@acpio/shared";
+import {
+  DEFAULT_SETTINGS,
+  type AppSettings,
+  type MessagePartDto,
+  type SessionDetailDto,
+} from "@acpio/shared";
+import { api } from "../lib/api";
 import { useAppStore } from "../lib/store";
 import { I18nProvider } from "../lib/i18n";
 import { ChatPage } from "./ChatPage";
@@ -599,5 +605,78 @@ describe("compaction row", () => {
     await userEvent.click(screen.getByRole("button", { name: "показать конспект" }));
     expect(container.textContent).toContain("починить парсер");
     expect(screen.getByRole("button", { name: "скрыть конспект" })).toBeTruthy();
+  });
+});
+
+// The row header is one ellipsized line, so a long shell command lost its own
+// text: the body offered the tool's output only, and a row still running could
+// not be opened at all.
+describe("a call too long for its row", () => {
+  const command =
+    "cd /c/MyFolder/Proj/scad && npx tsc --noEmit -p tsconfig.json 2>&1 | head -5; PYTHONIOENCODING=utf-8 npx tsx scripts/check.ts";
+  const running: SessionDetailDto = {
+    ...detail,
+    status: "running",
+    messages: [
+      detail.messages[0]!,
+      {
+        id: "m1",
+        sessionId: "s1",
+        role: "assistant",
+        createdAt: "2026-09-30T10:00:01.000Z",
+        parts: [
+          {
+            id: "c1",
+            messageId: "m1",
+            type: "tool_call",
+            order: 0,
+            payload: { toolCallId: "call_bash", title: `bash ${command}`, status: "in_progress" },
+            createdAt: "2026-09-30T10:00:02.000Z",
+          },
+        ],
+      },
+    ],
+  };
+
+  beforeEach(() => {
+    // The agent probe saves a provider patch through this call; the blanket api
+    // mock answers `{}`, which would wipe the settings for every chip below.
+    (api as unknown as Record<string, unknown>).updateSettings = vi.fn(
+      async () => DEFAULT_SETTINGS as AppSettings,
+    );
+    // Same shape problem: the git chip reads `status.files.length`, and the
+    // blanket mock's `{}` is a status without files.
+    (api as unknown as Record<string, unknown>).gitStatus = vi.fn(async () => null);
+    useAppStore.setState({
+      settings: { ...DEFAULT_SETTINGS, locale: "ru" as const, chatAgentTurnTimeline: true },
+      sessions: [running],
+      activeSessionId: "s1",
+      activeSession: running,
+      sessionLoading: false,
+      error: null,
+      chatPaneIds: ["s1"],
+      focusedPaneIndex: 0,
+      unseenFinishedTurns: {},
+      sessionDetails: { s1: running },
+    });
+  });
+
+  it("opens the running row and shows the whole command", async () => {
+    const { container } = render(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <I18nProvider>
+          <ChatPage />
+        </I18nProvider>
+      </MemoryRouter>,
+    );
+
+    await screen.findByText(/bash cd \/c\/MyFolder/);
+    const row = container.querySelector<HTMLElement>(`.${styles.partToggle}`);
+    expect(row).toBeTruthy();
+    expect(row!.hasAttribute("disabled")).toBe(false);
+
+    await userEvent.click(row!);
+    const body = container.querySelector<HTMLElement>(`.${styles.toolBody}`);
+    expect(body?.textContent).toContain(command);
   });
 });
