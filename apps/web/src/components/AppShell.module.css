@@ -488,6 +488,14 @@
   transform: translateY(-1px);
 }
 
+/* The pill lays its parts out on the text baseline; that shared baseline sits
+   at the cross-start of the line, so the board's name — the only thing in the
+   pill with text inline in that group — ends up a few pixels above the middle.
+   Box against box centring puts the name where the eye expects it. */
+.headerChatCtx.headerCtxBoard {
+  align-items: center;
+}
+
 .sidebar {
   display: flex;
   flex-direction: column;
