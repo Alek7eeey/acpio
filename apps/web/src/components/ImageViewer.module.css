@@ -15,8 +15,15 @@
 .stage {
   position: absolute;
   inset: 0;
-  display: grid;
-  place-items: center;
+  /* Flex, not grid: an auto-sized grid row makes the picture's `max-height: 100%`
+     resolve against the row's content height, so a tall picture stayed as wide as
+     it was and overflowed the screen. A flex line takes the stage's own height as
+     definite, and the padding keeps the picture clear of the bar and the footer. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 56px 16px 88px;
   overflow: hidden;
 }
 
