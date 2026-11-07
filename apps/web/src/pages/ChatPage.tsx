@@ -7493,15 +7493,12 @@ function ChatThread() {
           <button
             type="button"
             className={styles.jumpLatest}
-            onPointerDown={(e) => {
-              // Act on the press, not the release: the button floats over the
-              // scroll area, so the synthesized mouse/click events can land on
-              // the thread content beneath it (especially the left part after
-              // the composer shifts focus). pointerdown carries the correct
-              // target; preventDefault also suppresses the compat mouse events.
-              e.preventDefault();
-              scrollThreadToEnd();
-            }}
+            // Act on the click, never on the press: the pill floats over the
+            // bottom of the thread, right where a thumb rests, so a drag that
+            // starts on it is the reader scrolling up — a press there pulled
+            // the thread back to the bottom, and no swipe could get away from
+            // it. A drag is not a click, so the pill stays out of the gesture.
+            onClick={() => scrollThreadToEnd()}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
               <path
