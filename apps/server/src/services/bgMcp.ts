@@ -45,6 +45,15 @@ interface ToolDef {
 // name. Two tools, not five: the four things done to a job share one result
 // shape and one id, so they share one entry — the call's own arguments say
 // which of them it is, and the split cost ~1500 chars of schema per request.
+// Patience a note suggests when it tells the model to stay with a job. It is
+// deliberately NOT the ceiling: a ceiling printed as advice gets copied, and
+// then every "wait a moment" becomes half an hour of silence. Thoroughness is
+// not the reason to pick a big number — the wait returns the moment the job
+// ends, so a long patience buys nothing and only delays noticing a stuck job.
+// Half a minute is twice the foreground `bash` default, and a longer job is
+// simply waited on again.
+const SUGGESTED_WAIT_MS = 30_000;
+
 const TOOL_DEFS: ToolDef[] = [
   {
     name: "run",
@@ -66,7 +75,9 @@ const TOOL_DEFS: ToolDef[] = [
           type: "integer",
           description:
             `Block until it ends (max ${MAX_WAIT_MS}); its tail comes back too. ` +
-            "Omit for a server or a watcher.",
+            "Omit for a server or a watcher. Omit it also when you only want to peek at a " +
+            "command that is still starting: a small `waitMs` buys nothing — you get the same job " +
+            "id, just later. Either omit it, or wait for the end with a real ceiling.",
         },
       },
       required: ["command"],
@@ -193,7 +204,7 @@ async function callTool(
               `${job.id} is still running after ${patienceText(waitMs)} — ` +
                 "it outlived the wait, it was not killed.",
               `Do not sleep and do not poll: stay with it by calling ${bgMcpToolName("job")}` +
-                `({ jobId: "${job.id}", timeoutMs: ${MAX_WAIT_MS} }), or end your turn — ` +
+                `({ jobId: "${job.id}", timeoutMs: ${SUGGESTED_WAIT_MS} }), or end your turn — ` +
                 "the note with its output tail continues from there.",
               // A read comes back at once: it is not a second way to wait, and
               // naming it without saying so invites a poll loop.
@@ -244,9 +255,9 @@ async function callTool(
             report,
             patience > 0
               ? `Still running after ${patienceText(patience)} — nothing was killed. ` +
-                `Call ${bgMcpToolName("job")}({ jobId: "${job.id}", timeoutMs: ${MAX_WAIT_MS} }) ` +
+                `Call ${bgMcpToolName("job")}({ jobId: "${job.id}", timeoutMs: ${SUGGESTED_WAIT_MS} }) ` +
                 "again to stay with it, or end your turn: the note with its tail arrives when it finishes."
-              : `Still running. Call ${bgMcpToolName("job")}({ jobId: "${job.id}", timeoutMs: ${MAX_WAIT_MS} }) ` +
+              : `Still running. Call ${bgMcpToolName("job")}({ jobId: "${job.id}", timeoutMs: ${SUGGESTED_WAIT_MS} }) ` +
                 "to stay with it — this read does not wait.",
           ].join("\n"),
         );

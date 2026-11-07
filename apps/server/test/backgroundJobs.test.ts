@@ -12,6 +12,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { FastifyInstance } from "fastify";
 import {
+  BG_JOB_MAX_WAIT_MS,
   BG_MCP_SERVER_ID,
   BG_MCP_SERVER_NAME,
   DEFAULT_SETTINGS,
@@ -279,6 +280,10 @@ describe("running a command in the background", () => {
     expect(toolText(impatient)).toContain("Still running after 100ms");
     expect(toolText(impatient)).toContain("nothing was killed");
     expect(toolText(impatient)).toContain(`mcp__acpio_bg_job`);
+    // The advice names a sensible wait, not the ceiling: a limit printed as
+    // advice gets copied, and 30 minutes of silence is not "staying with it".
+    expect(toolText(impatient)).toContain("timeoutMs: 30000");
+    expect(toolText(impatient)).not.toContain(`timeoutMs: ${BG_JOB_MAX_WAIT_MS}`);
 
     const waited = await toolCall(chat.id, "job", { jobId: id, timeoutMs: 20_000 });
     const text = toolText(waited);
