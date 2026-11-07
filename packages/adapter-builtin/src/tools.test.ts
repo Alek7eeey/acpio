@@ -302,6 +302,7 @@ describe("createBuiltinTools", () => {
     const out = await exec(tools, "bash", { command: "echo hello" });
     expect(ask).toHaveBeenCalledWith(expect.objectContaining({ kind: "execute" }));
     expect(out).toContain("exit code: 0");
+    expect(out).not.toContain("took");
     expect(out).toContain("hello");
     expect(host.request.mock.calls.map((c: unknown[]) => c[0])).toEqual([
       "terminal/create",
@@ -309,6 +310,24 @@ describe("createBuiltinTools", () => {
       "terminal/output",
       "terminal/release",
     ]);
+  });
+
+  it("a slow command says how long it took, so the model sees the price", async () => {
+    const { tools, host } = setup();
+    host.request.mockImplementation(async (method: string) => {
+      if (method === "terminal/create") return { terminalId: "T1" };
+      if (method === "terminal/wait_for_exit") return { exitCode: 0, signal: null };
+      if (method === "terminal/output") return { output: "slow\n", truncated: false };
+      return {};
+    });
+    const now = vi.spyOn(Date, "now").mockReturnValueOnce(1_000);
+    now.mockReturnValue(513_000);
+    try {
+      const out = await exec(tools, "bash", { command: "node scripts/check.mjs" });
+      expect(out).toContain("exit code: 0 (took 512s)");
+    } finally {
+      now.mockRestore();
+    }
   });
 
   it("bash waits for the configured timeout unless the call names one", async () => {

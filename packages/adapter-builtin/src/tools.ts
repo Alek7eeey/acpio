@@ -106,6 +106,8 @@ const CLIP_TAIL = 2_000;
 const DEFAULT_BASH_TIMEOUT_MS = 15_000;
 /** The host clamps the same number, so one constant keeps the two honest. */
 const MAX_BASH_TIMEOUT_MS = TERMINAL_WAIT_MAX_MS;
+/** Grep-worthy slowness: at or above this, a `bash` result names how long it took. */
+const SLOW_COMMAND_MS = 30_000;
 const TERMINAL_BYTE_LIMIT = 64 * 1024;
 const MAX_SEARCH_RESULTS = 200;
 const MAX_GLOB_RESULTS = 500;
@@ -1036,6 +1038,7 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
       signal?.addEventListener("abort", onAbort, { once: true });
       try {
         const limitMs = timeout_ms ?? bashTimeoutMs;
+        const startedAt = Date.now();
         let exit: { exitCode: number | null; signal?: string | null };
         try {
           exit = await host.request<{ exitCode: number | null; signal?: string | null }>(
@@ -1071,7 +1074,14 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
         });
         const how = exit?.signal ? `signal ${exit.signal}` : String(exit?.exitCode ?? 0);
         const body = clip(out?.output ?? "");
-        return `exit code: ${how}${out?.truncated ? "\n(output was truncated by the host)" : ""}\n${body}`;
+        // A slow command is a fact the model otherwise never learns: it sees the
+        // exit code and nothing about the wall clock, so re-running a two-minute
+        // suite after a one-line change costs nothing in its view. Say the price
+        // where the price is paid. Below the threshold it is noise, so it is left
+        // out — the model reads the exit code, not a stopwatch.
+        const tookMs = Date.now() - startedAt;
+        const took = tookMs >= SLOW_COMMAND_MS ? ` (took ${Math.round(tookMs / 1000)}s)` : "";
+        return `exit code: ${how}${took}${out?.truncated ? "\n(output was truncated by the host)" : ""}\n${body}`;
       } finally {
         signal?.removeEventListener("abort", onAbort);
         await host.request("terminal/release", { terminalId }).catch(() => undefined);
