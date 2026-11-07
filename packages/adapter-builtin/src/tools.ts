@@ -823,11 +823,14 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
         }),
         apply_plan: tool({
           description:
-            "Ask the reader to approve the plan and start implementing: the right-hand panel shows " +
-            "«Утвердить и начать» / «Правки» and the turn waits for the answer. Call it once the " +
-            "plan is written, in the same turn. Approved, the stage turns `applying` and the work " +
-            "begins; rejected, nothing is implemented — ask what to change. Never call it before " +
-            "the reader has seen the plan, and never again once the stage is `applying`.",
+            "Ask the reader to approve the plan and start implementing: the card above the input " +
+            "offers «Открыть план» / «Одобрить» / «Отклонить», the right-hand panel offers " +
+            "«Утвердить и начать» together with the pace, and the turn waits for the answer. Call it " +
+            "once the plan is written, in the same turn, after one line of the answer saying the " +
+            "plan is ready and that this card approves it. Approved, the stage turns `applying` and " +
+            "the work begins; rejected, nothing is implemented and the turn ends there — the reader " +
+            "will say what to change. Never call it before the reader has seen the plan, and never " +
+            "again once the stage is `applying`.",
           inputSchema: z.object({
             pacing: z
               .enum(["whole", "step"])
@@ -857,8 +860,9 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
             if (!accepted) {
               planBridge.write({ ...asked, stage: "draft" });
               return (
-                "The reader did not approve the plan. Implement nothing: ask what to change, " +
-                "rework the plan file, and call `apply_plan` again when it is ready."
+                "The reader did not approve the plan. Implement nothing and end the turn: they " +
+                "will say what to change. Do not rework the plan on your own and do not call " +
+                "`apply_plan` again in this turn."
               );
             }
             planBridge.write({ ...asked, stage: "applying" });

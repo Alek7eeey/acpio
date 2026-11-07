@@ -103,6 +103,14 @@
   background: color-mix(in srgb, var(--danger, #c44) 8%, transparent);
 }
 
+/* The answer is already on its way: no second click. */
+.actions button:disabled,
+.actions button:disabled:hover {
+  opacity: 0.55;
+  cursor: default;
+  background: transparent;
+}
+
 .questions {
   display: grid;
   gap: 8px;

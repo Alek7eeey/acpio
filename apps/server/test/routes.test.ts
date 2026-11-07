@@ -936,6 +936,53 @@ describe("sessions", () => {
   });
 });
 
+describe("the plan file's switches", () => {
+  /** A session whose folder already holds a `.acpio/plan.md` — the built-in
+   *  agent's plan, the only one the panel's switches can speak to. */
+  async function planSession() {
+    const dir = await newTempDir("acpio-plan-");
+    const file = path.join(dir, ".acpio", "plan.md");
+    await fsp.mkdir(path.dirname(file), { recursive: true });
+    await fsp.writeFile(
+      file,
+      "---\nname: A plan\nstage: applying\npacing: whole\n---\n\n## Steps\n\n- [ ] One\n",
+      "utf8",
+    );
+    const row = await seedSession({ cwd: dir });
+    return { id: String(row.id), file };
+  }
+
+  it("takes a switch that changes nothing without calling it a missing file", async () => {
+    const { id } = await planSession();
+    // `whole` is already in the file: the write is a no-op, which used to
+    // answer 404 "No plan file" and reach the reader as a toast.
+    const same = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${id}/plan`,
+      payload: { pacing: "whole" },
+    });
+    expect(same.statusCode).toBe(200);
+
+    const changed = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${id}/plan`,
+      payload: { pacing: "step" },
+    });
+    expect(changed.statusCode).toBe(200);
+    expect((changed.json() as { plan: { pacing: string } }).plan.pacing).toBe("step");
+  });
+
+  it("answers 404 for a session with no plan file", async () => {
+    const row = await seedSession({ cwd: await newTempDir("acpio-noplan-") });
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${row.id}/plan`,
+      payload: { pacing: "step" },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
 describe("thought dedupe", () => {
   // Long enough to pass the re-emission threshold (>= 40 chars).
   const THINKING =

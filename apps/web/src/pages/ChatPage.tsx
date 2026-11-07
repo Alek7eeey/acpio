@@ -4505,8 +4505,10 @@ function ChatThread() {
   const sendPromptStore = useAppStore((s) => s.sendPrompt);
   const warnIfHarnessNotConfigured = useAppStore((s) => s.warnIfHarnessNotConfigured);
   const sendPrompt = useCallback(
-    (text: string, opts?: { editMessageId?: string; attachments?: PendingAttachment[] }) =>
-      sendPromptStore(text, { ...opts, sessionId: bind?.sessionId ?? undefined }),
+    (
+      text: string,
+      opts?: { editMessageId?: string; attachments?: PendingAttachment[]; internal?: boolean },
+    ) => sendPromptStore(text, { ...opts, sessionId: bind?.sessionId ?? undefined }),
     [sendPromptStore, bind?.sessionId],
   );
   /**
@@ -4586,6 +4588,11 @@ function ChatThread() {
   const [slashKeyboardNav, setSlashKeyboardNav] = useState(false);
   const [slashMenuDismissed, setSlashMenuDismissed] = useState(false);
   const [planPanelOpen, setPlanPanelOpen] = useState(false);
+  /** The plan the reader approved — its own content, without the stage. While it
+   *  is still the plan on screen the panel offers no second approval; the agent's
+   *  republish of `stage: applying` (or a reworked plan, whose steps differ) is
+   *  what puts the button back. */
+  const [approvedPlanKey, setApprovedPlanKey] = useState<string | null>(null);
   /** The git diff in the full view: portalled to the body, pinned to the viewport. */
   const [gitFullscreen, setGitFullscreen] = useState(false);
   const prevPaneCountRef = useRef(bind?.paneCount ?? 1);
@@ -4831,7 +4838,12 @@ function ChatThread() {
     return last ? coalesceAssistantParts(last.parts) : [];
   }, [activeSession?.messages]);
   const answerVisible = useMemo(() => turnAnswerVisible(lastAssistantParts), [lastAssistantParts]);
-  const stepsStreaming = turnBusy && !answerVisible;
+  /** A plan card in the dock is the turn parked inside `apply_plan`: the agent
+   *  writes no token until the reader answers, so the answer below it must read
+   *  as finished instead of pulsing "Работаю…" over a plan that is already
+   *  written. The card itself is what is waiting. */
+  const planPending = pendingQuestion?.kind === "create_plan";
+  const stepsStreaming = turnBusy && !answerVisible && !planPending;
 
   // MCP servers this chat's agent session runs with: the folder's list
   // (globals minus folder-disabled, plus folder-specific) plus the servers its
@@ -4870,7 +4882,6 @@ function ChatThread() {
     }
   }, [turnBusy, activeSession?.title, promptEpoch, cancelledPromptEpoch]);
 
-  const planPending = pendingQuestion?.kind === "create_plan";
   // Parked on an open prompt: Stop no longer aborts running work — the agent is
   // idle, and pressing it dismisses the question. The button has to say so.
   const questionParked = pendingQuestion?.kind === "ask_question";
@@ -4898,6 +4909,49 @@ function ChatThread() {
     });
     rememberDismissedPlan(part.id);
     setPlanPanelOpen(false);
+  };
+
+  /**
+   * The plan's own file: only the built-in agent keeps one, and only there does
+   * the pace mean anything. A plan another agent published is accepted through
+   * the card alone, exactly as before.
+   */
+  const planHasFile = Boolean(activePlan?.stage && activePlan?.path);
+
+  /** The plan as the reader approved it, stage aside: a reworked plan carries
+   *  different steps, so it is a new key and can be approved again. */
+  const planKey = useMemo(() => {
+    if (!activePlan) return "";
+    return [
+      activePlan.name ?? "",
+      activePlan.overview ?? "",
+      (activePlan.plan ?? "").slice(0, 200),
+      (activePlan.todos ?? []).map((todo) => `${todo.content}:${todo.status}`).join("|"),
+    ].join("\u0000");
+  }, [activePlan]);
+  /** An approval is already on its way: the panel and the card must not ask
+   *  twice while the plan still reads as the draft the reader just approved. */
+  const planApproving =
+    approvedPlanKey !== null && approvedPlanKey === planKey && activePlan?.stage !== "applying";
+
+  /** Say yes to the plan. The stage goes into `.acpio/plan.md` first: it is what
+   *  `apply_plan` and the panel both read, and what keeps the panel from offering
+   *  the same approval a moment later. A card whose turn is parked is answered —
+   *  that turn goes on with the plan. A draft nobody waits on (the reader turned
+   *  the card down earlier, or the agent never asked) starts with a prompt the
+   *  chat never shows: they clicked a button, they typed no request. */
+  const approvePlan = async (target: "pending" | "draft") => {
+    const sid = activeSession?.id;
+    if (!sid) return;
+    setApprovedPlanKey(planKey);
+    const pacing = activePlan?.pacing === "step" ? "step" : "whole";
+    // The write is awaited: an answer that overtakes it starts at the old pace.
+    if (planHasFile) await setSessionPlan({ stage: "applying", pacing }, sid);
+    if (target === "pending") {
+      void answerQuestion({ outcome: { outcome: "accepted" } });
+      return;
+    }
+    void sendPrompt(t("planPanel.approvePrompt"), { internal: true });
   };
 
   const planSignature = useMemo(() => {
@@ -4940,6 +4994,8 @@ function ChatThread() {
 
   useEffect(() => {
     setPlanPanelOpen(false);
+    // Another chat's approval says nothing about this chat's plan.
+    setApprovedPlanKey(null);
   }, [activeSession?.id]);
 
   const setComposerMultilineIfNeeded = (next: boolean) => {
@@ -6590,7 +6646,9 @@ function ChatThread() {
         key={msg.id}
         msg={msg}
         isLiveAssistant={isLiveAssistant}
-        turnActive={isLiveAssistant}
+        // The plan card parks the turn (see `planPending`): the last answer is
+        // drawn in its finished form, with the card right under it.
+        turnActive={isLiveAssistant && !planPending}
         stepsStreaming={isLiveAssistant ? stepsStreaming : false}
         onEditUser={(messageId, value) => {
           setEditingMessageId(messageId);
@@ -7400,7 +7458,11 @@ function ChatThread() {
       (!pendingPermission || pendingPermission.sessionId === activeSession?.id) &&
       (!pendingQuestion || pendingQuestion.sessionId === activeSession?.id) ? (
         <div className={styles.inlinePromptDock}>
-          <ChatInlinePrompt onOpenPlan={openPlanPanel} />
+          <ChatInlinePrompt
+            onOpenPlan={openPlanPanel}
+            onAcceptPlan={planPending ? () => void approvePlan("pending") : undefined}
+            busy={planApproving}
+          />
         </div>
       ) : null}
 
@@ -7503,9 +7565,16 @@ function ChatThread() {
             {!rewriting && agentMissing && (
               <div className={styles.typingBar}>{t("common.noAgentsOnline")}</div>
             )}
-            {!rewriting && !agentMissing && !agentUnavailable && activeSession?.status === "waiting" && (
-              <div className={styles.typingBar}>{t("common.waitingInput")}</div>
-            )}
+            {!rewriting &&
+              !agentMissing &&
+              !agentUnavailable &&
+              !planPending &&
+              activeSession?.status === "waiting" && (
+                // The plan card above says what is waited for ("План готов к
+                // подтверждению") and carries the buttons; a vague "Ожидание
+                // ввода" right under it only asks the reader what input.
+                <div className={styles.typingBar}>{t("common.waitingInput")}</div>
+              )}
             {!rewriting &&
               !agentMissing &&
               !agentUnavailable &&
@@ -8172,30 +8241,21 @@ function ChatThread() {
           fillPane={panelFillsChat}
           onClose={() => setPlanPanelOpen(false)}
           onRemove={planPending ? undefined : removeActivePlan}
-          onAccept={
-            planPending
-              ? () => void answerQuestion({ outcome: { outcome: "accepted" } })
-              : undefined
-          }
-          /*
-           * The draft's own approve: the file's stage flips first (that is what
-           * makes the harness push the model to close the steps), and the turn
-           * that follows is the reader's own message — so the agent starts on
-           * the plan it just published instead of asking them to approve twice.
-           */
+          /* One approval, two places it can come from: the card's own question
+             while a turn is parked on it, the footer's button for a draft nobody
+             waits on. Both write the stage into `.acpio/plan.md`. */
+          onAccept={planPending ? () => void approvePlan("pending") : undefined}
           onApprove={
             activePlan?.stage === "draft" && activeSession
-              ? () => {
-                  void setSessionPlan({ stage: "applying" }, activeSession.id);
-                  void sendPrompt(t("planPanel.approvePrompt"));
-                }
+              ? () => void approvePlan("draft")
               : undefined
           }
           onPacing={
-            activePlan?.stage === "applying" && activeSession
+            activePlan?.stage && activeSession
               ? (pacing) => void setSessionPlan({ pacing }, activeSession.id)
               : undefined
           }
+          approving={planApproving}
           onReject={
             planPending
               ? () =>

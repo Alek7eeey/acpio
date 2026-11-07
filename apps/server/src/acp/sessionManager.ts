@@ -489,6 +489,13 @@ type TurnOpts = {
    * only place the reader sees the result.
    */
   backgroundJobNote?: boolean;
+  /**
+   * The harness's own prompt, not the reader's: it drives a turn exactly like
+   * any other, but no user message is written for it, so the transcript shows
+   * only the answer. The plan's approval is what uses it — the reader clicked
+   * a button, they did not type "start implementing".
+   */
+  internal?: boolean;
 };
 
 /** Attachment chosen from the server machine — referenced or staged into the cwd. */
@@ -693,7 +700,8 @@ class SessionRuntime {
    * strictly one at a time in FIFO order, so streams never interleave.
    */
   turnQueue: Array<{
-    userMessageId: string;
+    /** `null` for a prompt the harness sent itself — it has no user message. */
+    userMessageId: string | null;
     text: string;
     images: PromptImageBlock[];
     opts: TurnOpts;
@@ -2868,7 +2876,7 @@ export async function runPrompt(
   try {
   if (opts.editMessageId) {
     userMessageId = opts.editMessageId;
-  } else if (!opts.backgroundJobNote) {
+  } else if (!opts.backgroundJobNote && !opts.internal) {
     await writeUserMessage();
   }
 
@@ -2949,9 +2957,9 @@ export async function runPrompt(
     // "running", but the visible state is still "waiting".
     // A note that nothing could take is a prompt after all — and has to be in
     // the transcript, since that is where the reader finds the result.
-    if (!userMessageId) await writeUserMessage();
+    if (!userMessageId && !opts.internal) await writeUserMessage();
     settlePreTurnClaim();
-    rt.turnQueue.push({ userMessageId: userMessageId!, text: promptUserText, images: promptImages, opts });
+    rt.turnQueue.push({ userMessageId, text: promptUserText, images: promptImages, opts });
     if (!rt.running && rt.pending.size > 0) {
       await updateSession(sessionId, { status: "waiting" }).catch(() => {});
     }
@@ -2964,7 +2972,7 @@ export async function runPrompt(
     return { queued: true };
   }
 
-  if (!userMessageId) await writeUserMessage();
+  if (!userMessageId && !opts.internal) await writeUserMessage();
   try {
     return await runTurn(
       rt,

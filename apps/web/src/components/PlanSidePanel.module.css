@@ -244,6 +244,19 @@
   flex-shrink: 0;
 }
 
+/* Reject, rework, accept: each one a third of the row. */
+.footerThree {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+/* Three labels in the narrowest panel still have to fit on one line. */
+.footerThree button {
+  padding: 10px 6px;
+  font-size: 0.84rem;
+  gap: 5px;
+}
+
 .footerSingle button {
   flex: 1;
 }
@@ -270,6 +283,10 @@
   border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
   border-radius: 999px;
   background: color-mix(in srgb, var(--bg-secondary) 60%, var(--surface));
+}
+
+.paceGroupBlock {
+  margin-left: 0;
 }
 
 .paceBtn {
@@ -316,6 +333,15 @@
     color 0.15s ease,
     box-shadow 0.15s ease,
     transform 0.12s ease;
+}
+
+/* An approval is already on its way: the footer must not ask a second time. */
+.footer button:disabled,
+.footerSingle button:disabled {
+  opacity: 0.55;
+  cursor: default;
+  filter: none;
+  transform: none;
 }
 
 .footer button svg {
@@ -366,6 +392,24 @@
 
 .danger:active {
   background: color-mix(in srgb, var(--danger, #c44) 12%, transparent);
+  transform: translateY(0);
+}
+
+/* The third way out of a card: neither a no nor a start. */
+.ghost {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid color-mix(in srgb, var(--text) 16%, var(--border));
+  border-radius: 999px;
+}
+
+.ghost:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  transform: translateY(-1px);
+}
+
+.ghost:active {
   transform: translateY(0);
 }
 

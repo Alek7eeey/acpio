@@ -2227,6 +2227,9 @@ export async function registerRoutes(app: FastifyInstance) {
         // and what an older client always meant) waits for the whole turn;
         // `steer` stops it now; `afterStep` folds the text into it.
         delivery: z.enum(["queue", "steer", "afterStep"]).optional(),
+        // The harness's own prompt: it drives a turn but leaves no user message
+        // in the transcript — the reader clicked a button, they typed nothing.
+        internal: z.boolean().optional(),
         attachments: z
           .array(
             z.object({
@@ -2294,9 +2297,11 @@ export async function registerRoutes(app: FastifyInstance) {
       mode: detail.mode,
       editMessageId: body.editMessageId,
       delivery: body.delivery,
+      internal: body.internal,
       attachments: attachments.length ? attachments : undefined,
-      titleHint: titleIsDefault ? body.text : undefined,
-      aiTitle,
+      // A note the reader never typed must not name the chat either.
+      titleHint: titleIsDefault && !body.internal ? body.text : undefined,
+      aiTitle: body.internal ? undefined : aiTitle,
     }).catch((err) => {
       // A chat closed or restarted under a running prompt dies mid-turn by our
       // own hand; the turn's own error part already says so in the chat.
@@ -2457,11 +2462,13 @@ export async function registerRoutes(app: FastifyInstance) {
     const detail = await getSessionDetail(id);
     if (!detail) return reply.code(404).send({ error: "Not found" });
     const file = planFilePath(detail.cwd);
-    const saved = setPlanOptions(file, body, (await getSettings()).locale === "ru" ? "ru" : "en");
-    // No file means no plan to switch: the panel is showing a plan some other
-    // agent published, and there is nothing here to write to.
-    if (!saved) return reply.code(404).send({ error: "No plan file" });
-    return { ok: true, plan: readPlan(file) };
+    // Read first: `setPlanOptions` says `false` both for a missing file and for
+    // bytes that did not change, and a switch already in that position is not
+    // an error. Only a file that is really absent is one.
+    const before = readPlan(file);
+    if (!before) return reply.code(404).send({ error: "No plan file" });
+    setPlanOptions(file, body, (await getSettings()).locale === "ru" ? "ru" : "en");
+    return { ok: true, plan: readPlan(file) ?? before };
   });
 
   app.post("/api/sessions/:id/permissions/:requestId", async (req) => {

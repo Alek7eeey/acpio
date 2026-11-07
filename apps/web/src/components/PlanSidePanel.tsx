@@ -38,6 +38,7 @@ export function PlanSidePanel({
   onReject,
   onApprove,
   onPacing,
+  approving = false,
 }: {
   plan: PlanPayload | null;
   open: boolean;
@@ -47,12 +48,15 @@ export function PlanSidePanel({
   onClose: () => void;
   /** Drop the plan from the panel entirely; absent while it waits for an answer. */
   onRemove?: () => void;
+  /** Answer the waiting card's own question: the plan starts implementing. */
   onAccept?: () => void;
   onReject?: () => void;
   /** Draft stage: approve the plan and start implementing. */
   onApprove?: () => void;
   /** Applying stage: switch the pace the steps are done at. */
   onPacing?: (pacing: "whole" | "step") => void;
+  /** An approval is already on its way — the footer must not ask twice. */
+  approving?: boolean;
 }) {
   const t = useT();
   const [width, setWidth] = useState(readStoredWidth);
@@ -135,8 +139,13 @@ export function PlanSidePanel({
   // The footer answers the stage the file declares: a draft can be approved, an
   // approved plan can be paced, and a card waiting for an answer is neither.
   const reviewing = Boolean(pending && onAccept && onReject);
-  const canApprove = !reviewing && stage === "draft" && Boolean(onApprove) && todos.length > 0;
-  const canPace = !reviewing && !canApprove && stage === "applying" && Boolean(onPacing);
+  // One way in, whatever the plan's stage: the card's own answer while a turn
+  // is parked on it, the panel's own «approve» for a draft nobody waits on.
+  const approve = reviewing ? onAccept : stage === "draft" ? onApprove : undefined;
+  const canApprove = Boolean(approve) && (reviewing || todos.length > 0);
+  // The pace is the reader's before the work starts, not only after it does,
+  // and it is the switch that starts the work — so it stays reachable either way.
+  const canPace = !reviewing && Boolean(onPacing) && Boolean(stage);
 
   return (
     <aside
@@ -216,8 +225,31 @@ export function PlanSidePanel({
         <PlanApprovalBody payload={plan} fallbackTitle={t("question.plan")} scrollable={false} />
       </div>
       {canApprove ? (
-        <div className={styles.footerSingle}>
-          <button type="button" className={styles.primary} onClick={onApprove}>
+        <div className={reviewing ? styles.footer : styles.footerSingle}>
+          {reviewing ? (
+            <button
+              type="button"
+              className={styles.danger}
+              disabled={approving}
+              onClick={onReject}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path
+                  d="M6 6l12 12M18 6L6 18"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                />
+              </svg>
+              <span>{t("common.reject")}</span>
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className={styles.primary}
+            disabled={approving}
+            onClick={() => approve?.()}
+          >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
               <path
                 d="M5 12.5l5 5L19 7.5"
@@ -234,49 +266,39 @@ export function PlanSidePanel({
       {canPace ? (
         <div className={styles.footerPace}>
           <span className={styles.paceLabel}>{t("planPanel.pacing")}</span>
-          <div className={styles.paceGroup} role="group" aria-label={t("planPanel.pacing")}>
-            {(["whole", "step"] as const).map((option) => (
-              <button
-                key={option}
-                type="button"
-                className={`${styles.paceBtn} ${pacing === option ? styles.paceBtnActive : ""}`}
-                aria-pressed={pacing === option}
-                onClick={() => onPacing?.(option)}
-              >
-                {t(option === "whole" ? "planPanel.pacingWhole" : "planPanel.pacingStep")}
-              </button>
-            ))}
-          </div>
-        </div>
-      ) : null}
-      {pending && onAccept && onReject ? (
-        <div className={styles.footer}>
-          <button type="button" className={styles.danger} onClick={onReject}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
-              <path
-                d="M6 6l12 12M18 6L6 18"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-              />
-            </svg>
-            <span>{t("common.reject")}</span>
-          </button>
-          <button type="button" className={styles.primary} onClick={onAccept}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
-              <path
-                d="M5 12.5l5 5L19 7.5"
-                stroke="currentColor"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-            <span>{t("common.accept")}</span>
-          </button>
+          <PlanPaceChoice value={pacing} onChange={(option) => onPacing?.(option)} />
         </div>
       ) : null}
     </aside>
+  );
+}
+
+/**
+ * The pace, as a two-state switch: approving a plan keeps whatever the reader
+ * picked here, and switching it later re-paces the work already running.
+ */
+export function PlanPaceChoice({
+  value,
+  onChange,
+}: {
+  value: "whole" | "step";
+  onChange: (pacing: "whole" | "step") => void;
+}) {
+  const t = useT();
+  return (
+    <div className={styles.paceGroup} role="group" aria-label={t("planPanel.pacing")}>
+      {(["whole", "step"] as const).map((option) => (
+        <button
+          key={option}
+          type="button"
+          className={`${styles.paceBtn} ${value === option ? styles.paceBtnActive : ""}`}
+          aria-pressed={value === option}
+          onClick={() => onChange(option)}
+        >
+          {t(option === "whole" ? "planPanel.pacingWhole" : "planPanel.pacingStep")}
+        </button>
+      ))}
+    </div>
   );
 }
 

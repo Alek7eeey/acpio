@@ -39,11 +39,20 @@ describe("PlanSidePanel", () => {
     expect(screen.getByText("1 of 3")).toBeTruthy();
   });
 
-  it("approves a draft with the panel's own button", () => {
+  it("approves a draft with the panel's own button — the only answer there", () => {
     const onApprove = vi.fn();
     renderPanel(PLAN, { onApprove });
     fireEvent.click(screen.getByText("Approve and start"));
     expect(onApprove).toHaveBeenCalledTimes(1);
+    // Reworking is not an answer the panel offers: approving or nothing.
+    expect(screen.queryByText("Rework")).toBeNull();
+  });
+
+  it("asks twice for nothing: the button is dead while the approval is in flight", () => {
+    const onApprove = vi.fn();
+    renderPanel(PLAN, { onApprove, approving: true });
+    fireEvent.click(screen.getByText("Approve and start"));
+    expect(onApprove).not.toHaveBeenCalled();
   });
 
   it("switches the pace of an approved plan, and offers no approval again", () => {
@@ -55,14 +64,25 @@ describe("PlanSidePanel", () => {
     expect(onPacing).toHaveBeenCalledWith("step");
   });
 
-  it("keeps the approval card in charge while the reader is answering it", () => {
+  it("offers the pace before the work starts too — it is the pace it will start at", () => {
+    const onPacing = vi.fn();
+    renderPanel(PLAN, { onPacing, onApprove: () => {} });
+    expect(screen.getByText("Pace")).toBeTruthy();
+    fireEvent.click(screen.getByText("One at a time"));
+    expect(onPacing).toHaveBeenCalledWith("step");
+  });
+
+  it("keeps the waiting card in charge: answer it, or turn it down", () => {
     const onAccept = vi.fn();
     const onApprove = vi.fn();
-    renderPanel(PLAN, { pending: true, onAccept, onReject: () => {}, onApprove });
+    const onReject = vi.fn();
+    renderPanel(PLAN, { pending: true, onAccept, onReject, onApprove });
     expect(screen.getByText("Awaiting")).toBeTruthy();
-    // The card's own accept is the approval; two buttons would ask twice.
-    expect(screen.queryByText("Approve and start")).toBeNull();
-    fireEvent.click(screen.getByText("Accept"));
+    // The card's own accept is the approval: one approve button, not two.
+    expect(screen.getAllByText("Approve and start")).toHaveLength(1);
+    fireEvent.click(screen.getByText("Reject"));
+    expect(onReject).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByText("Approve and start"));
     expect(onAccept).toHaveBeenCalledTimes(1);
   });
 

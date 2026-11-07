@@ -733,10 +733,14 @@ describe("the plan tools", () => {
     expect(readPlan(file)?.stage).toBe("applying");
   });
 
-  it("leaves the plan in draft when the reader says no", async () => {
+  it("leaves the plan in draft when the reader says no, and ends the turn there", async () => {
     const { tools, file } = setupPlan(false);
     await exec(tools, "plan", { entries: [{ content: "Read the code" }] });
-    await expect(exec(tools, "apply_plan", {})).resolves.toContain("did not approve");
+    const answer = await exec(tools, "apply_plan", {});
+    expect(answer).toContain("did not approve");
+    // A refusal is not an invitation to rework the plan on the reader's behalf:
+    // their own words come next. The plan stays a draft until then.
+    expect(answer).toContain("end the turn");
     expect(readPlan(file)?.stage).toBe("draft");
   });
 

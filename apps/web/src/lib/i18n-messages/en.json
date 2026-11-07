@@ -1366,6 +1366,7 @@
     "planReady": "Plan ready for approval",
     "planAwaiting": "Awaiting",
     "openPlan": "Open plan",
+    "planApprove": "Approve",
     "modeSwitch": "Mode switch suggested",
     "modeSwitchTitle": "Switch to {{mode}}?",
     "modeSwitchHint": "The agent wants to change the session mode. Approve to switch, or reject to stay in the current mode.",

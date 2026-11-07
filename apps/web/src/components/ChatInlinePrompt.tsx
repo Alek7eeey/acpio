@@ -67,7 +67,18 @@ function permissionCopy(payload: Record<string, unknown>, toolCall: ToolCallPerm
   return { title, detail: detail && detail !== title ? detail : "" };
 }
 
-export function ChatInlinePrompt({ onOpenPlan }: { onOpenPlan?: () => void }) {
+export function ChatInlinePrompt({
+  onOpenPlan,
+  onAcceptPlan,
+  busy = false,
+}: {
+  onOpenPlan?: () => void;
+  /** Approve the plan and start the work: the harness flips the plan's stage and,
+   *  when nobody's turn is parked on the card, starts the turn itself. */
+  onAcceptPlan?: () => void;
+  /** An answer is already on its way — the buttons must not ask twice. */
+  busy?: boolean;
+}) {
   const t = useT();
   const pendingPermission = useAppStore((s) => s.pendingPermission);
   const permissionQueue = useAppStore((s) => s.permissionQueue);
@@ -154,6 +165,7 @@ export function ChatInlinePrompt({ onOpenPlan }: { onOpenPlan?: () => void }) {
           <button
             type="button"
             className={styles.danger}
+            disabled={busy}
             onClick={() =>
               void answerQuestion({ outcome: { outcome: "rejected", reason: "rejected by user" } })
             }
@@ -163,9 +175,14 @@ export function ChatInlinePrompt({ onOpenPlan }: { onOpenPlan?: () => void }) {
           <button
             type="button"
             className={styles.primary}
-            onClick={() => void answerQuestion({ outcome: { outcome: "accepted" } })}
+            disabled={busy}
+            onClick={() =>
+              onAcceptPlan
+                ? onAcceptPlan()
+                : void answerQuestion({ outcome: { outcome: "accepted" } })
+            }
           >
-            {t("common.accept")}
+            {t("question.planApprove")}
           </button>
         </div>
       </div>

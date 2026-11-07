@@ -418,6 +418,90 @@ describe("parked question", () => {
   });
 });
 
+describe("parked plan card", () => {
+  // The plan was formed and `apply_plan` sits inside the approval request: the
+  // session is "waiting", but that is not the agent working. The answer must
+  // read as finished, and the card under it is what the reader answers — the
+  // vague "Ожидание ввода" over it only asked what input was expected.
+  const planWaiting: SessionDetailDto = {
+    ...detail,
+    status: "waiting",
+    messages: [
+      detail.messages[0]!,
+      {
+        id: "m1",
+        sessionId: "s1",
+        role: "assistant",
+        createdAt: "2026-09-30T10:00:01.000Z",
+        parts: [
+          part("t1", "thought", 0, "Разложу работу по шагам"),
+          part("x1", "text", 1, "Вот план — он в панели справа."),
+        ],
+      },
+    ],
+  };
+
+  beforeEach(() => {
+    useAppStore.setState({
+      settings: {
+        ...DEFAULT_SETTINGS,
+        locale: "ru" as const,
+        chatAgentTurnTimeline: true,
+        chatMetaChips: [],
+      },
+      sessions: [planWaiting],
+      activeSessionId: "s1",
+      activeSession: planWaiting,
+      sessionLoading: false,
+      error: null,
+      chatPaneIds: ["s1"],
+      focusedPaneIndex: 0,
+      unseenFinishedTurns: {},
+      sessionDetails: { s1: planWaiting },
+      pendingPermission: null,
+      pendingQuestion: {
+        sessionId: "s1",
+        requestId: "r1",
+        kind: "create_plan",
+        payload: {
+          name: "План как файл",
+          overview: "План переезжает в файл.",
+          stage: "draft",
+          path: ".acpio/plan.md",
+          entries: [{ content: "Написать planFile.ts", status: "pending" }],
+        },
+      },
+    });
+  });
+
+  afterEach(() => {
+    useAppStore.setState({ pendingQuestion: null });
+  });
+
+  it("finishes the answer and leaves the card as the only thing to answer", async () => {
+    const { container } = render(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <I18nProvider>
+          <ChatPage />
+        </I18nProvider>
+      </MemoryRouter>,
+    );
+
+    await screen.findByText("Вот план — он в панели справа.");
+
+    // The card names the plan and carries the way into it.
+    expect(screen.getByText("План готов к подтверждению")).toBeTruthy();
+    expect(screen.getByText("Открыть план")).toBeTruthy();
+
+    // Nothing claims the agent is generating, and nothing asks a vague question
+    // the card already answers.
+    expect(container.textContent).not.toContain("Работаю");
+    expect(container.textContent).not.toContain("Ожидание ввода");
+    // The run above the plan reads as finished work.
+    expect(container.textContent).toContain("Работал");
+  });
+});
+
 describe("compaction row", () => {
   /** The turn that ran the squeeze: the row, then the work it was folded for. */
   const compacted: SessionDetailDto = {

@@ -471,12 +471,24 @@ type AppState = {
   ) => Promise<void>;
   sendPrompt: (
     text: string,
-    opts?: { editMessageId?: string; attachments?: PendingAttachment[]; sessionId?: string },
+    opts?: {
+      editMessageId?: string;
+      attachments?: PendingAttachment[];
+      sessionId?: string;
+      /** The harness's own prompt: never queued, never shown in the chat. */
+      internal?: boolean;
+    },
   ) => Promise<void>;
   /** Internal: actually hand one prompt to the server (optimistic pair optional). */
   runSendPrompt: (
     text: string,
-    opts?: { editMessageId?: string; attachments?: PendingAttachment[]; sessionId?: string },
+    opts?: {
+      editMessageId?: string;
+      attachments?: PendingAttachment[];
+      sessionId?: string;
+      /** The harness's own prompt: never queued, never shown in the chat. */
+      internal?: boolean;
+    },
     flags?: { optimistic?: boolean },
   ) => Promise<void>;
   removeQueuedPrompt: (id: string) => void;
@@ -3341,9 +3353,13 @@ export const useAppStore = create<AppState>((set, get) => ({
    * `promptQueue` (editable/deletable) until a slot frees up; the drain then
    * hands them to the server one at a time (serial) or up to two at once when
    * multitask is enabled.
+   * `internal` is the harness speaking on the reader's behalf (the plan's
+   * approval): it never stands in the queue — nobody typed it — and it writes
+   * no message into the chat, so it bypasses the busy check and goes as is.
    */
   async sendPrompt(text, opts) {
     const sid = opts?.sessionId ?? get().activeSessionId;
+    const internal = opts?.internal === true;
     // A harness the user has not configured yet cannot turn this text into a
     // turn: say so now instead of queueing a message that would only come back
     // as a failure.
@@ -3357,7 +3373,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       ? get().promptQueue.filter((q) => q.sessionId === sid)
       : get().promptQueue;
     const busy =
-      inf >= limit || queued.length > 0 || status === "running" || status === "waiting";
+      !internal &&
+      (inf >= limit || queued.length > 0 || status === "running" || status === "waiting");
     if (busy) {
       if (!sid) return;
       set({
@@ -3390,15 +3407,17 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ inflight: get().inflight + 1 });
     }
     try {
-      await get().runSendPrompt(text, opts, { optimistic: true });
+      await get().runSendPrompt(text, opts, { optimistic: !internal });
     } catch (err) {
       // Nothing reached the server. The text goes to the head of the queue — it
       // was meant for now — so the reconnect hands it over instead of the user
       // retyping what the broken connection swallowed.
       const target = sid ?? get().activeSessionId;
-      if (target) {
+      set({ error: err instanceof Error ? err.message : String(err) });
+      // Nobody typed a hidden prompt, so it must not stand in the queue as one:
+      // the reader would see a request they cannot remember writing.
+      if (target && !internal) {
         set({
-          error: err instanceof Error ? err.message : String(err),
           promptQueue: [
             {
               id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -3608,11 +3627,13 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async runSendPrompt(text, opts, { optimistic = true } = {}) {
     const id = opts?.sessionId ?? get().activeSessionId;
+    // The harness's own prompt is not the reader's text: their draft stays.
+    const internal = opts?.internal === true;
     set({ error: null });
     // The text is now a real message; its composer draft must not linger in the
     // persisted map (or resurrect after a reload). Drop it from the live
     // registry too, so a later keystroke cannot re-persist the sent text.
-    if (id) forgetComposerDraft(id);
+    if (id && !internal) forgetComposerDraft(id);
     // A chat created moments ago may still be in flight to the server; sending
     // now would 404 on the missing row. Wait for the POST, then proceed.
     const pendingCreate = id ? pendingCreateById.get(id) : undefined;
@@ -3796,7 +3817,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         text,
         opts?.editMessageId
           ? { editMessageId: resolveServerMessageId(opts.editMessageId, id) }
-          : { ...(opts?.attachments?.length ? { attachments: opts.attachments } : {}) },
+          : {
+              ...(opts?.attachments?.length ? { attachments: opts.attachments } : {}),
+              ...(internal ? { internal: true } : {}),
+            },
       );
     } catch (err) {
       if (optimisticPair) rollbackOptimisticPair(get, set, optimisticPair);

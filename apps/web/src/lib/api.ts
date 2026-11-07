@@ -722,6 +722,8 @@ export const api = {
       attachments?: Array<{ name: string; path: string }>;
       /** How to reach an agent that is already working — see PromptDelivery. */
       delivery?: PromptDelivery;
+      /** The harness's own prompt: drives a turn, leaves no message in the chat. */
+      internal?: boolean;
     },
   ) =>
     request<{ ok: boolean }>(`/api/sessions/${id}/prompt`, {
@@ -730,6 +732,7 @@ export const api = {
         text,
         ...(opts?.editMessageId ? { editMessageId: opts.editMessageId } : {}),
         ...(opts?.delivery ? { delivery: opts.delivery } : {}),
+        ...(opts?.internal ? { internal: true } : {}),
         ...(opts?.attachments?.length ? { attachments: opts.attachments } : {}),
       }),
     }),

@@ -22,8 +22,10 @@ Publish it with the `plan` tool so the side panel shows it: `name` — the task 
 
 Call `apply_plan` and stop there: the panel asks the reader to approve the plan or edit it, and the turn ends with that answer. Do not implement "just the first step" while waiting, and do not start because the plan looks obvious.
 
+The answer that carries `apply_plan` says in one line that the plan is ready, and stops there. The card above the input carries the three answers: `Открыть план` opens the whole plan, «Одобрить» starts the work, «Отклонить» ends the turn with nothing implemented — the reader then says what to change, and only that brings the plan back to the file. One line: the steps themselves live in the panel, not in the answer.
+
 `/plan <task>` is the whole request: no questions before the plan. Where a wrong guess would silently change the goal, write the assumption into the plan instead of asking; ask only when the goal itself is undecided.
 
-Approved, the plan is the contract: the steps are the order of the work, and `plan` is called again as each one starts and lands. A step the reader changes on the way is changed in the plan file first.
+Approved (from that card, or from «Утвердить и начать» in the panel — with the pace the reader picked there: all at once or one step at a time), the plan is the contract: the steps are the order of the work, and `plan` is called again as each one starts and lands. A step the reader changes on the way is changed in the plan file first.
 
 If the plan tool is not offered in this chat, a plan as Markdown in the answer is the fallback — same steps, same checks, no `.acpio/plan.md`.
