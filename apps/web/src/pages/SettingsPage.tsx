@@ -3773,7 +3773,7 @@ export function SettingsPage() {
                               t("settings.builtinKeyModeExhausted"),
                             ]}
                           >
-                            <div className={styles.actionChips}>
+                            <div className={styles.keyModeChips}>
                               {(
                                 [
                                   ["rotate", t("settings.builtinKeyModeRotate")],
