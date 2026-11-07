@@ -432,22 +432,111 @@ export async function findDeclaration(
   spec: string,
   name: string,
 ): Promise<{ path: string; line: number; col: number } | null> {
-  let from = fromRel;
-  let specifier = spec;
-  for (let hop = 0; hop < 4 && specifier; hop += 1) {
+  // A name used and declared in the same file has no import to follow: the
+  // compiler reads the very file it was asked about.
+  if (!spec) {
+    const abs = insideRoot(root, fromRel);
+    const ts = abs ? configFor(root, abs)?.ts ?? compilerFor(root) : null;
+    const text = abs && ts ? await fsp.readFile(abs, "utf8").catch(() => null) : null;
+    const found = ts && text ? declarationIn(ts, text, name) : null;
+    return found ? { path: fromRel, line: found.line, col: found.col } : null;
+  }
+  // A barrel hides the name behind `export ... from` or `export * from`. Walk it
+  // depth first — a monorepo's `all.ts` fans out to dozens of barrels, so breadth
+  // first spends the budget on siblings before reaching the one that declares.
+  const firstTarget = await resolveSpecifier(root, fromRel, spec);
+  const seen = new Set<string>();
+  let budget = 60;
+  const visit = async (
+    from: string,
+    specifier: string,
+    depth: number,
+  ): Promise<{ path: string; line: number; col: number } | null> => {
+    budget -= 1;
+    if (budget <= 0 || depth > 6) return null;
     const target = await resolveSpecifier(root, from, specifier);
     const abs = target ? insideRoot(root, target) : null;
-    const ts = abs ? (configFor(root, abs)?.ts ?? compilerFor(root)) : null;
-    const text = ts && abs ? await fsp.readFile(abs, "utf8").catch(() => null) : null;
-    if (!target || !ts || !text) return null;
+    if (!target || !abs || seen.has(target)) return null;
+    seen.add(target);
+    const ts = configFor(root, abs)?.ts ?? compilerFor(root);
+    const text = ts ? await fsp.readFile(abs, "utf8").catch(() => null) : null;
+    if (!ts || !text) return null;
     const found = declarationIn(ts, text, name);
     if (found) return { path: target, line: found.line, col: found.col };
-    // A barrel re-exports the name instead of declaring it: follow that line.
-    const line = text
-      .split("\n")
-      .find((one) => /^\s*export\b/.test(one) && one.includes(name) && /from\s*["']/.test(one));
-    specifier = line ? (/from\s*["']([^"']+)["']/.exec(line)?.[1] ?? "") : "";
-    from = target;
+    const lines = text.split("\n");
+    // A named re-export says where the name lives; its whole `export *` fan-out
+    // is only worth walking when nothing names it.
+    const named = lines
+      .filter((line) => /^\s*export\b/.test(line) && line.includes(name) && /from\s*["']/.test(line))
+      .map((line) => /from\s*["']([^"']+)["']/.exec(line)?.[1] ?? "")
+      .filter(Boolean);
+    const next = named.length > 0
+      ? named
+      : lines
+        .map((line) => /^\s*export\s+\*\s+from\s+["']([^"']+)["']/.exec(line)?.[1] ?? "")
+        .filter(Boolean);
+    for (const one of next) {
+      const hit = await visit(target, one, depth + 1);
+      if (hit) return hit;
+    }
+    return null;
+  };
+  const walked = await visit(fromRel, spec, 0);
+  if (walked) return walked;
+  // Barrels can fan out past any budget (a DI container with 60 re-exports buries
+  // its siblings): read the package the specifier points into instead.
+  const firstAbs = (() => {
+    const target = firstTarget;
+    return target ? insideRoot(root, target) : null;
+  })();
+  if (!firstAbs) return null;
+  return scanDeclaration(root, await packageDirOf(firstAbs), name);
+}
+
+/** The nearest folder with a `package.json`, else the file's own. */
+async function packageDirOf(abs: string): Promise<string> {
+  let dir = path.dirname(abs);
+  for (let hops = 0; hops < 8; hops += 1) {
+    if (await fsp.access(path.join(dir, "package.json")).then(() => true, () => false)) return dir;
+    const up = path.dirname(dir);
+    if (up === dir) break;
+    dir = up;
+  }
+  return path.dirname(abs);
+}
+
+/** First `.ts` file of a package that declares the name at its top level. */
+async function scanDeclaration(
+  root: string,
+  packageDir: string,
+  name: string,
+  max = 800,
+): Promise<{ path: string; line: number; col: number } | null> {
+  const files: string[] = [];
+  const walk = async (dir: string): Promise<void> => {
+    if (files.length >= max) return;
+    const entries = await fsp.readdir(dir, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name === "node_modules" || entry.name === "dist" || entry.name.startsWith(".")) continue;
+        await walk(full);
+      } else if (/\.tsx?$/.test(entry.name) && !entry.name.endsWith(".d.ts")) {
+        files.push(full);
+      }
+    }
+  };
+  await walk(packageDir);
+  for (const abs of files.sort()) {
+    const text = await fsp.readFile(abs, "utf8").catch(() => null);
+    // Cheap filter: a file that never mentions the name cannot declare it.
+    if (!text || !text.includes(name)) continue;
+    const rel = path.relative(path.resolve(root), abs).replaceAll("\\", "/");
+    if (!insideRoot(root, rel)) continue;
+    const ts = configFor(root, abs)?.ts ?? compilerFor(root);
+    if (!ts) continue;
+    const found = declarationIn(ts, text, name);
+    if (found) return { path: rel, line: found.line, col: found.col };
   }
   return null;
 }

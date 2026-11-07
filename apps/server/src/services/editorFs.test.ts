@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
+  findDeclaration,
   formatText,
   insideRoot,
   lintFile,
@@ -213,6 +214,77 @@ describe("formatText", () => {
 
   it("refuses a path outside the root", async () => {
     await expect(formatText(process.cwd(), "../escape.ts", "x")).rejects.toThrow(/escapes root/);
+  });
+});
+
+describe("findDeclaration", () => {
+  // A monorepo package whose barrel buries the name behind 70 dead-end siblings,
+  // the way a DI container's `all.ts` does — deeper than any walk budget.
+  write("pkg/package.json", JSON.stringify({ name: "core" }));
+  write("pkg/tsconfig.json", "{}");
+  write("pkg/src/index.ts", "export * from './everything';\n");
+  write(
+    "pkg/src/everything.ts",
+    [
+      ...Array.from({ length: 70 }, (_, index) => `export * from './filler${index}';`),
+      "export * from './contracts';",
+      "",
+    ].join("\n"),
+  );
+  write("pkg/src/contracts.ts", "export type ImGlobal = { name: string };\n");
+  write("declapp/package.json", JSON.stringify({ name: "app" }));
+  write(
+    "declapp/tsconfig.json",
+    JSON.stringify({
+      compilerOptions: {
+        module: "esnext",
+        moduleResolution: "bundler",
+        baseUrl: ".",
+        paths: { core: ["../pkg/src/index.ts"] },
+      },
+    }),
+  );
+  write("declapp/plugins.ts", "import { ImGlobal } from 'core';\n");
+
+  it("finds a name the barrels bury, by reading the package the specifier points into", async () => {
+    expect(await findDeclaration(repo, "declapp/plugins.ts", "core", "ImGlobal")).toEqual({
+      path: "pkg/src/contracts.ts",
+      line: 1,
+      col: 1,
+    });
+  });
+
+  it("answers nothing for a name the package does not declare", async () => {
+    expect(await findDeclaration(repo, "declapp/plugins.ts", "core", "Nope")).toBeNull();
+  });
+
+  // `get Plugins(): IPlugins` next to `export interface IPlugins` has no import to
+  // follow: the language server refuses to point inside the same file, so nobody
+  // answered at all until the compiler read this very file.
+  it("finds a name declared in the file it is used in", async () => {
+    write(
+      "declapp/same.ts",
+      [
+        "import { Something } from './elsewhere';",
+        "export interface IPlugins {",
+        "  name: string;",
+        "}",
+        "",
+        "export type ImGlobal = {",
+        "  get Plugins(): IPlugins;",
+        "};",
+        "",
+      ].join("\n"),
+    );
+    expect(await findDeclaration(repo, "declapp/same.ts", "", "IPlugins")).toEqual({
+      path: "declapp/same.ts",
+      line: 2,
+      col: 1,
+    });
+  });
+
+  it("answers nothing for an unknown name in the same file", async () => {
+    expect(await findDeclaration(repo, "declapp/same.ts", "", "Nope")).toBeNull();
   });
 });
 
