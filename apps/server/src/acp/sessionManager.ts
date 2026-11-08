@@ -785,6 +785,9 @@ export function parseRpcId(requestId: string, sessionId: string): string | numbe
 /** Normalize ACP plan updates / create_plan payloads for the UI side panel. */
 export function normalizePlanPartPayload(raw: Record<string, unknown>): Record<string, unknown> {
   const name = String(raw.name ?? raw.title ?? "").trim();
+  // The problem the plan solves and the solution answering it: what the reader
+  // approves before any step — the panel draws them above the list.
+  const problem = String(raw.problem ?? "").trim();
   const overview = String(raw.overview ?? "").trim();
   const plan = String(raw.plan ?? raw.content ?? "").trim();
   const todosFromField = Array.isArray(raw.todos) ? raw.todos : null;
@@ -816,6 +819,7 @@ export function normalizePlanPartPayload(raw: Record<string, unknown>): Record<s
   return {
     ...raw,
     ...(name ? { name } : {}),
+    ...(problem ? { problem } : {}),
     ...(overview ? { overview } : {}),
     ...(plan ? { plan } : {}),
     ...(cleanedTodos?.length ? { todos: cleanedTodos } : {}),

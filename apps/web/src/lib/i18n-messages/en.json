@@ -1370,6 +1370,8 @@
   },
   "question": {
     "plan": "Plan",
+    "planProblem": "Problem",
+    "planSolution": "Solution",
     "agentQuestion": "Agent question",
     "yourAnswer": "Your answer",
     "todos": "Todos",

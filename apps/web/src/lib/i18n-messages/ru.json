@@ -1398,6 +1398,8 @@
   },
   "question": {
     "plan": "План",
+    "planProblem": "Проблема",
+    "planSolution": "Решение",
     "agentQuestion": "Вопрос агента",
     "yourAnswer": "Ваш ответ",
     "todos": "Задачи",

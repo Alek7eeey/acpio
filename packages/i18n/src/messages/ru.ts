@@ -1204,6 +1204,8 @@ export const ru = {
     todos: "Задачи",
     planReady: "План готов к подтверждению",
     planAwaiting: "Ожидает",
+    planProblem: "Проблема",
+    planSolution: "Решение",
     openPlan: "Открыть план",
   },
   modes: {

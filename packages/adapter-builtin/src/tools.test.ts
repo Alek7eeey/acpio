@@ -727,7 +727,11 @@ describe("the plan tools", () => {
 
   it("asks the reader before implementing, and only approval flips the stage", async () => {
     const { tools, file, approve } = setupPlan(true);
-    await exec(tools, "plan", { entries: [{ content: "Read the code" }] });
+    await exec(tools, "plan", {
+      problem: "The export drops the plan, so a reader loses it on copy.",
+      overview: "Add a plan branch to the export.",
+      entries: [{ content: "Read the code" }],
+    });
     await expect(exec(tools, "apply_plan", {})).resolves.toContain("Plan approved");
     expect(approve).toHaveBeenCalledTimes(1);
     expect(readPlan(file)?.stage).toBe("applying");
@@ -735,7 +739,10 @@ describe("the plan tools", () => {
 
   it("leaves the plan in draft when the reader says no, and ends the turn there", async () => {
     const { tools, file } = setupPlan(false);
-    await exec(tools, "plan", { entries: [{ content: "Read the code" }] });
+    await exec(tools, "plan", {
+      problem: "The export drops the plan.",
+      entries: [{ content: "Read the code" }],
+    });
     const answer = await exec(tools, "apply_plan", {});
     expect(answer).toContain("did not approve");
     // A refusal is not an invitation to rework the plan on the reader's behalf:
@@ -746,7 +753,10 @@ describe("the plan tools", () => {
 
   it("takes the pace from the call and keeps it", async () => {
     const { tools, file } = setupPlan(true);
-    await exec(tools, "plan", { entries: [{ content: "Read the code" }] });
+    await exec(tools, "plan", {
+      problem: "The export drops the plan.",
+      entries: [{ content: "Read the code" }],
+    });
     await exec(tools, "apply_plan", { pacing: "step" });
     expect(readPlan(file)?.pacing).toBe("step");
   });
@@ -755,5 +765,20 @@ describe("the plan tools", () => {
     const { tools, approve } = setupPlan(true);
     await expect(exec(tools, "apply_plan", {})).rejects.toThrow(/no steps yet/);
     expect(approve).not.toHaveBeenCalled();
+  });
+
+  it("refuses to apply a plan that states no problem", async () => {
+    // What the reader approves is the problem and its solution: a list with no
+    // reason behind it is not something to agree with.
+    const { tools, file, approve } = setupPlan(true);
+    await exec(tools, "plan", { overview: "Three steps.", entries: [{ content: "Read the code" }] });
+    await expect(exec(tools, "apply_plan", {})).rejects.toThrow(/states no problem/);
+    expect(approve).not.toHaveBeenCalled();
+    expect(readPlan(file)?.stage).toBe("draft");
+
+    // Said once, the plan is approvable — and the problem is in the file.
+    await exec(tools, "plan", { problem: "The export drops the plan." });
+    expect(readPlan(file)?.problem).toBe("The export drops the plan.");
+    await expect(exec(tools, "apply_plan", {})).resolves.toContain("Plan approved");
   });
 });

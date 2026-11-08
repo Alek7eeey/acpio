@@ -1183,6 +1183,8 @@ export const en = {
     todos: "Todos",
     planReady: "Plan ready for approval",
     planAwaiting: "Awaiting",
+    planProblem: "Problem",
+    planSolution: "Solution",
     openPlan: "Open plan",
   },
   modes: {

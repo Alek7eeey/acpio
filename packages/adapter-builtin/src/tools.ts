@@ -753,8 +753,9 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
     ? {
         plan: tool({
           description:
-            "Write or update the plan file the right-hand panel shows: the whole list of steps in " +
-            "order, each with its status, plus `name`, `overview` and the reasoning as Markdown. " +
+            "Write or update the plan file the right-hand panel shows: `problem` — what is broken, " +
+            "missing or wrong and why it is worth fixing now — then the solution in `overview`, the " +
+            "whole list of steps in order, each with its status, and the reasoning as Markdown. " +
             "Omitted fields keep what the file already has, so a call that only moves a step's " +
             "status carries `entries` alone; a call with nothing at all republishes the file as it " +
             `is (${planBridge.path}), which is what you want after editing it with \`read\`/\`edit\`.` +
@@ -779,10 +780,21 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
                   "keep the steps the file already has.",
               ),
             name: z.string().optional().describe("Title of the plan."),
+            problem: z
+              .string()
+              .optional()
+              .describe(
+                "The problem this plan solves, one or two lines: what is broken, missing or wrong, " +
+                  "and what it costs the reader today. A plan never approved says none — `apply_plan` " +
+                  "refuses a plan without it, the same way it refuses one with no steps.",
+              ),
             overview: z
               .string()
               .optional()
-              .describe("One or two lines on the shape of the plan: what it does and why."),
+              .describe(
+                "The solution in one or two lines: what changes and why exactly that way — an answer " +
+                  "to the problem above it.",
+              ),
             plan: z
               .string()
               .optional()
@@ -791,7 +803,7 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
                   "together, how it will be checked. The panel draws it below the overview.",
               ),
           }),
-          execute: async ({ entries, name, overview, plan: markdown }) => {
+          execute: async ({ entries, name, problem, overview, plan: markdown }) => {
             const list: PlanEntry[] = [];
             for (const entry of entries ?? []) {
               const content = entry.content.trim();
@@ -800,6 +812,7 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
             }
             const document: PlanDocument = {
               ...(name?.trim() ? { name: name.trim() } : {}),
+              ...(problem?.trim() ? { problem: problem.trim() } : {}),
               ...(overview?.trim() ? { overview: overview.trim() } : {}),
               ...(markdown?.trim() ? { plan: markdown.trim() } : {}),
             };
@@ -845,6 +858,15 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
             if (!prev.entries.length) {
               throw new Error(
                 `apply_plan: ${planBridge.path} has no steps yet — write the plan with \`plan\` first.`,
+              );
+            }
+            // What is being approved is the problem and its solution: a plan that
+            // never says what it fixes cannot be approved, exactly like one with
+            // no steps — the reader would be approving a list with no reason.
+            if (!(prev.problem ?? "").trim()) {
+              throw new Error(
+                `apply_plan: ${planBridge.path} states no problem — write it with \`plan\` first ` +
+                  "(`problem`: what is broken, missing or wrong, and why it is worth fixing now).",
               );
             }
             const pace = pacing ?? prev.pacing;

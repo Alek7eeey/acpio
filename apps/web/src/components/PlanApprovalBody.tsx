@@ -15,6 +15,9 @@ export type PlanPhase = {
 
 export type PlanPayload = {
   name?: string;
+  /** What is wrong — drawn above the solution, the way the plan file states it. */
+  problem?: string;
+  /** The solution in one or two lines: what changes and why exactly that way. */
   overview?: string;
   plan?: string;
   todos?: PlanTodo[];
@@ -91,6 +94,7 @@ export function isPlanPayload(
 export function coercePlanPayload(raw: Record<string, unknown>): PlanPayload | null {
   if (!isPlanPayload(raw)) return null;
   const name = String(raw.name ?? raw.title ?? "").trim();
+  const problem = String(raw.problem ?? "").trim();
   const overview = String(raw.overview ?? "").trim();
   const plan = String(raw.plan ?? raw.content ?? "").trim();
   let todos: PlanTodo[] = Array.isArray(raw.todos)
@@ -114,6 +118,7 @@ export function coercePlanPayload(raw: Record<string, unknown>): PlanPayload | n
   const pacing = String(raw.pacing ?? "").trim();
   return {
     name: name || undefined,
+    problem: problem || undefined,
     overview: overview || undefined,
     plan: plan || undefined,
     todos: todos.length ? todos : undefined,
@@ -137,6 +142,7 @@ export function PlanApprovalBody({
 }) {
   const t = useT();
   const title = String(payload.name ?? "").trim() || fallbackTitle;
+  const problem = String(payload.problem ?? "").trim();
   const overview = String(payload.overview ?? "").trim();
   const plan = String(payload.plan ?? "").trim();
   const todos = Array.isArray(payload.todos) ? payload.todos : [];
@@ -145,7 +151,22 @@ export function PlanApprovalBody({
   return (
     <div className={styles.planBody}>
       <h2 className={styles.planTitle}>{title}</h2>
-      {overview ? <p className={styles.planOverview}>{overview}</p> : null}
+      {problem ? (
+        <div className={styles.planSection}>
+          <div className={styles.planSectionLabel}>{t("question.planProblem")}</div>
+          <p className={styles.planOverview}>{problem}</p>
+        </div>
+      ) : null}
+      {overview ? (
+        problem ? (
+          <div className={styles.planSection}>
+            <div className={styles.planSectionLabel}>{t("question.planSolution")}</div>
+            <p className={styles.planOverview}>{overview}</p>
+          </div>
+        ) : (
+          <p className={styles.planOverview}>{overview}</p>
+        )
+      ) : null}
       {plan ? (
         <div className={`${styles.planMarkdown} ${scrollable ? "" : styles.planMarkdownFree}`}>
           <MarkdownContent text={plan} />
