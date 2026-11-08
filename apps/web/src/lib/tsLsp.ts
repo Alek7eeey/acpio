@@ -1,12 +1,15 @@
+import type { Completion } from "@codemirror/autocomplete";
 import type { LintItem } from "./editorApi";
 
 /**
  * A deliberately small LSP client: one WebSocket, one document at a time, full
- * text sync. That is enough for definition, references and diagnostics, and it
- * keeps the pane in control of every message it sends.
+ * text sync. That is enough for definition, references, diagnostics and manual
+ * completion, and it keeps the pane in control of every message it sends.
  *
- * shortcut: full-text sync on every change, no incremental changes and no
- * completion. Upgrade to incremental sync when a large file starts lagging.
+ * shortcut: full-text sync on every change, no incremental changes, and
+ * completion only when the user asks (Ctrl+Space) — one request per press, so
+ * nothing queues behind a keystroke burst. Upgrade to incremental sync when a
+ * large file starts lagging.
  */
 
 export type LspPosition = { line: number; character: number };
@@ -67,9 +70,17 @@ export class TsLsp {
   onDiagnostics: ((relPath: string, items: LintItem[]) => void) | null = null;
   ready: Promise<void>;
 
+  /**
+   * The folder the server is asked to own: the file's own project, never the
+   * pane root above it. A server pointed at a repository root loads every
+   * project in it, and no completion ever comes back.
+   */
+  private serverRoot: string;
+
   /** `project` is the file's own project folder, relative to the pane root. */
   constructor(root: string, project = "") {
     this.root = root;
+    this.serverRoot = project ? `${root}\\${project}` : root;
     const proto = window.location.protocol === "https:" ? "wss" : "ws";
     this.ws = new WebSocket(
       `${proto}://${window.location.host}/ws/editor/lsp?root=${encodeURIComponent(root)}` +
@@ -109,16 +120,34 @@ export class TsLsp {
     this.send({ jsonrpc: "2.0", method, params });
   }
 
-  private request<T>(method: string, params: unknown): Promise<T> {
+  /**
+   * A request the server never answers must settle anyway: tsserver goes quiet
+   * on a completion asked for a position past the end of the line the document
+   * it holds does not have, and an entry left in `pending` is a leak.
+   */
+  private request<T>(method: string, params: unknown, timeoutMs = 8000): Promise<T> {
     const id = this.nextId++;
     return new Promise<T>((resolve, reject) => {
-      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`${method} timed out`));
+      }, timeoutMs);
+      this.pending.set(id, {
+        resolve: (value) => {
+          clearTimeout(timer);
+          resolve(value as T);
+        },
+        reject: (err) => {
+          clearTimeout(timer);
+          reject(err);
+        },
+      });
       this.send({ jsonrpc: "2.0", id, method, params });
     });
   }
 
   private async handshake(): Promise<void> {
-    const rootUri = pathToUri(this.root);
+    const rootUri = pathToUri(this.serverRoot);
     const id = this.nextId++;
     const answered = new Promise<void>((resolve, reject) => {
       this.pending.set(id, { resolve: () => resolve(), reject });
@@ -296,6 +325,19 @@ export class TsLsp {
     return walk((await ask()) ?? []);
   }
 
+  /**
+   * Suggestions at the caret, filtered by tsserver itself. Asked for on a key
+   * press only; a server that answers nothing or fails just means no popup.
+   */
+  async completion(path: string, line: number, character: number): Promise<Completion[]> {
+    const res = await this.request<unknown>("textDocument/completion", {
+      textDocument: { uri: pathToUri(`${this.root}\\${path}`) },
+      position: { line, character },
+      context: { triggerKind: 1 },
+    }).catch(() => null);
+    return toCompletions(res);
+  }
+
   async references(path: string, line: number, character: number): Promise<LspLocation[]> {
     const res = await this.request<unknown>("textDocument/references", {
       textDocument: { uri: pathToUri(`${this.root}\\${path}`) },
@@ -314,6 +356,74 @@ export class TsLsp {
   }
 }
 
+/** LSP `CompletionItemKind` → the icon class CodeMirror styles. */
+const COMPLETION_TYPES: Record<number, string> = {
+  1: "text",
+  2: "method",
+  3: "function",
+  4: "function",
+  5: "property",
+  6: "variable",
+  7: "class",
+  8: "interface",
+  9: "namespace",
+  10: "property",
+  11: "constant",
+  12: "constant",
+  13: "enum",
+  14: "keyword",
+  15: "text",
+  16: "constant",
+  17: "text",
+  18: "variable",
+  19: "text",
+  20: "constant",
+  21: "constant",
+  22: "class",
+  23: "property",
+  24: "keyword",
+  25: "type",
+};
+
+type RawCompletion = {
+  label?: unknown;
+  kind?: number;
+  detail?: string;
+  sortText?: string;
+  documentation?: string | { value?: string };
+  insertText?: string;
+  insertTextFormat?: number;
+};
+
+/**
+ * `CompletionItem[]` or a `CompletionList` — tsserver answers with either.
+ * `sortText` keeps the server's order (locals before imports), and `detail`
+ * carries the type the way VS Code shows it next to the name.
+ */
+export function toCompletions(res: unknown): Completion[] {
+  const list = Array.isArray(res) ? res : ((res as { items?: unknown[] } | null)?.items ?? []);
+  return (list as RawCompletion[]).flatMap((item) => {
+    if (!item || typeof item.label !== "string") return [];
+    // A snippet would insert its `$1` markers verbatim: the plain name is safer.
+    const snippet = item.insertTextFormat === 2 || item.kind === 15;
+    // `textEdit` is ignored on purpose: tsserver's range starts on the trigger
+    // character, so its `.one` would land after a dot the buffer already has.
+    const text = snippet ? undefined : item.insertText;
+    const info =
+      typeof item.documentation === "string" ? item.documentation : item.documentation?.value;
+    return [
+      {
+        label: item.label,
+        sortText: item.sortText,
+        detail: item.detail,
+        info,
+        apply: text && text !== item.label ? text : undefined,
+        type: COMPLETION_TYPES[item.kind ?? 0] ?? "text",
+      },
+    ];
+  });
+}
+
 function toLocations(res: unknown): LspLocation[] {
   const list = Array.isArray(res) ? res : res ? [res] : [];
   return list.flatMap((item) => {
@@ -325,7 +435,7 @@ function toLocations(res: unknown): LspLocation[] {
 }
 
 /** `null` for a file the TypeScript server has no business parsing. */
-function languageIdOf(path: string): string | null {
+export function languageIdOf(path: string): string | null {
   const ext = path.split(".").pop()?.toLowerCase() ?? "";
   if (ext === "ts" || ext === "mts" || ext === "cts") return "typescript";
   if (ext === "tsx") return "typescriptreact";

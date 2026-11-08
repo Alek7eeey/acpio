@@ -486,6 +486,7 @@ describe("DEFAULT_SETTINGS", () => {
     diagnosticsDir: "",
     diagnosticsDeepLogging: false,
     editorTheme: "auto",
+    editorNavPlacement: "tabs",
     editorSplit: "off",
     editorKeyDefinition: "F12",
     editorKeyUsages: "Shift-F12",

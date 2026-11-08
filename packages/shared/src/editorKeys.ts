@@ -37,6 +37,18 @@ export type EditorKeyAction = (typeof EDITOR_KEY_ACTIONS)[number];
 
 export const DEFAULT_EDITOR_THEME: EditorThemeChoice = "auto";
 
+/** Where the pane keeps its «назад/вперёд» arrows: VS Code's spot, or the bar below. */
+export const EDITOR_NAV_PLACEMENTS = ["tabs", "statusBar"] as const;
+export type EditorNavPlacement = (typeof EDITOR_NAV_PLACEMENTS)[number];
+
+export const DEFAULT_EDITOR_NAV_PLACEMENT: EditorNavPlacement = "tabs";
+
+export function normalizeEditorNavPlacement(raw: unknown): EditorNavPlacement {
+  return EDITOR_NAV_PLACEMENTS.includes(raw as EditorNavPlacement)
+    ? (raw as EditorNavPlacement)
+    : DEFAULT_EDITOR_NAV_PLACEMENT;
+}
+
 export const DEFAULT_EDITOR_KEYS: Record<EditorKeyAction, string> = {
   definition: "F12",
   usages: "Shift-F12",

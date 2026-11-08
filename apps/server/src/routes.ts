@@ -7,7 +7,7 @@ import { db } from "./db/client.js";
 import { messages, messageParts, sessions } from "./db/schema.js";
 import { defaultSessionTitle, errorMessage } from "@acpio/i18n";
 import type { BuiltinProviderKind } from "@acpio/shared";
-import { BUILD_INFO, EDITOR_SPLITS, EDITOR_THEMES, EDITOR_TOOL_SOURCES, CONSOLE_TERMINAL_LIMITS, CUSTOM_AGENT_MAX, BUILTIN_MAX_OUTPUT_TOKENS_MAX, BUILTIN_TURN_RETRY_ATTEMPTS_MIN, BUILTIN_TURN_RETRY_ATTEMPTS_MAX, BUILTIN_THINKING_LIMIT_MAX, BUILTIN_BASH_TIMEOUT_SEC_MIN, BUILTIN_BASH_TIMEOUT_SEC_MAX, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MIN, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MAX, BUILTIN_KEEP_RECENT_PERCENT_MIN, BUILTIN_KEEP_RECENT_PERCENT_MAX, BUILTIN_MAX_SUMMARY_TOKENS_MAX, BUILTIN_PRUNE_TOOL_RESULTS_KEEP_LAST_MAX, CHAT_TITLE_MAX_LEN_MIN, CHAT_TITLE_MAX_LEN_MAX, isShellSession, canonicalCwd, normalizeBuiltinSubagents, normalizeSkillModes, BUILTIN_PRESET_MAX, normalizeBuiltinPresets, SHELL_SESSION_PROVIDER, titleFromTaskDescription, titleFromUserText, titleFromSlashCommand, builtinProviderKeys, BUILTIN_MAX_PROVIDER_KEYS, BUILTIN_MAX_KEY_LENGTH, BUILTIN_PROVIDER_KINDS } from "@acpio/shared";
+import { BUILD_INFO, EDITOR_NAV_PLACEMENTS, EDITOR_SPLITS, EDITOR_THEMES, EDITOR_TOOL_SOURCES, CONSOLE_TERMINAL_LIMITS, CUSTOM_AGENT_MAX, BUILTIN_MAX_OUTPUT_TOKENS_MAX, BUILTIN_TURN_RETRY_ATTEMPTS_MIN, BUILTIN_TURN_RETRY_ATTEMPTS_MAX, BUILTIN_THINKING_LIMIT_MAX, BUILTIN_BASH_TIMEOUT_SEC_MIN, BUILTIN_BASH_TIMEOUT_SEC_MAX, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MIN, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MAX, BUILTIN_KEEP_RECENT_PERCENT_MIN, BUILTIN_KEEP_RECENT_PERCENT_MAX, BUILTIN_MAX_SUMMARY_TOKENS_MAX, BUILTIN_PRUNE_TOOL_RESULTS_KEEP_LAST_MAX, CHAT_TITLE_MAX_LEN_MIN, CHAT_TITLE_MAX_LEN_MAX, isShellSession, canonicalCwd, normalizeBuiltinSubagents, normalizeSkillModes, BUILTIN_PRESET_MAX, normalizeBuiltinPresets, SHELL_SESSION_PROVIDER, titleFromTaskDescription, titleFromUserText, titleFromSlashCommand, builtinProviderKeys, BUILTIN_MAX_PROVIDER_KEYS, BUILTIN_MAX_KEY_LENGTH, BUILTIN_PROVIDER_KINDS } from "@acpio/shared";
 import {
   buildSettingsFile,
   forgetMcpFolderConfig,
@@ -438,6 +438,7 @@ const settingsSchema = z.object({
     .optional(),
   editorTheme: z.enum(EDITOR_THEMES).optional(),
   editorSplit: z.enum(EDITOR_SPLITS).optional(),
+  editorNavPlacement: z.enum(EDITOR_NAV_PLACEMENTS).optional(),
   // A combo the pane cannot bind is healed to the default on read, not refused
   // here: the settings form must never fail a save over a hand-typed shortcut.
   editorKeyDefinition: z.string().max(40).optional(),

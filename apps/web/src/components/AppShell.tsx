@@ -146,7 +146,13 @@ function EditorSlot({
     <>
       {openEditors.map((pane) => (
         <div key={pane.root} className={styles.editorSlot} hidden={pane.root !== root}>
-          <EditorPage root={pane.root} sessionId={pane.sessionId} chatHidden={chatHidden} onToggleChat={onToggleChat} />
+          <EditorPage
+            root={pane.root}
+            sessionId={pane.sessionId}
+            chatHidden={chatHidden}
+            onToggleChat={onToggleChat}
+            active={pane.root === root}
+          />
         </div>
       ))}
     </>

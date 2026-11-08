@@ -6,7 +6,9 @@
   height: 100%;
   min-height: 0;
   min-width: 0;
-  position: relative;
+  /* Одна высота у шапки дерева и полосы вкладок: две панели стоят рядом, и
+   * разная высота их шапок читается как ступенька на стыке. */
+  --bar-row: 33px;
   background: var(--surface);
   color: var(--text);
 }
@@ -247,8 +249,10 @@
 /* Вкладки панели: файлы проекта / изменённые файлы (как SCM-вид в VS Code). */
 .treeTabs {
   display: flex;
+  align-items: center;
   gap: 2px;
   padding: 4px 6px;
+  height: var(--bar-row);
   border-bottom: 1px solid var(--border);
   flex: none;
 }
@@ -633,7 +637,9 @@
   align-items: stretch;
   gap: 2px;
   overflow-x: auto;
-  padding-right: 84px;
+  /* Та же высота, что у шапки дерева: пустая полоса иначе схлопывается в
+   * одну линию, и на стыке двух панелей видна ступенька. */
+  height: var(--bar-row);
   border-bottom: 1px solid var(--border);
   background: var(--surface-2);
   flex: none;
@@ -670,6 +676,56 @@
 .tabName {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* «Назад / вперёд» по истории мест: в конце полосы вкладок (как в VS Code)
+ * или в статус-баре — выбирается настройкой. */
+.navCluster {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: 1px;
+  padding: 0 2px;
+}
+
+.tabs > .navCluster {
+  /* Стрелки прижаты к правому краю и не уезжают с вкладками: полоса
+   * скроллится, кластер стоит на месте — как заголовок группы в VS Code. */
+  position: sticky;
+  right: 0;
+  margin-left: auto;
+  align-self: center;
+  padding: 0 4px 0 6px;
+  background: var(--surface-2);
+}
+
+.navArrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.navArrow svg {
+  width: 15px;
+  height: 15px;
+}
+
+.navArrow:hover:not(:disabled) {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.navArrow:disabled {
+  opacity: 0.3;
+  cursor: default;
 }
 
 /* Кнопка меню в конце полосы вкладок: высоты не добавляет. */

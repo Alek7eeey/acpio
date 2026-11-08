@@ -10,8 +10,10 @@ import type {
 import type { PluginEntryConfig, PluginSkillFolder } from "./pluginSource.js";
 import {
   DEFAULT_EDITOR_KEYS,
+  DEFAULT_EDITOR_NAV_PLACEMENT,
   DEFAULT_EDITOR_THEME,
   DEFAULT_EDITOR_TOOL_SOURCE,
+  type EditorNavPlacement,
   type EditorSplit,
   type EditorThemeChoice,
   type EditorToolSource,
@@ -19,21 +21,25 @@ import {
 
 export {
   DEFAULT_EDITOR_KEYS,
+  DEFAULT_EDITOR_NAV_PLACEMENT,
   DEFAULT_EDITOR_THEME,
   DEFAULT_EDITOR_TOOL_SOURCE,
   EDITOR_KEY_ACTIONS,
+  EDITOR_NAV_PLACEMENTS,
   EDITOR_SPLITS,
   EDITOR_THEMES,
   EDITOR_TOOL_SOURCES,
   EDITOR_TOOLS,
   isEditorKeyCombo,
   normalizeEditorKeyCombo,
+  normalizeEditorNavPlacement,
   normalizeEditorSplit,
   normalizeEditorTheme,
   normalizeEditorToolSource,
 } from "./editorKeys.js";
 export type {
   EditorKeyAction,
+  EditorNavPlacement,
   EditorSplit,
   EditorThemeChoice,
   EditorTool,
@@ -2569,6 +2575,8 @@ export interface AppSettings {
    */
   editorTheme: EditorThemeChoice;
   editorSplit: EditorSplit;
+  /** Which end of the pane holds «назад/вперёд»: the tab strip or the status bar. */
+  editorNavPlacement: EditorNavPlacement;
   /** CodeMirror notation, healed on read — see `editorKeys.ts`. */
   editorKeyDefinition: string;
   editorKeyUsages: string;
@@ -2713,6 +2721,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   composerDrafts: {},
   editorTheme: DEFAULT_EDITOR_THEME,
   editorSplit: "off",
+  editorNavPlacement: DEFAULT_EDITOR_NAV_PLACEMENT,
   editorKeyDefinition: DEFAULT_EDITOR_KEYS.definition,
   editorKeyUsages: DEFAULT_EDITOR_KEYS.usages,
   editorKeySave: DEFAULT_EDITOR_KEYS.save,

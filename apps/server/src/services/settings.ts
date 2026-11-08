@@ -24,6 +24,7 @@ import {
   normalizeBuiltinSubagents,
   DEFAULT_EDITOR_KEYS,
   normalizeEditorKeyCombo,
+  normalizeEditorNavPlacement,
   normalizeEditorSplit,
   normalizeEditorTheme,
   normalizeEditorToolSource,
@@ -176,6 +177,7 @@ function mergeSettings(raw: unknown): AppSettings {
   // side that does not exist: heal both here, at the single read path.
   merged.editorTheme = normalizeEditorTheme(merged.editorTheme);
   merged.editorSplit = normalizeEditorSplit(merged.editorSplit);
+  merged.editorNavPlacement = normalizeEditorNavPlacement(merged.editorNavPlacement);
   merged.editorKeyDefinition = normalizeEditorKeyCombo(
     merged.editorKeyDefinition,
     DEFAULT_EDITOR_KEYS.definition,

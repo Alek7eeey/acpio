@@ -8,6 +8,7 @@ import {
   DEFAULT_EDITOR_KEYS,
   DEFAULT_SETTINGS,
   normalizeEditorKeyCombo,
+  normalizeEditorNavPlacement,
   normalizeEditorSplit,
   normalizeEditorTheme,
   normalizeEditorToolSource,
@@ -573,6 +574,7 @@ export function mergeClientAppSettings(raw: unknown): AppSettings {
   merged.chatTitleMaxLen = normalizeChatTitleMaxLen(partial.chatTitleMaxLen);
   merged.editorTheme = normalizeEditorTheme(partial.editorTheme);
   merged.editorSplit = normalizeEditorSplit(partial.editorSplit);
+  merged.editorNavPlacement = normalizeEditorNavPlacement(partial.editorNavPlacement);
   merged.editorKeyDefinition = normalizeEditorKeyCombo(
     partial.editorKeyDefinition,
     DEFAULT_EDITOR_KEYS.definition,

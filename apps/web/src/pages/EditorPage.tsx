@@ -37,8 +37,14 @@ import { csharp } from "@codemirror/legacy-modes/mode/clike";
 import { sass } from "@codemirror/legacy-modes/mode/sass";
 import { lintGutter, setDiagnostics, type Diagnostic } from "@codemirror/lint";
 import {
+  autocompletion,
+  type CompletionContext,
+  type CompletionResult,
+} from "@codemirror/autocomplete";
+import {
   isEditorKeyCombo,
   type AppSettings,
+  type EditorNavPlacement,
   type EditorSplit,
   type EditorThemeChoice,
   type EditorToolSource,
@@ -48,7 +54,8 @@ import { editorApi, type EditorEntry, type LintItem, type ToolStatus } from "../
 import { toolsForPath } from "../lib/editorTools";
 import { dropBuffer, loadBuffers, requestPersistence, saveBuffer } from "../lib/editorStore";
 import { editorTheme, type EditorScheme } from "../lib/editorTheme";
-import { TsLsp, uriToRelPath, type LspLocation } from "../lib/tsLsp";
+import { NavHistory, trapBrowserBack } from "../lib/editorNav";
+import { TsLsp, languageIdOf, uriToRelPath, type LspLocation } from "../lib/tsLsp";
 import { MergeView, unifiedMergeView } from "@codemirror/merge";
 import type { GitChangedFileDto } from "@acpio/shared";
 import { useAppStore } from "../lib/store";
@@ -624,12 +631,19 @@ export function EditorPage({
   sessionId: sessionProp,
   chatHidden,
   onToggleChat,
+  active = true,
 }: {
   root?: string;
   sessionId?: string | null;
   /** The chat is put away: the button offers to bring it back. */
   chatHidden?: boolean;
   onToggleChat?: () => void;
+  /**
+   * The pane on screen. A folder's pane stays mounted while another is shown,
+   * and only the visible one may take the browser's back button: two traps on
+   * one press would each walk their own history.
+   */
+  active?: boolean;
 } = {}) {
   const storeRoot = useAppStore((s) => s.activeSession?.cwd ?? s.knownFolders[0] ?? "");
   const storeSession = useAppStore((s) => s.activeSessionId);
@@ -806,7 +820,18 @@ export function EditorPage({
     () => Object.fromEntries(caretsRef.current) as Record<string, { line: number; col: number }>,
     [],
   );
+  /** Where «назад» comes back to: the places the pane has been, with the caret. */
+  const navRef = useRef(new NavHistory());
+  /** Set while the history itself is being walked: that move is not a new step. */
+  const navApplying = useRef(false);
+  /** Whether the arrows can act; the history itself stays in a ref. */
+  const [navFlags, setNavFlags] = useState({ back: false, forward: false });
+  const syncNavFlags = useCallback(() => {
+    setNavFlags({ back: navRef.current.canBack, forward: navRef.current.canForward });
+  }, []);
   const rootRef = useRef(root);
+  const tabsRef = useRef(tabs);
+  tabsRef.current = tabs;
   const sessionRef = useRef<string | null>(sessionId);
   const lintTimer = useRef<number>(0);
   const syncTimer = useRef<number>(0);
@@ -905,6 +930,37 @@ export function EditorPage({
     [],
   );
 
+  /**
+   * Ctrl+Space only: the pane asks tsserver when the user asks it to, so no
+   * keystroke ever waits on a language server. `completionKeymap` (Arrow/Enter/
+   * Escape) comes with `autocompletion` itself, at highest precedence.
+   *
+   * Only files the TypeScript server holds get hints: a CSS or YAML document is
+   * never handed to it, and asking anyway would be a round trip for nothing.
+   */
+  const lspCompletion = useCallback(
+    (path: string) => async (context: CompletionContext): Promise<CompletionResult | null> => {
+      const lsp = lspRef.current;
+      if (!lsp || !languageIdOf(path)) return null;
+      const line = context.state.doc.lineAt(context.pos);
+      // The buffer reaches tsserver on a 400ms timer; a press inside that window
+      // would ask about text the server has not seen yet.
+      lsp.change(path, context.state.doc.toString());
+      const items = await lsp.completion(path, line.number - 1, context.pos - line.from);
+      if (items.length === 0) return null;
+      // tsserver filtered on the prefix already; the range lets the popup keep
+      // narrowing the list locally while the user types. `validFor` is what keeps
+      // that local: without it every keystroke would ask the server again.
+      const word = context.matchBefore(/[\w$]+/);
+      return {
+        from: word ? word.from : context.pos,
+        options: items,
+        validFor: /^[\w$]*$/,
+      };
+    },
+    [],
+  );
+
   const handlersRef = useRef<EditorHandlers>({
     goto: () => {},
     usages: () => {},
@@ -945,6 +1001,7 @@ export function EditorPage({
         history(),
         languageFor(path),
         lintGutter(),
+        autocompletion({ activateOnTyping: false, override: [lspCompletion(path)] }),
         askField(handlers),
         askGutter((pos) => viewRef.current?.dispatch({ effects: setAsk.of(pos) })),
         pointerExtensions(handlersRef),
@@ -982,7 +1039,7 @@ export function EditorPage({
         }),
       ];
     },
-    [applyDiagnostics, cmKeys, keys, scheme, sendQuestion],
+    [applyDiagnostics, cmKeys, keys, lspCompletion, scheme, sendQuestion],
   );
 
   const makeState = useCallback(
@@ -1048,6 +1105,22 @@ export function EditorPage({
   const activateTab = useCallback(
     (tab: EditorTab, line?: number, col?: number) => {
       rememberCaret();
+      if (navApplying.current) {
+        // A move made by «назад»/«вперёд» is already a step of its own.
+        navApplying.current = false;
+      } else {
+        const key = tabKey(tab);
+        const cur = navRef.current.current;
+        const caret = caretsRef.current.get(tab.path);
+        // A jump inside one file remembers where the reader stood, so «назад»
+        // comes back to that line instead of to wherever the file was opened.
+        if (cur && caret && cur.key === key && activeRef.current === tab.path) {
+          navRef.current.push({ key, line: caret.line, col: caret.col });
+        }
+        const at = line != null ? { line, col: col ?? 1 } : caret;
+        navRef.current.push({ key, line: at?.line ?? 1, col: at?.col ?? 1 });
+        syncNavFlags();
+      }
       // A diff owns the visible area: switching files leaves it. And the state
       // goes to the tab view — `viewRef` may still point at the merge view.
       if (tab.kind === "file" && diff) closeDiff();
@@ -1075,7 +1148,7 @@ export function EditorPage({
       }
       view.focus();
     },
-    [applyDiagnostics, applyEditorConfig, closeDiff, diff, rememberCaret],
+    [applyDiagnostics, applyEditorConfig, closeDiff, diff, rememberCaret, syncNavFlags],
   );
 
   const addTab = useCallback((tab: EditorTab) => {
@@ -1234,21 +1307,59 @@ export function EditorPage({
   // A tab restored from the last session has no document yet: open it the way
   // the tree does, or the pane shows an empty file.
   const selectTab = useCallback(
-    (tab: EditorTab) => {
+    (tab: EditorTab, line?: number, col?: number) => {
       if (tab.kind === "diff" && !diffBaseRef.current.has(tab.path)) {
         void openDiff(tab.path);
         return;
       }
       if (tab.kind === "file" && !statesRef.current.has(tab.path)) {
-        void openFile(tab.path);
+        void openFile(tab.path, line, col);
         return;
       }
-      activateTab(tab);
+      activateTab(tab, line, col);
     },
     [activateTab, openDiff, openFile],
   );
 
-  const saveActive = useCallback(async () => {    const path = activeRef.current;
+  /** One press of «назад»/«вперёд»: moved, or nothing left in that direction. */
+  const navStep = useRef<(dir: 1 | -1) => boolean>(() => false);
+  navStep.current = (dir) => {
+    const target = navRef.current.step(dir, (step) =>
+      tabsRef.current.some((tab) => tabKey(tab) === step.key),
+    );
+    const tab = target && tabsRef.current.find((item) => tabKey(item) === target.key);
+    if (!target || !tab) return false;
+    navApplying.current = true;
+    if (tab.kind === "file" && !statesRef.current.has(tab.path)) {
+      void openFile(tab.path, target.line, target.col).finally(() => {
+        navApplying.current = false;
+        syncNavFlags();
+      });
+    } else {
+      selectTab(tab, target.line, target.col);
+      navApplying.current = false;
+    }
+    syncNavFlags();
+    return true;
+  };
+
+  // While the pane is open the browser's back button belongs to it: every press
+  // walks the history of visited places, as in VS Code, and only the press that
+  // finds nothing left leaves the page. Armed once — the step reads the latest
+  // render through a ref, so a re-render never adds a history entry.
+  useEffect(() => {
+    if (!active) return;
+    return trapBrowserBack((dir) => navStep.current(dir));
+  }, [active]);
+
+  // Another folder is another set of tabs: its own history starts empty.
+  useEffect(() => {
+    navRef.current = new NavHistory();
+    syncNavFlags();
+  }, [root, syncNavFlags]);
+
+  const saveActive = useCallback(async () => {
+    const path = activeRef.current;
     if (!path) return;
     const state = statesRef.current.get(path);
     if (!state) return;
@@ -1634,9 +1745,14 @@ export function EditorPage({
   ]);
 
   // The language server is per project root: reconnect when the folder changes.
+  // It owns the file's own project, not the pane root above it: a repository
+  // root makes tsserver load every project inside and answer nothing at all.
+  const projectRef = useRef("");
+  if (tools?.project) projectRef.current = tools.project;
+  const project = projectRef.current;
   useEffect(() => {
     if (!root) return;
-    const lsp = new TsLsp(root);
+    const lsp = new TsLsp(root, project);
     lspRef.current = lsp;
     lsp.onDiagnostics = (path, items) => {
       lspDiagsRef.current.set(path, items);
@@ -1656,7 +1772,7 @@ export function EditorPage({
       lsp.dispose();
       lspRef.current = null;
     };
-  }, [applyDiagnostics, root]);
+  }, [applyDiagnostics, root, project]);
 
   // Every menu closes the way a native one does.
   const anyMenu = menu != null || changeMenu != null || tabMenu != null;
@@ -1718,6 +1834,51 @@ export function EditorPage({
     </button>
   );
 
+  // «Назад/вперёд» по местам, где читатель уже был. Точка в интерфейсе на
+  // выбор: конец полосы вкладок (как в VS Code) или статус-бар.
+  const navArrows = (
+    <div className={styles.navCluster} role="group" aria-label="Переходы назад и вперёд">
+      <button
+        type="button"
+        className={styles.navArrow}
+        disabled={!navFlags.back}
+        title="Назад — туда, где читатель был до этого"
+        aria-label="Назад"
+        onClick={() => navStep.current(-1)}
+      >
+        <svg viewBox="0 0 16 16" aria-hidden>
+          <path
+            d="M9.5 3.5 5 8l4.5 4.5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.7"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </button>
+      <button
+        type="button"
+        className={styles.navArrow}
+        disabled={!navFlags.forward}
+        title="Вперёд"
+        aria-label="Вперёд"
+        onClick={() => navStep.current(1)}
+      >
+        <svg viewBox="0 0 16 16" aria-hidden>
+          <path
+            d="M6.5 3.5 11 8l-4.5 4.5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.7"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </button>
+    </div>
+  );
+
   const changeCount = changes?.repo ? changes.files.length : 0;
   // Source-control reads in two groups: what git tracks, and what it has never seen.
   const untrackedChanges = useMemo(
@@ -1776,6 +1937,24 @@ export function EditorPage({
                 <option value="left">Слева от чата</option>
                 <option value="right">Справа от чата</option>
               </select>
+            </label>
+            <label className={styles.field}>
+              <span>Стрелки «назад / вперёд»</span>
+              <select
+                value={settings.editorNavPlacement}
+                onChange={(event) =>
+                  void saveSettings({
+                    editorNavPlacement: event.target.value as EditorNavPlacement,
+                  })
+                }
+              >
+                <option value="tabs">В полосе вкладок (как в VS Code)</option>
+                <option value="statusBar">В статус-баре</option>
+              </select>
+              <span className={styles.hint}>
+                Ходят по местам, где вы уже были: файл и строка, как «назад» в VS Code.
+                Кнопка «назад» браузера делает то же, пока открыт редактор.
+              </span>
             </label>
             <div className={styles.field}>
               <span>Откуда брать инструменты</span>
@@ -2031,6 +2210,8 @@ export function EditorPage({
                 )}
               </div>
             ))}
+            {/* VS Code's spot: the end of the tab strip, beside the «…» menu. */}
+            {settings.editorNavPlacement === "tabs" ? navArrows : null}
           </div>
           <div className={styles.editor} ref={hostRef} hidden={diff != null || !activePath} />
           {!activePath && !diff ? (
@@ -2142,6 +2323,7 @@ export function EditorPage({
 
       {/* Статус-бар: самое нужное в одну строку, чтобы не занимать высоту. */}
       <footer className={styles.statusBar}>
+        {settings.editorNavPlacement === "statusBar" ? navArrows : null}
         <button
           type="button"
           className={`${styles.barChip} ${styles.barProblems} ${problems.length > 0 ? styles.actionAlert : ""}`}

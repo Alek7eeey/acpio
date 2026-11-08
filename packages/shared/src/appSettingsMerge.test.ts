@@ -228,6 +228,17 @@ describe("mergeClientAppSettings", () => {
     expect(mergeClientAppSettings({ chatToolbarStyle: "weird" }).chatToolbarStyle).toBe("classic");
   });
 
+  it("keeps the editor's back/forward arrows in the tab strip unless moved", () => {
+    expect(DEFAULT_SETTINGS.editorNavPlacement).toBe("tabs");
+    expect(mergeClientAppSettings({}).editorNavPlacement).toBe("tabs");
+    expect(mergeClientAppSettings({ editorNavPlacement: "statusBar" }).editorNavPlacement).toBe(
+      "statusBar",
+    );
+    expect(mergeClientAppSettings({ editorNavPlacement: "everywhere" }).editorNavPlacement).toBe(
+      "tabs",
+    );
+  });
+
   it("defaults the board add-task placeholder to the card shape", () => {
     expect(mergeClientAppSettings({}).boardAddCardStyle).toBe("card");
     expect(mergeClientAppSettings({ boardAddCardStyle: "compact" }).boardAddCardStyle).toBe("compact");
