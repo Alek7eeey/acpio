@@ -159,14 +159,24 @@ export function PlanSidePanel({
   // switches: only a plan that lives in a file can be edited this way.
   const canEdit = Boolean(plan.path && onReadText && onWriteText);
 
+  /**
+   * The pencil opens the editor at once and fills it when the file's text lands:
+   * the button is the reader's the whole time, whatever the round trip does. It
+   * used to grey itself out until the read came back, and a read that took its
+   * time made the plan look uneditable for as long as the agent was working.
+   */
   const startEditing = async () => {
     if (!onReadText) return;
+    setEditing(true);
     setBusyEdit(true);
     try {
-      setDraft(await onReadText());
-      setEditing(true);
+      const text = await onReadText();
+      // Whatever the reader already typed is theirs: the file that arrives late
+      // must not type over it.
+      setDraft((prev) => (prev.trim() ? prev : text));
     } catch {
-      // The panel stays as it was; the error banner carries the reason.
+      // Nothing to edit, so nothing is opened; the banner carries the reason.
+      setEditing(false);
     } finally {
       setBusyEdit(false);
     }
@@ -220,7 +230,7 @@ export function PlanSidePanel({
             <button
               type="button"
               className={styles.editBtn}
-              disabled={busyEdit}
+              aria-busy={busyEdit}
               onClick={() => void startEditing()}
               aria-label={t("planPanel.edit")}
               title={t("planPanel.edit")}
@@ -294,12 +304,9 @@ export function PlanSidePanel({
       </div>
       {editing ? (
         <div className={styles.footer}>
-          <button
-            type="button"
-            className={styles.danger}
-            disabled={busyEdit}
-            onClick={() => setEditing(false)}
-          >
+          {/* Cancel is the reader's in every state — a read still on its way
+              must not be a box they cannot get out of. */}
+          <button type="button" className={styles.danger} onClick={() => setEditing(false)}>
             <span>{t("common.cancel")}</span>
           </button>
           <button

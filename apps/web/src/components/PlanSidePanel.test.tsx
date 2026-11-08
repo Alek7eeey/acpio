@@ -112,6 +112,44 @@ describe("PlanSidePanel", () => {
     await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
   });
 
+  it("opens the editor at once and never greys the pencil out while the file is on its way", async () => {
+    // Reading the file is the server's business; the reader's button is not the
+    // place to wait for it. A slow read used to leave the pencil disabled for as
+    // long as the agent was busy, which read as "the plan cannot be edited".
+    let land: (text: string) => void = () => {};
+    const onReadText = vi.fn(
+      () => new Promise<string>((resolve) => {
+        land = resolve;
+      }),
+    );
+    renderPanel(PLAN, { onReadText, onWriteText: async () => {} });
+
+    const pencil = screen.getByLabelText("Edit plan") as HTMLButtonElement;
+    expect(pencil.disabled).toBe(false);
+    fireEvent.click(pencil);
+    // The editor is already there, empty until the text lands — and the reader
+    // can start typing right away: what they type is not overwritten.
+    const box = (await screen.findByRole("textbox")) as HTMLTextAreaElement;
+    expect(box.value).toBe("");
+    land("---\nstage: draft\n---\n## Steps\n- [ ] One\n");
+    await waitFor(() => expect(box.value).toContain("- [ ] One"));
+  });
+
+  it("keeps what the reader typed while the file was still on its way", async () => {
+    let land: (text: string) => void = () => {};
+    const onReadText = () =>
+      new Promise<string>((resolve) => {
+        land = resolve;
+      });
+    renderPanel(PLAN, { onReadText, onWriteText: async () => {} });
+
+    fireEvent.click(screen.getByLabelText("Edit plan"));
+    const box = (await screen.findByRole("textbox")) as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: "my own steps" } });
+    land("---\nstage: draft\n---\n## Steps\n- [ ] One\n");
+    await waitFor(() => expect(box.value).toBe("my own steps"));
+  });
+
   it("offers no editor for a plan with no file behind it", () => {
     const { plan: _ignored, ...bare } = PLAN;
     renderPanel(

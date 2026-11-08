@@ -75,7 +75,13 @@ function connectAgent() {
 
 /** Insert a session row directly (no agent involved). */
 async function seedSession(
-  opts: { title?: string; createdAt?: Date; cwd?: string; provider?: string } = {},
+  opts: {
+    title?: string;
+    createdAt?: Date;
+    cwd?: string;
+    provider?: string;
+    acpSessionId?: string;
+  } = {},
 ) {
   const [row] = await db
     .insert(sessionsTable)
@@ -84,6 +90,7 @@ async function seedSession(
       provider: opts.provider ?? "omp",
       cwd: opts.cwd ?? "",
       mode: "agent",
+      ...(opts.acpSessionId ? { acpSessionId: opts.acpSessionId } : {}),
       ...(opts.createdAt
         ? { createdAt: opts.createdAt, updatedAt: opts.createdAt }
         : {}),
@@ -939,16 +946,19 @@ describe("sessions", () => {
 describe("the plan file's switches", () => {
   /** A session whose folder already holds a `.acpio/plan.md` — the built-in
    *  agent's plan, the only one the panel's switches can speak to. */
-  async function planSession() {
+  async function planSession(opts: { owner?: string; acpSessionId?: string } = {}) {
     const dir = await newTempDir("acpio-plan-");
     const file = path.join(dir, ".acpio", "plan.md");
     await fsp.mkdir(path.dirname(file), { recursive: true });
     await fsp.writeFile(
       file,
-      "---\nname: A plan\nstage: applying\npacing: whole\n---\n\n## Steps\n\n- [ ] One\n",
+      `---\nname: A plan\n${opts.owner ? `chat: ${opts.owner}\n` : ""}stage: applying\npacing: whole\n---\n\n## Steps\n\n- [ ] One\n`,
       "utf8",
     );
-    const row = await seedSession({ cwd: dir });
+    const row = await seedSession({
+      cwd: dir,
+      ...(opts.acpSessionId ? { acpSessionId: opts.acpSessionId } : {}),
+    });
     return { id: String(row.id), file };
   }
 
@@ -980,6 +990,41 @@ describe("the plan file's switches", () => {
       payload: { pacing: "step" },
     });
     expect(res.statusCode).toBe(404);
+  });
+
+  it("reads and switches only the file its own chat owns", async () => {
+    // One file per folder, many chats in it: the file names the agent session it
+    // belongs to, and that id is the row's `acp_session_id` — `session/new` mints
+    // its own, so a chat's row id never appears in the file.
+    const mine = await planSession({ owner: "agent-b", acpSessionId: "agent-b" });
+    const read = await app.inject({ method: "GET", url: `/api/sessions/${mine.id}/plan` });
+    expect(read.statusCode).toBe(200);
+    expect((read.json() as { text: string }).text).toContain("A plan");
+
+    // The same chat under a different agent session: not its file.
+    const [repurposed] = await db
+      .update(sessionsTable)
+      .set({ acpSessionId: "agent-z" })
+      .where(eq(sessionsTable.id, mine.id))
+      .returning();
+    expect(repurposed?.acpSessionId).toBe("agent-z");
+    const foreign = await app.inject({ method: "GET", url: `/api/sessions/${mine.id}/plan` });
+    expect(foreign.statusCode).toBe(404);
+    const foreignSwitch = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${mine.id}/plan`,
+      payload: { pacing: "step" },
+    });
+    expect(foreignSwitch.statusCode).toBe(404);
+    // And a file with no owner yet is claimed by the chat that pressed the switch.
+    const ownerless = await planSession({ acpSessionId: "agent-c" });
+    const claim = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${ownerless.id}/plan`,
+      payload: { pacing: "step" },
+    });
+    expect(claim.statusCode).toBe(200);
+    expect((claim.json() as { plan: { chat?: string } }).plan.chat).toBe("agent-c");
   });
 });
 

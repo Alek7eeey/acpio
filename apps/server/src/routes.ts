@@ -19,6 +19,7 @@ import {
   addTaskAttachments,
   createSession,
   deleteSession,
+  getPlanSession,
   getSessionCwd,
   getSessionDetail,
   listBoardSessions,
@@ -2466,18 +2467,36 @@ export async function registerRoutes(app: FastifyInstance) {
         text: z.string().optional(),
       })
       .parse(req.body);
-    const detail = await getSessionDetail(id);
-    if (!detail) return reply.code(404).send({ error: "Not found" });
-    const file = planFilePath(detail.cwd);
+    const target = await getPlanSession(id);
+    if (!target) return reply.code(404).send({ error: "Not found" });
+    const { chatId: owner } = target;
+    const file = planFilePath(target.cwd);
     // Read first: `setPlanOptions` says `false` both for a missing file and for
     // bytes that did not change, and a switch already in that position is not
     // an error. Only a file that is really absent is one.
     const before = readPlan(file);
-    if (!before) return reply.code(404).send({ error: "No plan file" });
+    // A file another chat owns is this chat's answer too: it has no plan file.
+    if (!before || (before.chat && owner && before.chat !== owner)) {
+      return reply.code(404).send({ error: "No plan file" });
+    }
+    // One file per folder, many chats in it: a file whose owner was never
+    // recorded is claimed by the chat whose panel just spoke about it — that
+    // panel is showing this plan, so the plan is this chat's.
+    const claim = before.chat || !owner ? {} : { chat: owner };
+    const switches = {
+      ...(body.stage ? { stage: body.stage } : {}),
+      ...(body.pacing ? { pacing: body.pacing } : {}),
+      ...claim,
+    };
     if (typeof body.text === "string") {
       await fsp.writeFile(file, body.text, "utf8");
+      // The reader's own text is written verbatim; the owner is the one thing
+      // the file needs from this chat to be followed again.
+      if (!readPlan(file)?.chat) {
+        setPlanOptions(file, claim, (await getSettings()).locale === "ru" ? "ru" : "en");
+      }
     } else {
-      setPlanOptions(file, body, (await getSettings()).locale === "ru" ? "ru" : "en");
+      setPlanOptions(file, switches, (await getSettings()).locale === "ru" ? "ru" : "en");
     }
     return { ok: true, plan: readPlan(file) ?? before };
   });
@@ -2485,10 +2504,16 @@ export async function registerRoutes(app: FastifyInstance) {
   /** The plan file as it is on disk — what the panel's editor opens. */
   app.get("/api/sessions/:id/plan", async (req, reply) => {
     const { id } = req.params as { id: string };
-    const detail = await getSessionDetail(id);
-    if (!detail) return reply.code(404).send({ error: "Not found" });
+    const target = await getPlanSession(id);
+    if (!target) return reply.code(404).send({ error: "Not found" });
     try {
-      const text = await fsp.readFile(planFilePath(detail.cwd), "utf8");
+      const file = planFilePath(target.cwd);
+      // Another chat's plan is not this chat's file to open (see the POST above).
+      const owner = readPlan(file)?.chat;
+      if (owner && target.chatId && owner !== target.chatId) {
+        return reply.code(404).send({ error: "No plan file" });
+      }
+      const text = await fsp.readFile(file, "utf8");
       return { ok: true, text };
     } catch {
       return reply.code(404).send({ error: "No plan file" });

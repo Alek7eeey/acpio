@@ -210,6 +210,27 @@ export async function getSessionCwd(id: string): Promise<string | null> {
 }
 
 /**
+ * What the plan file's routes need and nothing else: the folder the file lives
+ * in, and the agent session that owns it — the id the built-in agent writes into
+ * the file as `chat:` (`session/new` mints its own, the row keeps it). A route
+ * that reads one file must not pull every message of the chat through
+ * `getSessionDetail`: the panel's pencil waits on that answer, and on a long chat
+ * under a running turn the wait is what made the plan look uneditable.
+ */
+export async function getPlanSession(
+  id: string,
+): Promise<{ cwd: string; chatId: string } | null> {
+  const rows = await db
+    .select({ cwd: sessions.cwd, acpSessionId: sessions.acpSessionId })
+    .from(sessions)
+    .where(eq(sessions.id, id))
+    .limit(1);
+  const row = rows[0];
+  if (!row) return null;
+  return { cwd: canonicalCwd(row.cwd), chatId: row.acpSessionId ?? "" };
+}
+
+/**
  * Just the title — the title refinement reads it twice around a model call and
  * must not drag every message of a long chat through `getSessionDetail`.
  */
