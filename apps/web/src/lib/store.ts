@@ -179,14 +179,18 @@ function pendingQuestionFromDetail(detail: SessionDetailDto): PendingQuestion | 
     if (!msg) continue;
     for (let pi = msg.parts.length - 1; pi >= 0; pi -= 1) {
       const part = msg.parts[pi];
-      if (part?.type !== "question") continue;
+      // A parked `apply_plan` sits on a `plan` part and asks the same question
+      // the `question.request` frame does: re-opening a chat whose plan waits
+      // for an approval has to find the card here too, or the chat reads as a
+      // finished turn with nothing to answer.
+      if (part?.type !== "question" && part?.type !== "plan") continue;
       if (!part.payload.pending) continue;
       const requestId = String(part.payload.requestId ?? "");
       if (!requestId) continue;
       return {
         sessionId: detail.id,
         requestId,
-        kind: "ask_question",
+        kind: part.type === "plan" ? "create_plan" : "ask_question",
         payload: part.payload as Record<string, unknown>,
       };
     }
@@ -2835,6 +2839,11 @@ export const useAppStore = create<AppState>((set, get) => ({
         rememberSessionDetail(detail);
         if (slashListStillLoading(detail.slashCommands)) pollSlashCommands(id, get, set);
         if (seq !== selectSessionSeq || get().activeSessionId !== id) return;
+        // A parked question — a plan waiting for its approval included — is part
+        // of the snapshot, and this warm path is the one a chat already open in
+        // the tab takes: without it the card never comes back.
+        const parked = pendingQuestionFromDetail(detail);
+        if (parked) set({ pendingQuestion: parked });
         const live = get().activeSession;
         // Don't clobber an in-flight optimistic turn with a lagging GET snapshot —
         // but only this tab's own live turn earns that, never a pane that merely
@@ -4395,13 +4404,18 @@ export const useAppStore = create<AppState>((set, get) => ({
           void submitAutoErrorDump(message);
         }
       }
-      if (event.type === "part.updated" && event.part.type === "question" && !event.part.payload.pending) {
+      if (
+        event.type === "part.updated" &&
+        (event.part.type === "question" || event.part.type === "plan") &&
+        !event.part.payload.pending
+      ) {
         const pending = get().pendingQuestion;
         const requestId = String(event.part.payload.requestId ?? "");
+        const kind = event.part.type === "plan" ? "create_plan" : "ask_question";
         if (
           pending?.sessionId === event.sessionId &&
           pending.requestId === requestId &&
-          pending.kind === "ask_question"
+          pending.kind === kind
         ) {
           set({ pendingQuestion: null });
         }

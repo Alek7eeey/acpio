@@ -4847,7 +4847,7 @@ async function markQuestionPartAnswered(
     if (!msg) continue;
     for (let pi = msg.parts.length - 1; pi >= 0; pi -= 1) {
       const part = msg.parts[pi];
-      if (part?.type !== "question") continue;
+      if (part?.type !== "question" && part?.type !== "plan") continue;
       if (String(part.payload.requestId ?? "") !== requestId) continue;
       const answerSummary = summarizeQuestionAnswer({
         ...(part.payload as Record<string, unknown>),
@@ -4859,7 +4859,10 @@ async function markQuestionPartAnswered(
   }
 }
 
-/** Payload of the still-unanswered question part `requestId` belongs to. */
+/** Payload of the still-unanswered question part `requestId` belongs to. A
+ *  parked `apply_plan` is the same kind of request on a `plan` part — the card
+ *  above the input, the re-broadcast after a reconnect and the answer that was
+ *  persisted all read it through here. */
 function findPendingQuestionPayload(
   detail: SessionDetailDto,
   requestId: string,
@@ -4869,7 +4872,7 @@ function findPendingQuestionPayload(
     if (!msg) continue;
     for (let pi = msg.parts.length - 1; pi >= 0; pi -= 1) {
       const part = msg.parts[pi];
-      if (part?.type !== "question") continue;
+      if (part?.type !== "question" && part?.type !== "plan") continue;
       if (!part.payload.pending) continue;
       if (String(part.payload.requestId ?? "") !== requestId) continue;
       return part.payload as Record<string, unknown>;
@@ -4878,12 +4881,14 @@ function findPendingQuestionPayload(
   return null;
 }
 
-/** True when the chat holds an unanswered question (its durable parked state). */
+/** True when the chat holds an unanswered question — or a plan waiting for its
+ *  approval — which is its durable parked state. */
 function hasPendingQuestion(detail: SessionDetailDto | null): boolean {
   if (!detail) return false;
   for (const message of detail.messages) {
     for (const part of message.parts) {
-      if (part.type === "question" && part.payload.pending) return true;
+      if (part.type !== "question" && part.type !== "plan") continue;
+      if (part.payload.pending) return true;
     }
   }
   return false;
