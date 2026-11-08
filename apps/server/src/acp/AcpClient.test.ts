@@ -951,13 +951,17 @@ describe("built-in agent outside the session cwd", () => {
   // the turn turned into a disk hunt. A command naming a real attachment gets
   // the path it names; an unknown one keeps its spelling.
   it("resolves an att:// handle inside a shell command", () => {
-    const files = ["C:\\store\\a\\notes.md", "C:\\store\\b\\Разбор противоречий.md"];
+    // Built with `path`, not spelled out: `resolveAttHandles` resolves each hit
+    // the way this host spells a path, and a literal `C:\\store\\…` was green on
+    // Windows and red on the Linux runner.
+    const store = path.join(path.parse(process.cwd()).root, "store");
+    const notes = path.join(store, "a", "notes.md");
+    const transcript = path.join(store, "b", "Разбор противоречий.md");
+    const files = [notes, transcript];
     expect(resolveAttHandles('grep -n x "att://Разбор противоречий.md"', files)).toBe(
-      'grep -n x "C:\\store\\b\\Разбор противоречий.md"',
+      `grep -n x "${transcript}"`,
     );
-    expect(resolveAttHandles("cat att://notes.md | head", files)).toBe(
-      "cat C:\\store\\a\\notes.md | head",
-    );
+    expect(resolveAttHandles("cat att://notes.md | head", files)).toBe(`cat ${notes} | head`);
     // Not an attachment of this chat — left for the shell to complain about.
     expect(resolveAttHandles('cat "att://menu.png"', files)).toBe('cat "att://menu.png"');
   });
