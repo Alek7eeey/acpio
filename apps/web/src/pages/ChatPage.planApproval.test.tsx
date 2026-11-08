@@ -285,11 +285,11 @@ describe("the plan's approval", () => {
     return renderChat();
   }
 
-  it("opens the panel on a chat reopened while its plan waits for an approval", async () => {
-    // A plan nobody waits on is not news: reopening its chat keeps the layout
-    // the reader left it with.
+  it("opens the panel on a chat reopened with its plan, waiting or not", async () => {
+    // A plan already lying in the chat is news to a panel that has not shown it:
+    // the reader opens the chat and reads the plan without hunting for it.
     await openChat(planSession("s7", false));
-    expect(screen.queryByLabelText("Редактировать план")).toBeNull();
+    expect(await screen.findByLabelText("Редактировать план")).toBeTruthy();
     cleanup();
 
     // The same chat, its plan now parked on `apply_plan`: the card above the

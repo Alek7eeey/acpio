@@ -5079,10 +5079,9 @@ function ChatThread() {
 
   /** The panel opens itself once per plan: the chat it belongs to, the plan it
    *  was opened for, and the approval that plan was parked on. A closed step is
-   *  the same plan — its panel must not pop back — and a chat opened with a plan
-   *  nobody waits on keeps the layout the reader left it with. A plan parked on
-   *  its approval is the exception: the card above the input asks about it, so
-   *  reopening that chat brings the panel back with it. */
+   *  the same plan — its panel must not pop back. A plan the panel of this chat
+   *  has not shown yet is news wherever it turns up: composed mid-turn, or
+   *  already lying in the chat the reader opens. */
   const planAutoOpenRef = useRef<{
     chat: string | null;
     key: string | null;
@@ -5105,18 +5104,22 @@ function ChatThread() {
       setGitPanelOpen(false);
       setPlanPanelOpen(true);
     };
-    // While the detail is still on its way the thread is a stub and its plan has
-    // not arrived yet: the plan of a chat being opened is not news.
+    // While the detail is still on its way the thread is a stub and the plan of
+    // the chat being opened has not arrived yet — remember the chat alone, so
+    // that plan lands as the new one it is.
     if (sessionLoading) {
-      planAutoOpenRef.current = { chat, key, parked: null };
+      planAutoOpenRef.current = { chat, key: null, parked: null };
+      return;
+    }
+    // Another chat's plan: its panel has seen nothing of it. The panel is where
+    // a plan is read and answered from, so opening that chat shows it.
+    if (opened.chat !== chat) {
+      if (key) openPanel();
+      else planAutoOpenRef.current = { chat, key, parked };
       return;
     }
     if (parked && opened.parked !== parked) {
       openPanel();
-      return;
-    }
-    if (opened.chat !== chat) {
-      planAutoOpenRef.current = { chat, key, parked };
       return;
     }
     if (!key || opened.key === key) return;
