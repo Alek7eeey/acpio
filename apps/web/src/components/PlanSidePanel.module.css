@@ -261,6 +261,14 @@
 }
 
 .footer {
+  display: grid;
+  grid-template-columns: 1fr 1.15fr;
+  gap: 10px;
+  padding: 12px 14px 14px;
+  border-top: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--surface) 60%, var(--bg-secondary));
+  flex-shrink: 0;
+}
 
 .footerSingle {
   display: flex;
