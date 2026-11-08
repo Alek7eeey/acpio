@@ -122,6 +122,7 @@ import {
   readPlan,
   setPlanOptions,
   skillMode,
+  skillText,
 } from "@acpio/adapter-builtin";
 import { searchChats, searchMessages } from "./services/search.js";
 import { openPath } from "./services/openPath.js";
@@ -1047,7 +1048,9 @@ export async function registerRoutes(app: FastifyInstance) {
     const skills = await discoverSettingsSkills(settings, cwd);
     return skills.map((skill) => ({
       name: skill.name,
-      description: skill.description,
+      // The UI language, not the file's own: this list is what Settings →
+      // Skills and the board's task form read.
+      description: skillText(skill, settings.locale).description,
       mode: skillMode(settings.builtinSkillModes, skill.name),
       ...(skill.builtin ? { builtin: true } : {}),
     }));

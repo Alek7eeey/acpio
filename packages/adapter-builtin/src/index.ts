@@ -47,6 +47,7 @@ export {
   enabledSkills,
   renderSkillsSection,
   skillMode,
+  skillText,
   type BuiltinSkill,
 } from "./skills.js";
 

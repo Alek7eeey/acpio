@@ -13,6 +13,7 @@ import {
   parseSkillMarkdown,
   renderSkillsSection,
   skillMode,
+  skillText,
   supersededRules,
 } from "./skills.js";
 
@@ -33,6 +34,13 @@ function skill(dir: string, name: string, md: string): string {
   mkdirSync(folder, { recursive: true });
   writeFileSync(join(folder, "SKILL.md"), md);
   return join(folder, "SKILL.md");
+}
+
+/** The `SKILL.<lang>.md` translation sitting next to a skill's own SKILL.md. */
+function translation(dir: string, name: string, lang: string, md: string): string {
+  const file = join(dir, name, `SKILL.${lang}.md`);
+  writeFileSync(file, md);
+  return file;
 }
 
 describe("parseSkillMarkdown", () => {
@@ -344,6 +352,79 @@ describe("renderSkillsSection", () => {
     expect(section).not.toContain("- commit:");
     expect(section.match(/commit\/SKILL\.md`/g) ?? []).toHaveLength(0);
     expect(section).toMatch(/\n- notes: Take notes — `.*notes.SKILL\.md`$/m);
+  });
+});
+
+describe("translated skills", () => {
+  const en = "---\nname: commit\ndescription: Make a commit\n---\nRun git commit.";
+  const ru = "---\nname: commit\ndescription: Сделать коммит\n---\nСделай git-коммит.";
+
+  /** One skill with an English SKILL.md and a Russian sibling. */
+  async function translated(): Promise<{ cwd: string; skills: Awaited<ReturnType<typeof discoverSkills>> }> {
+    const cwd = tempDir();
+    skill(cwd, "commit", en);
+    translation(cwd, "commit", "ru", ru);
+    return { cwd, skills: await discoverSkills([cwd], cwd) };
+  }
+
+  it("picks the file and the description of the ui locale, the primary one otherwise", async () => {
+    const { cwd, skills } = await translated();
+    expect(skillText(skills[0], "ru")).toEqual({
+      path: join(cwd, "commit", "SKILL.ru.md"),
+      description: "Сделать коммит",
+    });
+    expect(skillText(skills[0], "en")).toEqual({
+      path: join(cwd, "commit", "SKILL.md"),
+      description: "Make a commit",
+    });
+  });
+
+  it("falls back to the primary file for a locale that has no sibling", async () => {
+    const { cwd, skills } = await translated();
+    expect(skillText(skills[0], "de").path).toBe(join(cwd, "commit", "SKILL.md"));
+  });
+
+  it("keeps the primary description when the translation's frontmatter has none", async () => {
+    const cwd = tempDir();
+    skill(cwd, "commit", en);
+    translation(cwd, "commit", "ru", "---\nname: commit\n---\nСделай git-коммит.");
+    expect(skillText((await discoverSkills([cwd], cwd))[0], "ru")).toEqual({
+      path: join(cwd, "commit", "SKILL.ru.md"),
+      description: "Make a commit",
+    });
+  });
+
+  it("puts the ru path and description in the prompt", async () => {
+    const { cwd, skills } = await translated();
+    const section = await renderSkillsSection(skills, undefined, "ru");
+    expect(section).toContain("- commit: Сделать коммит — `");
+    expect(section).toContain(join(cwd, "commit", "SKILL.ru.md"));
+    expect(await renderSkillsSection(skills, undefined, "en")).toContain("- commit: Make a commit");
+  });
+
+  it("inlines the ru body of an active skill", async () => {
+    const { skills } = await translated();
+    const section = await renderSkillsSection(skills, { commit: "active" }, "ru");
+    expect(section).toContain("Сделай git-коммит.");
+    expect(section).not.toContain("Run git commit.");
+  });
+
+  it("expands /name from the ru file", async () => {
+    const { skills } = await translated();
+    expect(await expandSkillInvocation("/commit", skills, undefined, "ru")).toContain(
+      "Сделай git-коммит.",
+    );
+    expect(await expandSkillInvocation("/commit", skills, undefined, "en")).toContain(
+      "Run git commit.",
+    );
+  });
+
+  it("offers the ru description in the slash menu", async () => {
+    const { skills } = await translated();
+    const menu = (locale: string) =>
+      builtinSlashCommands({ locale }, skills).find((cmd) => cmd.name === "commit")?.description;
+    expect(menu("ru")).toBe("Сделать коммит");
+    expect(menu("en")).toBe("Make a commit");
   });
 });
 

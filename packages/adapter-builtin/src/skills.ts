@@ -38,6 +38,12 @@ export interface BuiltinSkill {
    */
   supersedes: string[];
   /**
+   * The same skill in another UI language: `SKILL.<lang>.md` next to the
+   * primary `SKILL.md`, which is the fallback for every language absent here.
+   * A missing file simply means the skill speaks one language.
+   */
+  translations?: Record<string, { path: string; description: string }>;
+  /**
    * Ships with the app — the adapter's own folder ({@link BUILTIN_SKILLS_DIR})
    * or a plugin's — instead of being found in the user's folders.
    */
@@ -81,6 +87,11 @@ function declaredRules(
 const MAX_SKILLS = 100;
 const SKILL_BODY_CHAR_LIMIT = 24_000;
 const SKILL_NAME_RE = /^[A-Za-z][\w.-]*$/;
+/**
+ * Languages a skill may ship next to its primary `SKILL.md` as
+ * `SKILL.<lang>.md`. English is the primary file itself, so it needs none.
+ */
+const SKILL_TRANSLATIONS = ["ru"] as const;
 
 /** Frontmatter plus the markdown body that follows it. */
 export interface ParsedSkillMarkdown {
@@ -156,12 +167,25 @@ async function skillsInDir(
     const parsed = parseSkillMarkdown(text, entry.name);
     const name = usableName(parsed.name);
     if (!name) continue;
+    const translations: Record<string, { path: string; description: string }> = {};
+    for (const lang of SKILL_TRANSLATIONS) {
+      const file = path.join(dir, entry.name, `SKILL.${lang}.md`);
+      try {
+        translations[lang] = {
+          path: file,
+          description: parseSkillMarkdown(await readFile(file, "utf8"), name).description,
+        };
+      } catch {
+        // One language is a complete skill: no sibling, nothing to add.
+      }
+    }
     found.push({
       name,
       description: parsed.description,
       disableModelInvocation: parsed.disableModelInvocation,
       supersedes: declared[name.toLowerCase()] ?? [],
       path: md,
+      ...(Object.keys(translations).length ? { translations } : {}),
       ...(shipped.has(path.resolve(dir)) ? { builtin: true } : {}),
     });
   }
@@ -272,7 +296,7 @@ export function builtinSlashCommands(
     // system prompt", not "gone". Only `off` takes the command away.
     ...enabledSkills(skills, settings.builtinSkillModes).map((skill) => ({
       name: skill.name,
-      description: skill.description || skill.name,
+      description: skillText(skill, settings.locale).description || skill.name,
       kind: "skill",
     })),
   ];
@@ -336,11 +360,27 @@ export async function discoverSettingsSkills(
   );
 }
 
+/**
+ * The file and the description of a skill in one UI language: its
+ * `SKILL.<lang>.md` when the folder has one, the primary `SKILL.md` otherwise —
+ * so a skill written in a single language reads the same in every locale, and a
+ * translation that carries no frontmatter `description` still gets the primary
+ * one instead of an empty line in the menu.
+ */
+export function skillText(
+  skill: BuiltinSkill,
+  locale?: string,
+): { path: string; description: string } {
+  const translated = locale ? skill.translations?.[locale] : undefined;
+  if (!translated) return { path: skill.path, description: skill.description };
+  return { path: translated.path, description: translated.description || skill.description };
+}
+
 /** The SKILL.md body handed to the model, bounded so a huge file can't eat a turn. */
-export async function loadSkillBody(skill: BuiltinSkill): Promise<string> {
+export async function loadSkillBody(skill: BuiltinSkill, locale?: string): Promise<string> {
   let text: string;
   try {
-    text = await readFile(skill.path, "utf8");
+    text = await readFile(skillText(skill, locale).path, "utf8");
   } catch {
     return "";
   }
@@ -396,38 +436,55 @@ export function supersededRules(
 export async function renderSkillsSection(
   skills: readonly BuiltinSkill[],
   modes?: Record<string, SkillMode>,
+  /** UI language: the prompt names the file and the body of that language. */
+  locale?: string,
 ): Promise<string> {
   const offered = advertisedSkills(skills, modes);
   if (!offered.length) return "";
+  const ru = locale === "ru";
   const active: string[] = [];
   const applied = new Set<string>();
   for (const skill of offered) {
     if (skillMode(modes, skill.name) !== "active") continue;
-    const body = await loadSkillBody(skill);
+    const body = await loadSkillBody(skill, locale);
     // The header says which of the two sets wins: a skill is the specific case,
     // and the base rules already tell the model to follow it where they overlap.
     if (!body) continue;
-    active.push(`--- ${skill.name} (active by default — follow it now) ---\n${body}`);
+    active.push(
+      ru
+        ? `--- ${skill.name} (активен по умолчанию — следуй ему) ---\n${body}`
+        : `--- ${skill.name} (active by default — follow it now) ---\n${body}`,
+    );
     applied.add(skill.name);
   }
   // An active skill is listed by name alone: its whole text is a few lines below,
   // so both its path and its description would say the same thing twice.
-  const rows = offered.map((s) =>
-    applied.has(s.name)
-      ? `- ${s.name} — already in effect, its text is below.`
-      : `- ${s.name}${s.description ? `: ${s.description}` : ""} — \`${s.path}\``,
-  );
+  const rows = offered.map((s) => {
+    if (applied.has(s.name))
+      return ru
+        ? `- ${s.name} — уже в силе, его текст ниже.`
+        : `- ${s.name} — already in effect, its text is below.`;
+    const { path: file, description } = skillText(s, locale);
+    return `- ${s.name}${description ? `: ${description}` : ""} — \`${file}\``;
+  });
   return [
     "",
     // One header carries both ways in: matching the task, or naming the skill.
-    "Skills available (read a skill's SKILL.md with `read` when the task matches; a message that is " +
-      "exactly `/name` invokes that skill):",
+    ru
+      ? "Доступные скиллы (читай SKILL.md скилла через `read`, когда задача совпадает; " +
+          "сообщение, состоящее ровно из `/имя`, вызывает этот скилл):"
+      : "Skills available (read a skill's SKILL.md with `read` when the task matches; a message " +
+          "that is exactly `/name` invokes that skill):",
     ...rows,
     // Said here, not among the rules: it is about this block, and a skill the
     // user turned on is the more specific instruction — a rule it words itself
     // is not left above it to argue with (see `supersededRules`).
-    "A skill is the more specific instruction: where it and a rule disagree, the skill wins.",
-    ...(active.length ? ["", "Skills active by default:", ...active] : []),
+    ru
+      ? "Скилл — более конкретная инструкция: где он расходится с правилом, побеждает скилл."
+      : "A skill is the more specific instruction: where it and a rule disagree, the skill wins.",
+    ...(active.length
+      ? ["", ru ? "Скиллы, активные по умолчанию:" : "Skills active by default:", ...active]
+      : []),
   ].join("\n");
 }
 
@@ -441,11 +498,18 @@ export async function expandSkillInvocation(
   text: string,
   skills: readonly BuiltinSkill[],
   modes?: Record<string, SkillMode>,
+  /** UI language: the body inlines the SKILL.<lang>.md of that language. */
+  locale?: string,
 ): Promise<string | null> {
   const matched = matchSkillInvocation(text, skills, modes);
   if (!matched) return null;
-  const body = await loadSkillBody(matched.skill);
+  const body = await loadSkillBody(matched.skill, locale);
   if (!body) return null;
-  const request = matched.args || "(no additional request — just follow the skill)";
-  return `[The user invoked the skill "${matched.skill.name}". Follow the skill instructions below.]\n\n${body}\n\n---\nUser request: ${request}`;
+  const ru = locale === "ru";
+  const request =
+    matched.args ||
+    (ru ? "(без отдельной просьбы — просто следуй скиллу)" : "(no additional request — just follow the skill)");
+  return ru
+    ? `[Пользователь вызвал скилл "${matched.skill.name}". Следуй инструкциям скилла ниже.]\n\n${body}\n\n---\nПросьба пользователя: ${request}`
+    : `[The user invoked the skill "${matched.skill.name}". Follow the skill instructions below.]\n\n${body}\n\n---\nUser request: ${request}`;
 }
