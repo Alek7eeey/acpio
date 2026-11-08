@@ -5,7 +5,7 @@
 // nobody was parked on — with a prompt the chat never shows — and a rejection
 // implements nothing.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { DEFAULT_SETTINGS, type MessageDto, type SessionDetailDto } from "@acpio/shared";
 import { api } from "../lib/api";
@@ -229,12 +229,73 @@ describe("the plan's approval", () => {
     });
 
     renderChat();
-    fireEvent.click(await screen.findByText("Отклонить"));
+    fireEvent.click((await planCard()).getByText("Отклонить"));
     await waitFor(() =>
       expect(api.answerQuestion).toHaveBeenCalledWith("s1", "s1:237", {
         outcome: { outcome: "rejected", reason: "rejected by user" },
       }),
     );
+  });
+
+  /** The card above the input. The panel's footer repeats its answers once the
+   *  panel is open, so the card's own clicks are scoped to it. */
+  async function planCard() {
+    return within(await screen.findByRole("group", { name: "План" }));
+  }
+
+  /** A chat whose newest plan part may or may not be waiting for an answer. Its
+   *  own id: the store caches a detail per session, and a second chat built on
+   *  the first one's id would come back from that cache. */
+  function planSession(id: string, pending: boolean): SessionDetailDto {
+    return session({
+      id,
+      messages: [
+        {
+          ...planMessage,
+          parts: [
+            planMessage.parts[0]!,
+            {
+              ...planMessage.parts[1]!,
+              payload: pending
+                ? { ...PLAN_PAYLOAD, requestId: `${id}:237`, pending: true }
+                : PLAN_PAYLOAD,
+            },
+          ],
+        },
+      ],
+    });
+  }
+
+  /** Open a chat the way the app does on a reload: nothing on screen, then the
+   *  detail lands — its parked question with it. */
+  async function openChat(detail: SessionDetailDto) {
+    useAppStore.setState({
+      settings: { ...DEFAULT_SETTINGS, locale: "ru" as const, chatMetaChips: [] },
+      sessions: [detail],
+      activeSessionId: null,
+      activeSession: null,
+      sessionLoading: true,
+      sessionDetails: {},
+      chatPaneIds: [],
+      focusedPaneIndex: 0,
+      pendingQuestion: null,
+    });
+    vi.mocked(api.getSession).mockResolvedValue(detail);
+    await act(() => useAppStore.getState().selectSession(detail.id));
+    return renderChat();
+  }
+
+  it("opens the panel on a chat reopened while its plan waits for an approval", async () => {
+    // A plan nobody waits on is not news: reopening its chat keeps the layout
+    // the reader left it with.
+    await openChat(planSession("s7", false));
+    expect(screen.queryByLabelText("Редактировать план")).toBeNull();
+    cleanup();
+
+    // The same chat, its plan now parked on `apply_plan`: the card above the
+    // input asks about that plan, so the panel drawing it comes back too.
+    await openChat(planSession("s8", true));
+    expect(await screen.findByLabelText("Редактировать план")).toBeTruthy();
   });
 
   it("opens the panel when a plan is composed, and only then — not on every step", async () => {
@@ -316,7 +377,12 @@ describe("the plan's approval", () => {
     // The pace is asked first: nothing starts until the reader says how.
     fireEvent.click(await screen.findByText("Одобрить"));
     expect(api.setSessionPlan).not.toHaveBeenCalled();
-    fireEvent.click(await screen.findByText("По одному"));
+    // The popup, not the panel's own pace switch: that one is on screen too.
+    fireEvent.click(
+      within(await screen.findByRole("dialog", { name: "Как выполнять шаги?" })).getByText(
+        "По одному",
+      ),
+    );
 
     await waitFor(() =>
       expect(api.setSessionPlan).toHaveBeenCalledWith("s1", {
@@ -374,7 +440,7 @@ describe("the plan's approval", () => {
     park(session(), true);
     renderChat();
 
-    fireEvent.click(await screen.findByText("Отклонить"));
+    fireEvent.click((await planCard()).getByText("Отклонить"));
 
     await waitFor(() =>
       expect(api.answerQuestion).toHaveBeenCalledWith("s1", "r1", {
@@ -383,6 +449,24 @@ describe("the plan's approval", () => {
     );
     expect(api.setSessionPlan).not.toHaveBeenCalled();
     expect(api.prompt).not.toHaveBeenCalled();
+  });
+
+  it("stays closed once the reader closes it: the same parked question is not news", async () => {
+    park(session(), true);
+    renderChat();
+
+    // The panel came with the parked plan, and the reader closes it by hand.
+    expect(await screen.findByLabelText("Редактировать план")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("Отмена"));
+    expect(screen.queryByLabelText("Редактировать план")).toBeNull();
+
+    // A fresh detail of the same chat flows in: the approval is the same one,
+    // so it must not reopen what the reader just closed.
+    const refreshed = session();
+    act(() =>
+      useAppStore.setState({ activeSession: refreshed, sessionDetails: { s1: refreshed } }),
+    );
+    expect(screen.queryByLabelText("Редактировать план")).toBeNull();
   });
 
   it("does not offer the same approval twice while it is on its way", async () => {

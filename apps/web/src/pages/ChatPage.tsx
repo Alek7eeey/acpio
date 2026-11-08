@@ -5039,34 +5039,69 @@ function ChatThread() {
     }
   };
 
-  /** The panel opens itself once per plan: the chat it belongs to, and the plan
-   *  it was opened for. A closed step is the same plan — its panel must not pop
-   *  back — and a chat opened with the plan already in place keeps the layout
-   *  the reader left it with. */
-  const planAutoOpenRef = useRef<{ chat: string | null; key: string | null }>({
-    chat: null,
-    key: null,
-  });
+  // Another chat's approval says nothing about this chat's plan, and neither
+  // does another chat's hand edit — not even one that happens to read alike.
+  // It runs before the auto open below: that one decides what the chat being
+  // opened shows.
+  useEffect(() => {
+    setPlanPanelOpen(false);
+    setApprovedPlanKey(null);
+    setHandEditedPlan(null);
+  }, [activeSession?.id]);
+
+  /** The panel opens itself once per plan: the chat it belongs to, the plan it
+   *  was opened for, and the approval that plan was parked on. A closed step is
+   *  the same plan — its panel must not pop back — and a chat opened with a plan
+   *  nobody waits on keeps the layout the reader left it with. A plan parked on
+   *  its approval is the exception: the card above the input asks about it, so
+   *  reopening that chat brings the panel back with it. */
+  const planAutoOpenRef = useRef<{
+    chat: string | null;
+    key: string | null;
+    parked: string | null;
+  }>({ chat: null, key: null, parked: null });
 
   useEffect(() => {
     const chat = activeSession?.id ?? null;
     const key = activePlan ? planAutoOpenKey(activePlan) : null;
+    // The approval the plan is parked on, by its own request: being asked again
+    // after a rejection is a new question, and opens the panel again.
+    const parked = planPending ? (pendingQuestion?.requestId ?? "pending") : null;
     const opened = planAutoOpenRef.current;
-    // While the detail is still on its way the thread is a stub and its plan
-    // has not arrived yet: the plan of a chat being opened is not news.
-    if (opened.chat !== chat || sessionLoading) {
-      planAutoOpenRef.current = { chat, key };
+    const openPanel = () => {
+      planAutoOpenRef.current = { chat, key, parked };
+      // Reading and answering the plan is the one moment the panel is worth
+      // taking over the chat for. It used to be every update, which is why it
+      // was suppressed on a narrow screen.
+      setConsoleOpen(false);
+      setGitPanelOpen(false);
+      setPlanPanelOpen(true);
+    };
+    // While the detail is still on its way the thread is a stub and its plan has
+    // not arrived yet: the plan of a chat being opened is not news.
+    if (sessionLoading) {
+      planAutoOpenRef.current = { chat, key, parked: null };
+      return;
+    }
+    if (parked && opened.parked !== parked) {
+      openPanel();
+      return;
+    }
+    if (opened.chat !== chat) {
+      planAutoOpenRef.current = { chat, key, parked };
       return;
     }
     if (!key || opened.key === key) return;
-    planAutoOpenRef.current = { chat, key };
-    // Composing a plan is the one moment the panel is worth taking over the
-    // chat for — that is where the plan is read and answered from. It used to
-    // be every update, which is why it was suppressed on a narrow screen.
-    setConsoleOpen(false);
-    setGitPanelOpen(false);
-    setPlanPanelOpen(true);
-  }, [activePlan, activeSession?.id, sessionLoading, setConsoleOpen, setGitPanelOpen]);
+    openPanel();
+  }, [
+    activePlan,
+    activeSession?.id,
+    sessionLoading,
+    planPending,
+    pendingQuestion?.requestId,
+    setConsoleOpen,
+    setGitPanelOpen,
+  ]);
 
   useEffect(() => {
     if (consoleOpen || gitPanelOpen) setPlanPanelOpen(false);
@@ -5077,14 +5112,6 @@ function ChatThread() {
     if (consoleOpen) setConsoleOpen(false);
     if (gitPanelOpen) setGitPanelOpen(false);
   }, [planPanelOpen, consoleOpen, gitPanelOpen, setConsoleOpen, setGitPanelOpen]);
-
-  useEffect(() => {
-    setPlanPanelOpen(false);
-    // Another chat's approval says nothing about this chat's plan, and neither
-    // does another chat's hand edit — not even one that happens to read alike.
-    setApprovedPlanKey(null);
-    setHandEditedPlan(null);
-  }, [activeSession?.id]);
 
   const setComposerMultilineIfNeeded = (next: boolean) => {
     composerMultilineRef.current = next;
