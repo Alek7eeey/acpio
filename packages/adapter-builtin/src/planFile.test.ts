@@ -29,6 +29,7 @@ afterEach(() => {
 
 const PLAN: PlanState = {
   name: "План как файл",
+  problem: "План жил в переписке: одобрять было нечего, а шаги терялись.",
   overview: "План уезжает в `.acpio/plan.md`, панель его читает.",
   plan: "## Файлы\n\n`agent.ts`.\n\n## Проверка\n\n`npm test`.",
   entries: [
@@ -42,6 +43,42 @@ const PLAN: PlanState = {
 
 it("round-trips a plan through the file", () => {
   expect(parsePlan(renderPlan(PLAN))).toEqual(PLAN);
+});
+
+it("puts the problem above the solution, and reads a plan without one as before", () => {
+  const text = renderPlan(PLAN);
+  expect(text.indexOf("## Проблема")).toBeLessThan(text.indexOf("## Решение"));
+  expect(text.indexOf("## Решение")).toBeLessThan(text.indexOf("## Шаги"));
+  expect(parsePlan(text)).toMatchObject({ problem: PLAN.problem, overview: PLAN.overview });
+  // A file written before the problem existed carries none, and that is not an
+  // overview with a strange heading in it.
+  const { problem: _unused, ...noProblem } = PLAN;
+  expect(parsePlan(renderPlan(noProblem)).problem).toBeUndefined();
+  expect(parsePlan(renderPlan(noProblem)).overview).toBe(PLAN.overview);
+  // The English file says Problem / Solution.
+  expect(renderPlan(PLAN, "en")).toContain("## Problem");
+  expect(renderPlan(PLAN, "en")).toContain("## Solution");
+  expect(parsePlan(renderPlan(PLAN, "en"))).toMatchObject({
+    problem: PLAN.problem,
+    overview: PLAN.overview,
+  });
+  // The problem is what the reader is approving: it is part of who this plan is.
+  expect(planSignature({ ...PLAN, problem: "Другая проблема" })).not.toBe(planSignature(PLAN));
+});
+
+it("remembers which chat the plan belongs to, and leaves a file that has no owner alone", () => {
+  const owned: PlanState = { ...PLAN, chat: "7b2815c5-3a2c-4bae-9c51-f25208ae495b" };
+  expect(parsePlan(renderPlan(owned))).toEqual(owned);
+  // An ownerless file — written by hand or by an older version — stays ownerless.
+  expect(parsePlan(renderPlan(PLAN)).chat).toBeUndefined();
+  expect(renderPlan(PLAN)).not.toContain("chat:");
+  // The owner is part of who this plan is: another chat taking it over is a change.
+  expect(planSignature(owned)).not.toBe(planSignature(PLAN));
+  // The panel's own switch is how an ownerless file gets claimed.
+  const file = join(tempDir(), ".acpio", "plan.md");
+  writePlan(file, PLAN);
+  expect(setPlanOptions(file, { chat: owned.chat, pacing: "step" })).toBe(true);
+  expect(readPlan(file)).toMatchObject({ chat: owned.chat, pacing: "step", stage: "draft" });
 });
 
 it("round-trips in English too", () => {

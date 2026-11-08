@@ -59,6 +59,7 @@ import { isValidSessionId, loadBuiltinSession, saveBuiltinSession } from "./stor
 import {
   PLAN_DIR,
   PLAN_FILE,
+  archivePlan,
   planFilePath,
   planSignature,
   readPlan,
@@ -955,6 +956,7 @@ export class BuiltinAgent implements InProcessAgentTransport {
     return {
       sessionUpdate: "plan",
       ...(state.name ? { name: state.name } : {}),
+      ...(state.problem ? { problem: state.problem } : {}),
       ...(state.overview ? { overview: state.overview } : {}),
       ...(state.plan ? { plan: state.plan } : {}),
       entries: state.entries,
@@ -974,6 +976,19 @@ export class BuiltinAgent implements InProcessAgentTransport {
     return `${PLAN_DIR}/${PLAN_FILE}`;
   }
 
+  /**
+   * A folder holds many chats and one plan file: the file itself says whose plan
+   * it is, and another chat's plan is not this chat's to read, follow or
+   * publish. An ownerless file — written by hand, or by a version before the
+   * owner was recorded — is nobody's yet: the first write takes it (see
+   * `savePlan`), the watcher never adopts it on its own.
+   */
+  private ownPlan(state: PlanState | undefined): PlanState | undefined {
+    if (!state) return undefined;
+    if (state.chat && state.chat !== this.sessionId) return undefined;
+    return state;
+  }
+
   private planLocale(): "ru" | "en" {
     return this.opts.settings.locale === "ru" ? "ru" : "en";
   }
@@ -988,8 +1003,14 @@ export class BuiltinAgent implements InProcessAgentTransport {
 
   /** Write the file and put the very same state on the wire. */
   private savePlan(state: PlanState): void {
-    writePlan(this.planFile(), state, this.planLocale());
-    this.publishPlan(state);
+    const file = this.planFile();
+    // Another chat's plan is not overwritten in place: it goes to `.acpio/plans/`
+    // where the plan it replaced already goes, and this chat's own plan starts.
+    const onDisk = readPlan(file);
+    if (onDisk && onDisk.chat && onDisk.chat !== this.sessionId) archivePlan(file);
+    const own: PlanState = { ...state, chat: this.sessionId };
+    writePlan(file, own, this.planLocale());
+    this.publishPlan(own);
   }
 
   /**
@@ -1019,8 +1040,9 @@ export class BuiltinAgent implements InProcessAgentTransport {
       file,
       path: this.planDisplayPath(),
       // The file first: it is the truth, and the memory copy only stands in
-      // when the reader deleted it mid-task.
-      read: () => readPlan(file) ?? this.planState,
+      // when the reader deleted it mid-task. Another chat's file is not read at
+      // all — its steps are not this chat's work.
+      read: () => this.ownPlan(readPlan(file)) ?? this.planState,
       write: (state) => this.savePlan(state),
       approve: (state) => this.approvePlan(state),
     };
@@ -1041,12 +1063,20 @@ export class BuiltinAgent implements InProcessAgentTransport {
   private watchPlan(): void {
     this.unwatchPlan();
     const file = this.planFile();
-    this.planState = readPlan(file) ?? this.planState;
-    this.planPublished = planSignature(readPlan(file));
+    // Adopted only when the file says this very chat owns it: opening a chat in
+    // a folder where another chat left its plan is not that chat's news.
+    const opening = readPlan(file);
+    if (opening?.chat === this.sessionId) {
+      this.planState = opening;
+      this.planPublished = planSignature(opening);
+    } else {
+      this.planState = this.ownPlan(this.planState);
+      this.planPublished = planSignature(this.planState);
+    }
     const timer = setInterval(() => {
       if (this.stopping) return;
       const state = readPlan(file);
-      if (!state) return;
+      if (!state || state.chat !== this.sessionId) return;
       const signature = planSignature(state);
       if (signature === this.planPublished) return;
       // A hand edit is not this turn's plan: the epoch stays, so a reader

@@ -77,7 +77,12 @@ import { buildAgentTimeline, finalAnswerPart, isSingleItemTimeline, splitQuestio
 import { formatDuration, partDurations, partTtfts, sumDurations } from "../lib/partTiming.js";
 import { messagePlainText } from "../lib/messageText.js";
 import { buildPromptRailItems } from "../lib/promptRail.js";
-import { readDismissedPlanIds, rememberDismissedPlan } from "../lib/dismissedPlans.js";
+import {
+  readClosedPlanKeys,
+  readDismissedPlanIds,
+  rememberClosedPlan,
+  rememberDismissedPlan,
+} from "../lib/dismissedPlans.js";
 import { AttachDialog } from "../components/AttachDialog";
 import { ChatPromptRail } from "../components/ChatPromptRail";
 import { PromptQueueBar } from "../components/PromptQueueBar";
@@ -4405,6 +4410,12 @@ function planAutoOpenKey(payload: PlanPayload): string {
   ].join("\u0000");
 }
 
+/** What the panel's X remembers: this plan, in this chat. The same steps in
+ *  another chat are another chat's plan, not the one the reader closed. */
+function closedPlanId(chat: string | null, key: string): string {
+  return `${chat ?? ""}\u0000${key}`;
+}
+
 /** Latest plan-ish part of the session, with the id of the part that carried it. */
 function findLatestPlanPart(
   session: { messages: MessageDto[] } | null,
@@ -4947,6 +4958,11 @@ function ChatThread() {
   const [dismissedPlanIds, setDismissedPlanIds] = useState<ReadonlySet<string>>(
     () => new Set(readDismissedPlanIds()),
   );
+  /** Plans the reader closed with the panel's X — they do not open themselves
+   *  again, not in this chat and not when it is opened a second time. */
+  const [closedPlanKeys, setClosedPlanKeys] = useState<ReadonlySet<string>>(
+    () => new Set(readClosedPlanKeys()),
+  );
   const activePlanPart = useMemo((): { id: string; payload: PlanPayload } | null => {
     if (planPending && pendingQuestion) {
       const payload = coercePlanPayload(pendingQuestion.payload);
@@ -4984,6 +5000,17 @@ function ChatThread() {
     });
     rememberDismissedPlan(part.id);
     setPlanPanelOpen(false);
+  };
+  /** The X in the panel's header: the reader is done with this plan, so it is
+   *  not drawn at them again — not on a republish of the same plan, and not when
+   *  the chat is opened later. A plan with other steps is a different plan. */
+  const closePlanPanel = () => {
+    setPlanPanelOpen(false);
+    const key = activePlan ? planAutoOpenKey(activePlan) : "";
+    if (!key) return;
+    const id = closedPlanId(activeSession?.id ?? null, key);
+    rememberClosedPlan(id);
+    setClosedPlanKeys((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
   };
 
   /**
@@ -5079,9 +5106,9 @@ function ChatThread() {
 
   /** The panel opens itself once per plan: the chat it belongs to, the plan it
    *  was opened for, and the approval that plan was parked on. A closed step is
-   *  the same plan — its panel must not pop back. A plan the panel of this chat
-   *  has not shown yet is news wherever it turns up: composed mid-turn, or
-   *  already lying in the chat the reader opens. */
+   *  the same plan — its panel must not pop back — and a chat opened with a plan
+   *  nobody waits on keeps the layout the reader left it with: one plan file per
+   *  folder means every chat there has one lying about, and none of them is news. */
   const planAutoOpenRef = useRef<{
     chat: string | null;
     key: string | null;
@@ -5104,22 +5131,26 @@ function ChatThread() {
       setGitPanelOpen(false);
       setPlanPanelOpen(true);
     };
-    // While the detail is still on its way the thread is a stub and the plan of
-    // the chat being opened has not arrived yet — remember the chat alone, so
-    // that plan lands as the new one it is.
+    // While the detail is still on its way the thread is a stub and its plan has
+    // not arrived yet: the plan of a chat being opened is not news.
     if (sessionLoading) {
-      planAutoOpenRef.current = { chat, key: null, parked: null };
+      planAutoOpenRef.current = { chat, key, parked: null };
       return;
     }
-    // Another chat's plan: its panel has seen nothing of it. The panel is where
-    // a plan is read and answered from, so opening that chat shows it.
-    if (opened.chat !== chat) {
-      if (key) openPanel();
-      else planAutoOpenRef.current = { chat, key, parked };
+    // A plan the reader closed with the X is not news, whoever publishes it: the
+    // panel stays where they left it, and only another plan opens it again.
+    if (key && closedPlanKeys.has(closedPlanId(chat, key))) {
+      planAutoOpenRef.current = { chat, key, parked };
       return;
     }
+    // A plan parked on its approval is a question above the input: the panel
+    // drawing the plan it asks about comes back with it.
     if (parked && opened.parked !== parked) {
       openPanel();
+      return;
+    }
+    if (opened.chat !== chat) {
+      planAutoOpenRef.current = { chat, key, parked };
       return;
     }
     if (!key || opened.key === key) return;
@@ -5128,6 +5159,7 @@ function ChatThread() {
     activePlan,
     activeSession?.id,
     sessionLoading,
+    closedPlanKeys,
     planPending,
     pendingQuestion?.requestId,
     setConsoleOpen,
@@ -8447,7 +8479,7 @@ function ChatThread() {
           open={activeRightPanel === "plan" && (!bind || bind.focused)}
           pending={planPending}
           fillPane={panelFillsChat}
-          onClose={() => setPlanPanelOpen(false)}
+          onClose={closePlanPanel}
           onRemove={planPending ? undefined : removeActivePlan}
           /* One approval, two places it can come from: the card's own question
              while a turn is parked on it, the footer's button for a draft nobody

@@ -285,16 +285,66 @@ describe("the plan's approval", () => {
     return renderChat();
   }
 
-  it("opens the panel on a chat reopened with its plan, waiting or not", async () => {
-    // A plan already lying in the chat is news to a panel that has not shown it:
-    // the reader opens the chat and reads the plan without hunting for it.
+  it("opens the panel on a chat reopened while its plan waits for an approval", async () => {
+    // A plan nobody waits on is not news: one plan file per folder means every
+    // chat there has one lying about, and reopening its chat keeps the layout
+    // the reader left it with.
     await openChat(planSession("s7", false));
-    expect(await screen.findByLabelText("Редактировать план")).toBeTruthy();
+    expect(screen.queryByLabelText("Редактировать план")).toBeNull();
     cleanup();
 
     // The same chat, its plan now parked on `apply_plan`: the card above the
     // input asks about that plan, so the panel drawing it comes back too.
     await openChat(planSession("s8", true));
+    expect(await screen.findByLabelText("Редактировать план")).toBeTruthy();
+  });
+
+  it("leaves a plan the reader closed with the X closed when the chat is opened again", async () => {
+    // The panel is up because the plan is waiting for its approval.
+    await openChat(planSession("s9", true));
+    expect(await screen.findByLabelText("Редактировать план")).toBeTruthy();
+    // The reader is done with it and closes the panel with the X.
+    fireEvent.click(screen.getByLabelText("Отмена"));
+    await waitFor(() => expect(screen.queryByLabelText("Редактировать план")).toBeNull());
+    cleanup();
+
+    // The same chat, opened again: the parked plan does not drag the panel back
+    // in front of the reader — the card above the input is still there to answer.
+    // A newer snapshot of the same chat, as the reload fetches it.
+    await openChat({ ...planSession("s9", true), updatedAt: "2026-09-30T10:05:00.000Z" });
+    expect(await screen.findByRole("group", { name: "План" })).toBeTruthy();
+    // The parked plan really is there — the panel is what stays shut.
+    expect(useAppStore.getState().pendingQuestion).toMatchObject({ requestId: "s9:237" });
+    expect(screen.queryByLabelText("Редактировать план")).toBeNull();
+
+    // A plan with other steps is another plan: that one is news again.
+    cleanup();
+    await openChat(planSession("s10", false));
+    expect(screen.queryByLabelText("Редактировать план")).toBeNull();
+    const changed = planSession("s10", false);
+    const withOtherPlan: SessionDetailDto = {
+      ...changed,
+      messages: [
+        {
+          ...planMessage,
+          parts: [
+            planMessage.parts[0]!,
+            {
+              ...planMessage.parts[1]!,
+              id: "p3",
+              payload: { ...PLAN_PAYLOAD, name: "Другой план" },
+            },
+          ],
+        },
+      ],
+    };
+    act(() => {
+      useAppStore.setState({
+        sessions: [withOtherPlan],
+        activeSession: withOtherPlan,
+        sessionDetails: { s10: withOtherPlan },
+      });
+    });
     expect(await screen.findByLabelText("Редактировать план")).toBeTruthy();
   });
 
@@ -361,7 +411,9 @@ describe("the plan's approval", () => {
     publishPlan();
 
     fireEvent.click(await screen.findByLabelText("Редактировать план"));
-    fireEvent.change(await screen.findByRole("textbox"), {
+    // The editor opens at once and fills when the file lands: the composer is a
+    // textbox too, so the plan's own one is named by its hint.
+    fireEvent.change(await screen.findByLabelText(/Файл плана как он есть на диске/), {
       target: { value: "---\nstage: draft\n---\n" },
     });
     expect(screen.queryByText("Правка руками")).toBeNull();

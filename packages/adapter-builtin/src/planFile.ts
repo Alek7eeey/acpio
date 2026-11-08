@@ -27,6 +27,13 @@ export type PlanEntry = {
  */
 export type PlanDocument = {
   name?: string;
+  /**
+   * What is wrong: the defect, the gap, the thing that costs the reader
+   * something today. A plan the reader approves has to say what it fixes before
+   * it says how — `apply_plan` refuses a plan that never states one.
+   */
+  problem?: string;
+  /** The solution in one or two lines: what changes and why exactly that way. */
   overview?: string;
   plan?: string;
 };
@@ -50,6 +57,13 @@ export type PlanState = PlanDocument & {
   entries: PlanEntry[];
   stage: PlanStage;
   pacing: PlanPacing;
+  /**
+   * The chat the plan belongs to. A folder holds many chats and one plan file,
+   * so the file says whose plan it is: a session follows and reads only its own,
+   * and the next chat to write it becomes its owner. Absent on a file written by
+   * hand, or by a version that did not record the owner yet.
+   */
+  chat?: string;
 };
 
 /** Folder the plan lives in, relative to the session's working directory. */
@@ -67,7 +81,9 @@ export function emptyPlanState(): PlanState {
 const STEPS_HEADING = /^##[ \t]+(?:шаги|задачи|steps|tasks)[ \t]*$/im;
 const ANY_HEADING = /^##[ \t]/m;
 /** The wrapper headings the file itself owns — stripped on the way back in. */
-const OVERVIEW_HEADING = /^##[ \t]+(?:обзор|overview|кратко)[ \t]*\r?\n?/i;
+const OVERVIEW_HEADING = /^##[ \t]+(?:обзор|решение|overview|solution|кратко)[ \t]*\r?\n?/i;
+const PROBLEM_HEADING = /^##[ \t]+(?:проблема|problem)[ \t]*\r?\n?/im;
+const ANY_SECTION = /^##[ \t]/m;
 const PLAN_HEADING = /^##[ \t]+(?:план|plan)[ \t]*\r?\n?/i;
 const CHECKBOX = /^[ \t]*[-*][ \t]+\[([ xX~/\-])\][ \t]+(.*)$/;
 const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---[ \t]*\r?\n?/;
@@ -88,7 +104,7 @@ const MARK_OF_STATUS: Record<PlanEntry["status"], string> = {
   completed: "x",
 };
 
-type Headings = { overview: string; steps: string; plan: string };
+type Headings = { problem: string; overview: string; steps: string; plan: string };
 
 /** Frontmatter keys, one `key: value` per line — enough for four scalars. */
 function readFrontmatter(text: string): { meta: Record<string, string>; body: string } {
@@ -108,7 +124,22 @@ function readFrontmatter(text: string): { meta: Record<string, string>; body: st
   return { meta, body: text.slice(match[0].length) };
 }
 
-/** The three regions of the body: what is above the steps, the steps, what follows. */
+/**
+ * The problem sits above everything the steps are about: it is the first `##`
+ * section of the body, and whatever follows it (the solution) is what the
+ * overview has always been.
+ */
+function splitProblem(above: string): { problem: string; overview: string } {
+  const heading = PROBLEM_HEADING.exec(above);
+  if (!heading) return { problem: "", overview: above };
+  const rest = above.slice(heading.index + heading[0].length);
+  const boundary = ANY_SECTION.exec(rest);
+  const problem = boundary ? rest.slice(0, boundary.index) : rest;
+  const tail = boundary ? rest.slice(boundary.index) : "";
+  return { problem, overview: [above.slice(0, heading.index), tail].join("\n") };
+}
+
+/** The four regions of the body: problem, solution, steps, what follows. */
 function splitSections(body: string): Headings {
   const heading = STEPS_HEADING.exec(body);
   if (heading) {
@@ -118,19 +149,19 @@ function splitSections(body: string): Headings {
     const boundary = ANY_HEADING.exec(afterHeading);
     const steps = boundary ? afterHeading.slice(0, boundary.index) : afterHeading;
     const rest = boundary ? afterHeading.slice(boundary.index) : "";
-    return { overview: before, steps, plan: rest };
+    return { ...splitProblem(before), steps, plan: rest };
   }
   // A hand-written plan with no headings at all: the checkboxes are the steps,
   // the prose before and after them is the document.
   const lines = body.split(/\r?\n/);
   const first = lines.findIndex((line) => CHECKBOX.test(line));
-  if (first < 0) return { overview: body, steps: "", plan: "" };
+  if (first < 0) return { problem: "", overview: body, steps: "", plan: "" };
   let last = first;
   for (let i = first; i < lines.length; i += 1) {
     if (CHECKBOX.test(lines[i] ?? "")) last = i;
   }
   return {
-    overview: lines.slice(0, first).join("\n"),
+    ...splitProblem(lines.slice(0, first).join("\n")),
     steps: lines.slice(first, last + 1).join("\n"),
     plan: lines.slice(last + 1).join("\n"),
   };
@@ -158,12 +189,16 @@ export function parsePlan(text: string): PlanState {
   const { meta, body } = readFrontmatter(text);
   const sections = splitSections(body);
   const name = (meta.name ?? "").trim();
+  const chat = (meta.chat ?? meta.session ?? "").trim();
   const stage: PlanStage = /^applying$/i.test((meta.stage ?? "").trim()) ? "applying" : "draft";
   const pacing: PlanPacing = /^step$/i.test((meta.pacing ?? "").trim()) ? "step" : "whole";
+  const problem = sections.problem.trim().replace(PROBLEM_HEADING, "").trim();
   const overview = sections.overview.trim().replace(OVERVIEW_HEADING, "").trim();
   const plan = sections.plan.trim().replace(PLAN_HEADING, "").trim();
   return {
     ...(name ? { name } : {}),
+    ...(chat ? { chat } : {}),
+    ...(problem ? { problem } : {}),
     ...(overview ? { overview } : {}),
     ...(plan ? { plan } : {}),
     entries: parseEntries(sections.steps),
@@ -177,7 +212,9 @@ export function renderPlan(state: PlanState, locale: "ru" | "en" = "ru"): string
   const ru = locale !== "en";
   const stepsHeading = ru ? "## Шаги" : "## Steps";
   const planHeading = ru ? "## План" : "## Plan";
-  const overviewHeading = ru ? "## Обзор" : "## Overview";
+  const overviewHeading = ru ? "## Решение" : "## Solution";
+  const problemHeading = ru ? "## Проблема" : "## Problem";
+  const problem = (state.problem ?? "").trim();
   const overview = (state.overview ?? "").trim();
   const plan = (state.plan ?? "").trim();
   const steps = state.entries
@@ -188,10 +225,12 @@ export function renderPlan(state: PlanState, locale: "ru" | "en" = "ru"): string
     ...((state.name ?? "").trim()
       ? [`name: ${(state.name ?? "").trim().replace(/\r?\n/g, " ")}`]
       : []),
+    ...((state.chat ?? "").trim() ? [`chat: ${(state.chat ?? "").trim()}`] : []),
     `stage: ${state.stage}`,
     `pacing: ${state.pacing}`,
     "---",
     "",
+    ...(problem ? [problemHeading, "", problem, ""] : []),
     ...(overview ? [overviewHeading, "", overview, ""] : []),
     stepsHeading,
     "",
@@ -233,7 +272,7 @@ export function writePlan(file: string, state: PlanState, locale: "ru" | "en" = 
  */
 export function setPlanOptions(
   file: string,
-  patch: { stage?: PlanStage; pacing?: PlanPacing },
+  patch: { stage?: PlanStage; pacing?: PlanPacing; chat?: string },
   locale: "ru" | "en" = "ru",
 ): boolean {
   const state = readPlan(file);
@@ -281,7 +320,9 @@ export function planSignature(state: PlanState | undefined): string {
   return JSON.stringify([
     state.stage,
     state.pacing,
+    state.chat ?? "",
     state.name ?? "",
+    state.problem ?? "",
     state.overview ?? "",
     state.plan ?? "",
     state.entries.map((entry) => [entry.content, entry.status]),
