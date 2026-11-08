@@ -101,7 +101,8 @@ function SlashCommandMenuInner({
   const items: ReactNode[] = [];
   let skillsHeading = false;
   commands.forEach((cmd, idx) => {
-    if (isSlashSkill(cmd) && !skillsHeading) {
+    const skill = isSlashSkill(cmd);
+    if (skill && !skillsHeading) {
       skillsHeading = true;
       items.push(
         <div key="section-skills" className={styles.section} role="presentation">
@@ -125,7 +126,12 @@ function SlashCommandMenuInner({
         }}
       >
         <span className={styles.name}>/{cmd.name}</span>
-        <span className={styles.description}>{cmd.description}</span>
+        <span
+          className={`${styles.description}${skill ? ` ${styles.descriptionClamped}` : ""}`}
+          title={skill ? cmd.description : undefined}
+        >
+          {cmd.description}
+        </span>
         {cmd.inputHint ? <span className={styles.hint}>{cmd.inputHint}</span> : null}
       </button>,
     );

@@ -70,6 +70,12 @@
   overflow-wrap: anywhere;
 }
 
+.descriptionClamped {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .hint {
   font-size: 0.72rem;
   color: color-mix(in srgb, var(--text-secondary) 85%, var(--accent));

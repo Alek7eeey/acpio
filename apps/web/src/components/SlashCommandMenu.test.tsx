@@ -100,6 +100,14 @@ describe("SlashCommandMenu", () => {
     expect(screen.queryByText("Команды")).toBeNull();
   });
 
+  it("keeps a skill's description short, with the full text on hover", () => {
+    const long = "Длинное описание скилла, которое не влезает в одну строку меню и раньше растягивало пункт";
+    renderMenu({ list: [{ name: "git-commit-ru", description: long, kind: "skill" }] });
+    const desc = screen.getByText(long);
+    expect(desc.getAttribute("title")).toBe(long);
+    expect(desc.className).toMatch(/descriptionClamped/);
+  });
+
   it("reports the hovered option through onActiveIndexChange", () => {
     const { onActiveIndexChange } = renderMenu();
     fireEvent.mouseEnter(screen.getByRole("option", { name: /\/ask/ }));
