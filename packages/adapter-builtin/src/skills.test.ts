@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -425,6 +425,32 @@ describe("translated skills", () => {
       builtinSlashCommands({ locale }, skills).find((cmd) => cmd.name === "commit")?.description;
     expect(menu("ru")).toBe("Сделать коммит");
     expect(menu("en")).toBe("Make a commit");
+  });
+});
+
+describe("the shipped English skill files", () => {
+  /** The `skills` folders of this repo: what the app ships and what its own plugin ships. */
+  const shipped = [
+    BUILTIN_SKILLS_DIR,
+    join(BUILTIN_SKILLS_DIR, "..", "..", "..", "plugin-ponytail", "skills"),
+  ];
+  const cyrillic = /[\u0400-\u04FF]/;
+
+  it("carry no Russian: the / menu and the prompt read them as the English version", async () => {
+    // A translation lives beside the file in `SKILL.ru.md` and is free to be
+    // Russian; the primary file is the English one, so an English reader must
+    // not meet a Russian word in the description the composer lists or in the
+    // body the model follows. Russian in an English UI is the one mix the
+    // translation mechanism exists to prevent.
+    const skills = await discoverSkills(shipped, tempDir());
+    expect(skills.map((s) => s.name)).toContain("verify-bugfix");
+    for (const found of skills) {
+      const russian = readFileSync(found.path, "utf8")
+        .split(/\r?\n/)
+        .map((line, index) => `${found.name}:${index + 1}: ${line}`)
+        .filter((line) => cyrillic.test(line));
+      expect(russian).toEqual([]);
+    }
   });
 });
 

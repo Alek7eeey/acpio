@@ -1,6 +1,6 @@
 ---
 name: goal-loop
-description: Carry a task to a checkable goal without stopping between steps — the goal and its check are fixed once, then each iteration ends in a run of that check, and the turn only ends when it passes, on a real blocker, or when the user stops. Use when the user says "автономно", "until it's done", "продолжай", "доведи до результата", "не спрашивай", or when the goal is measurable (a metric, a passing command) and reaching it takes many steps.
+description: Carry a task to a checkable goal without stopping between steps — the goal and its check are fixed once, then each iteration ends in a run of that check, and the turn only ends when it passes, on a real blocker, or when the user stops. Use when the user says "until it's done", "keep going", "don't ask", "carry it through", or when the goal is measurable (a metric, a passing command) and reaching it takes many steps.
 ---
 
 # Goal loop
@@ -15,7 +15,7 @@ Ask the user only if the goal needs something only they can give: which variant 
 
 ## An iteration
 
-One change, its check, one line: `#4 1452 → 380 mm³ — полосы по петлям вместо площади`. Then the next iteration, immediately. Do not end a turn with what you are about to do, what you would check next, or a question inviting approval nobody asked for.
+One change, its check, one line: `#4 1452 → 380 mm³ — loop bands instead of area`. Then the next iteration, immediately. Do not end a turn with what you are about to do, what you would check next, or a question inviting approval nobody asked for.
 
 The turn ends for exactly three reasons:
 

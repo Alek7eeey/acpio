@@ -1,6 +1,6 @@
 ---
 name: ask
-description: Ask before touching code — the turn ends with the questions answered, not with an edit. Use for "/ask", "ask me first", "questions only", "спроси меня", "не трогай код", "clarify first", "don't change anything yet", or a task whose result hinges on a decision only the user can make.
+description: Ask before touching code — the turn ends with the questions answered, not with an edit. Use for "/ask", "ask me first", "questions only", "clarify first", "don't change anything yet", or a task whose result hinges on a decision only the user can make.
 ---
 
 # Ask
@@ -9,7 +9,7 @@ description: Ask before touching code — the turn ends with the questions answe
 
 An asking turn happens in three cases only:
 
-- the user asks for questions instead of work — «спроси меня», "ask me first", "/ask", "questions only", "don't touch the code", "clarify first";
+- the user asks for questions instead of work — "ask me first", "/ask", "questions only", "don't touch the code", "clarify first";
 - the work cannot be done without one of the user's decisions: two readings of the task that give different results, a behaviour only they can pick, a scope or a value no file states;
 - you catch yourself about to guess something the user would have to undo later.
 

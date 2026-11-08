@@ -46,7 +46,9 @@ menu costs a process start at most once per folder every few minutes.
 A skill can speak the UI language: next to its `SKILL.md` the folder may carry
 `SKILL.<lang>.md` (`SKILL.ru.md`). In that language the `/` menu, Settings → Skills, the
 system prompt's list and `/name` all use the translation; every other language falls back to
-`SKILL.md`, so a skill written in one language reads the same everywhere.
+`SKILL.md`, so a skill written in one language reads the same everywhere. `SKILL.md` itself is
+the English version and holds no Russian at all — a Russian word belongs in `SKILL.ru.md`,
+while a Russian translation is free to quote English names and commands as they are.
 
 ### Message search
 
