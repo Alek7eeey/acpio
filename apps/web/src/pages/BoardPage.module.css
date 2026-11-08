@@ -569,6 +569,13 @@
   font-size: 0.84rem;
   line-height: 1.4;
   outline: none;
+  /* The browser paints its resize grip in the bottom-right corner of the box,
+     inside the padding edge: the grip is a dozen pixels across, so a line that
+     fills the width has to stop further from that edge than its own marks or
+     the last glyphs run under them. The copy laid over the field carries the
+     same box (see `.composerMirror`), or the two would wrap at different
+     widths. */
+  padding: 0 18px 12px 0;
   /* What the reader sees is the mirror's text (see `.composerMirror`): a
      textarea cannot colour a range, and an attached file's name is a link. */
   color: transparent;
@@ -604,13 +611,6 @@
      field, and the copy laid over it would hang that much taller. */
   display: block;
   scrollbar-width: none;
-  /* The field's own 2px on every side (the browser's, not ours) shrinks the
-     text it lays out by 4px and pushes it down and right, while the copy has
-     none — so the two wrapped at different widths, every glyph sat a couple of
-     pixels off its painted twin, and the caret at the end of the text stood
-     past the last letter. The copy's box is the one the reader sees: the field
-     keeps no padding of its own. */
-  padding: 0;
 }
 
 .composerText .composerInput::-webkit-scrollbar {
@@ -626,6 +626,10 @@
   font: inherit;
   font-size: 0.84rem;
   line-height: 1.4;
+  /* The field's own gap under the resize grip, to the pixel: the copy is what
+     the reader sees, so a padding the field had and this box did not would put
+     every glyph a couple of pixels off its painted twin. */
+  padding: 0 18px 12px 0;
   color: var(--text);
   pointer-events: none;
   user-select: none;
