@@ -4033,6 +4033,50 @@ export function SettingsPage() {
             </SettingTable>
 
             <SettingTable>
+              {/* The answer language: one line of the same system prompt, and the
+                  only dial that shapes it. Three chips rather than a switch —
+                  "follow the interface" is a choice, not the off state. */}
+              <SettingRow
+                label={t("settings.builtinReplyLanguage")}
+                hint={t("settings.builtinReplyLanguageHint")}
+                terms={[
+                  t("settings.builtinReplyLanguage"),
+                  t("settings.builtinReplyLanguageHint"),
+                  "language",
+                  "язык",
+                  "русский",
+                  "english",
+                  "locale",
+                ]}
+              >
+                <div className={styles.actionChips}>
+                  {(
+                    [
+                      ["auto", t("settings.builtinReplyLanguageAuto")],
+                      ["ru", t("settings.builtinReplyLanguageRu")],
+                      ["en", t("settings.builtinReplyLanguageEn")],
+                    ] as const
+                  ).map(([id, label]) => {
+                    const on = (form.builtinReplyLanguage ?? "auto") === id;
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        className={`${styles.actionChip}${on ? ` ${styles.actionChipOn}` : ""}`}
+                        aria-pressed={on}
+                        onClick={() => {
+                          patch("builtinReplyLanguage", id);
+                          // Applies at once: the next turn of a running chat is
+                          // built with the new answer language.
+                          void saveSettings({ builtinReplyLanguage: id });
+                        }}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </SettingRow>
               {/* The picture line is one sentence of the same system prompt the
                   instructions above extend, so it lives in this group. */}
               <SettingRow

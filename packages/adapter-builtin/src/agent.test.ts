@@ -121,9 +121,16 @@ function boot(
 }
 
 describe("system prompt rules", () => {
-  const build = (superseded: string[], skillsSection = "", planTool = true) =>
+  const build = (
+    superseded: string[],
+    skillsSection = "",
+    planTool = true,
+    locale = "en",
+    replyLanguage: "auto" | "ru" | "en" = "auto",
+  ) =>
     systemPrompt(
-      "en",
+      locale,
+      replyLanguage,
       "/work",
       { servers: [] },
       skillsSection,
@@ -140,6 +147,28 @@ describe("system prompt rules", () => {
     expect(prompt).toContain("Make the smallest change that fully solves the task.");
     expect(prompt).toContain("When a check fails, fix the code, never the check — unless the check itself is wrong,");
     expect(prompt).toContain("Read a file before changing it,");
+  });
+
+  it("speaks the ui language: the ru prompt carries the rules and headers in Russian", () => {
+    const prompt = build([], "", true, "ru");
+    expect(prompt).toContain("Ты — встроенный кодирующий агент");
+    expect(prompt).toContain("Рабочая папка: /work");
+    expect(prompt).toContain("Правила:");
+    expect(prompt).toContain("Делай минимальное изменение, которое полностью решает задачу.");
+    expect(prompt).toContain("Отвечай по-русски.");
+    expect(prompt).not.toContain("Make the smallest change");
+    // A rule an active skill words itself leaves the ru prompt too.
+    expect(build(["smallest-change"], "", true, "ru")).not.toContain("Делай минимальное");
+  });
+
+  it("makes the setting, not the interface, decide the answer language", () => {
+    // An English interface with the answer pinned to Russian — the reader's own
+    // case: the prompt stays English, the one line that shapes the answer does not.
+    expect(build([], "", true, "en", "ru")).toContain("Reply in Russian.");
+    expect(build([], "", true, "ru", "en")).toContain("Отвечай по-английски.");
+    // `auto` hands it back to the interface language.
+    expect(build([], "", true, "en", "auto")).toContain("Reply in English.");
+    expect(build([], "", true, "ru", "auto")).toContain("Отвечай по-русски.");
   });
 
   it("drops the rule an active skill words itself and keeps the rest", () => {

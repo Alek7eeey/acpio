@@ -3,12 +3,14 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type {
   AppSettings,
   BuiltinProviderConfig,
+  BuiltinReplyLanguage,
   InProcessAgentOptions,
   InProcessAgentTransport,
 } from "@acpio/shared";
 import {
   builtinProviderHeaders,
   normalizeBuiltinBashTimeoutSec,
+  normalizeBuiltinReplyLanguage,
   normalizeBuiltinThinkingLimit,
   parseBuiltinBody,
 } from "@acpio/shared";
@@ -131,8 +133,11 @@ function userContent(parts: unknown): ModelMessage {
  * turn carries its own take on a step, and saying that step twice — once here,
  * once in the skill, at two different strictnesses — is what makes a model spend
  * reasoning on which one wins. An id nothing supersedes is simply kept.
+ *
+ * `text` is English, `ru` the same rule in Russian: the prompt speaks the UI
+ * language (Settings → Appearance), so a reader who reads it sees their own.
  */
-const RULES: ReadonlyArray<{ id: string; text: string }> = [
+const RULES: ReadonlyArray<{ id: string; text: string; ru: string }> = [
   // Merged with `tools`: measured with the prompt's rules removed, the model
   // reads first and keeps its edits in the tools, but reaches for `sed -i` when
   // nothing says not to. Everything else it does unprompted.
@@ -143,8 +148,18 @@ const RULES: ReadonlyArray<{ id: string; text: string }> = [
       "or a heredoc through `bash`. One `edit` call per file, however many `edits` it carries; " +
       "a new file the task asks for is written, not surveyed first. Use `read`/`glob`/`grep` " +
       "rather than `cat`/`find`, and one direct command over a helper script.",
+    ru:
+      "Прочитай файл, прежде чем менять его, и меняй через `edit`/`write` — никогда `sed`, " +
+      "`perl` или heredoc через `bash`. Один вызов `edit` на файл, сколько бы `edits` он ни " +
+      "нёс; новый файл, который просит задача, сразу пишется, а не изучается предварительно. " +
+      "Пользуйся `read`/`glob`/`grep`, а не `cat`/`find`, и одной прямой командой вместо " +
+      "вспомогательного скрипта.",
   },
-  { id: "smallest-change", text: "Make the smallest change that fully solves the task." },
+  {
+    id: "smallest-change",
+    text: "Make the smallest change that fully solves the task.",
+    ru: "Делай минимальное изменение, которое полностью решает задачу.",
+  },
   // The side panel is the plan's home: the same place other ACP agents put
   // theirs. A model told nothing publishes nothing, and one that restates the
   // list in its answer makes the reader read the same steps twice. The plan is a
@@ -170,12 +185,31 @@ const RULES: ReadonlyArray<{ id: string; text: string }> = [
       "sets the pace: if they want one step at a time, or not to start without them, that " +
       "outranks everything here — do not close the whole list in one turn, and say where you " +
       "stopped. The reader watches the right-hand panel — never repeat the plan in the answer.",
+    ru:
+      "План составляется только в трёх случаях: пользователь его просит, вызван скилл `plan` " +
+      "(`/plan <задача>`), или изменение крупное — много файлов либо шаги пока не ясны — и ты " +
+      "говоришь об этом до начала работы. Ни одного из трёх нет — делай работу сразу и никакого " +
+      "плана не публикуй. Иначе план идёт в файл `.acpio/plan.md` до первого шага: заголовок, " +
+      "`## Overview` в одну-две строки, шаги строками `- [ ]` под `## Шаги` (`- [~]`, пока шаг " +
+      "в работе, `- [x]`, когда он закрыт), затем файлы, обоснование и способ проверки в " +
+      "разделах после них. Пиши его инструментом `plan` или через `write`/`edit` и потом `plan` " +
+      "без аргументов, чтобы опубликовать заново; вызывай `plan` снова, когда шаг начинается и " +
+      "когда он закрыт. На стадии `draft` ничего не реализуется: читай, ищи, составь план, затем " +
+      "вызови `apply_plan` — он останавливает ход и просит читателя одобрить. Работа начинается " +
+      "только когда стадия `applying`. Темп задаёт читатель: если он хочет по одному шагу или не " +
+      "хочет начинать без него, это важнее всего здесь — не закрывай весь список за один ход и " +
+      "скажи, где остановился. Читатель смотрит на панель справа — никогда не повторяй план в " +
+      "ответе.",
   },
   {
     id: "batch",
     text:
       "Batch independent calls in one step (several reads, searches or unrelated commands); " +
       "run a command only after the call it depends on has finished.",
+    ru:
+      "Объединяй независимые вызовы в один шаг (несколько чтений, поисков или несвязанные " +
+      "команды); запускай команду только после того, как завершился вызов, от которого она " +
+      "зависит.",
   },
   // The measurement behind the shorter line: with no rules at all the model ran
   // `npm test` and the real script unprompted, so only the norm it broke where
@@ -186,6 +220,11 @@ const RULES: ReadonlyArray<{ id: string; text: string }> = [
       "When a check fails, fix the code, never the check — unless the check itself is wrong, " +
       "then fix it and say why in a line. Stop as soon as it passes — no extra listings, " +
       "re-reads or cleanup beyond what the task or a skill asks.",
+    ru:
+      "Когда проверка падает, исправляй код, а не проверку — если только сама проверка не " +
+      "ошибочна, тогда исправь её и одной строкой скажи почему. Останавливайся, как только она " +
+      "проходит — никаких дополнительных листингов, повторных чтений и уборки сверх того, что " +
+      "просят задача или скилл.",
   },
 ];
 
@@ -194,6 +233,8 @@ export const RULE_IDS: readonly string[] = RULES.map((rule) => rule.id);
 
 export function systemPrompt(
   locale: string,
+  /** Settings → Built-in agent: which language the answer comes in. */
+  replyLanguage: BuiltinReplyLanguage,
   cwd: string,
   mcp: { servers: string[] },
   /** Skills the model may call, already rendered into its prompt block. */
@@ -211,17 +252,37 @@ export function systemPrompt(
   /** The harness's own rider (the thinking knob) — not the user's words. */
   thinkingInstructions: string,
 ): string {
+  // The prompt speaks the UI language: every fixed line below has its Russian
+  // twin, so a reader flipping the language reads rules in their own.
+  const t = (en: string, ru: string) => (locale === "ru" ? ru : en);
+  // The answer language is the setting's to decide; `auto` hands it back to the
+  // interface, which is what every other line here follows anyway.
+  const answerIn = replyLanguage === "ru" || replyLanguage === "en" ? replyLanguage : locale;
   return [
-    "You are the built-in coding agent of the Acpio chat harness.",
-    `Working directory: ${cwd} (platform: ${process.platform})`,
+    t(
+      "You are the built-in coding agent of the Acpio chat harness.",
+      "Ты — встроенный кодирующий агент чат-харнесса Acpio.",
+    ),
+    t(
+      `Working directory: ${cwd} (platform: ${process.platform})`,
+      `Рабочая папка: ${cwd} (платформа: ${process.platform})`,
+    ),
     ...(outsideCwd
       ? [
-          "Paths outside the working directory work too: absolute paths such as a global skill " +
-            "folder are readable, and `grep`/`glob` may scope to one. Keep new files inside the " +
-            "working directory unless the user points you elsewhere.",
+          t(
+            "Paths outside the working directory work too: absolute paths such as a global skill " +
+              "folder are readable, and `grep`/`glob` may scope to one. Keep new files inside the " +
+              "working directory unless the user points you elsewhere.",
+            "Пути вне рабочей папки тоже работают: абсолютные пути, например к глобальной папке " +
+              "скиллов, читаются, и `grep`/`glob` можно ограничить ею. Новые файлы держи внутри " +
+              "рабочей папки, если пользователь не укажет другое.",
+          ),
         ]
       : []),
-    `Reply in ${locale === "ru" ? "Русский" : "English"}. Use Markdown; keep answers short and concrete.`,
+    t(
+      `Reply in ${answerIn === "ru" ? "Russian" : "English"}. Use Markdown; keep answers short and concrete.`,
+      `Отвечай по-${answerIn === "ru" ? "русски" : "английски"}. Пиши в Markdown; ответы держи короткими и конкретными.`,
+    ),
     // A picture on disk is one line of markdown away from the reader: the chat
     // serves it through the session's own file route. Said as a fact, not as a ban
     // on one sentence: measured on the default model, the markdown is pasted
@@ -230,8 +291,12 @@ export function systemPrompt(
     // Settings → Built-in agent, on by default.
     ...(markdownImages
       ? [
-          "A picture on disk reaches the reader as markdown — `![shot](shot.png)`, a path " +
-            "inside the working directory or an absolute one. The chat renders it.",
+          t(
+            "A picture on disk reaches the reader as markdown — `![shot](shot.png)`, a path " +
+              "inside the working directory or an absolute one. The chat renders it.",
+            "Картинка на диске доходит до читателя строкой markdown — `![shot](shot.png)`, путь " +
+              "внутри рабочей папки или абсолютный. Чат её отрисует.",
+          ),
         ]
       : []),
     "",
@@ -239,10 +304,10 @@ export function systemPrompt(
     // a skill, so a skill can never argue with a rule that already answered its
     // case. A rule an active skill words itself is not repeated here, and the
     // plan rule leaves with the tool it names (Settings → Built-in agent).
-    "Rules:",
+    t("Rules:", "Правила:"),
     ...RULES.filter(
       (rule) => !supersededRules.has(rule.id) && (planTool || rule.id !== "plan"),
-    ).map((rule) => `- ${rule.text}`),
+    ).map((rule) => `- ${t(rule.text, rule.ru)}`),
     // Stable to volatile, top to bottom: the rules and the frozen skills block
     // come first so a MCP server coming online or the thinking knob turning mid
     // chat rewrites only the tail, never the head the provider has cached.
@@ -250,11 +315,21 @@ export function systemPrompt(
     ...(mcp.servers.length
       ? [
           "",
-          `MCP servers connected: ${mcp.servers.join(", ")} — their tools are prefixed \`mcp__\`.`,
+          t(
+            `MCP servers connected: ${mcp.servers.join(", ")} — their tools are prefixed \`mcp__\`.`,
+            `MCP-серверы подключены: ${mcp.servers.join(", ")} — их инструменты с префиксом \`mcp__\`.`,
+          ),
         ]
       : []),
     ...(extraInstructions.trim()
-      ? ["", "Additional instructions from the user (follow them):", extraInstructions.trim()]
+      ? [
+          "",
+          t(
+            "Additional instructions from the user (follow them):",
+            "Дополнительные инструкции от пользователя (следуй им):",
+          ),
+          extraInstructions.trim(),
+        ]
       : []),
     // The harness's rider goes in bare: under the header above it would read as
     // the user's own words, and a user who writes instructions of their own
@@ -1572,6 +1647,7 @@ export class BuiltinAgent implements InProcessAgentTransport {
       promptText(promptParts),
       skills,
       this.opts.settings.builtinSkillModes,
+      this.opts.settings.locale,
     );
     this.messages.push(userContent(expanded ? [{ type: "text", text: expanded }] : promptParts));
     this.persist();
@@ -1652,10 +1728,11 @@ export class BuiltinAgent implements InProcessAgentTransport {
       this.bridgeReported = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 };
       // Frozen once per session (see `frozenSkills`): the skills block is the
       // one part of the prompt that depends on skill settings, and those are
-      // read live on every turn.
+      // read live on every turn. The locale rides in it too, so a chat keeps the
+      // language it started in — as it keeps the skill list.
       if (!this.frozenSkills) {
         this.frozenSkills = {
-          section: await renderSkillsSection(skills, live.builtinSkillModes),
+          section: await renderSkillsSection(skills, live.builtinSkillModes, live.locale),
           supersedes: supersededRules(skills, live.builtinSkillModes),
         };
         this.persist();
@@ -1666,6 +1743,9 @@ export class BuiltinAgent implements InProcessAgentTransport {
       // attempt must not drift the prefix the first attempt already warmed.
       const system = systemPrompt(
         live.locale,
+        // Read live, like the switches below: the setting reaches the prompt of
+        // the very next turn, without restarting the chat.
+        normalizeBuiltinReplyLanguage(live.builtinReplyLanguage),
         this.cwd,
         {
           // Sorted: the manager hands the entries back in connect order, which

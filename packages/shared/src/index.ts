@@ -122,6 +122,7 @@ export {
   mergeClientAppSettings,
   normalizeBuiltinContextSettings,
   normalizeBuiltinContextMode,
+  normalizeBuiltinReplyLanguage,
   normalizeBuiltinOffloadToolResultTokens,
   normalizeBuiltinPruneReasoning,
   normalizeBuiltinCompactionThresholdPercent,
@@ -1729,6 +1730,14 @@ export type BuiltinContextMode = "off" | "prune" | "summary";
 export const BUILTIN_CONTEXT_MODES: readonly BuiltinContextMode[] = ["off", "prune", "summary"];
 
 /**
+ * Which language the built-in agent answers in (Settings → Built-in agent):
+ * `"auto"` follows the interface language, `"ru"`/`"en"` pin one whatever the
+ * interface speaks. A prompt in another language does not change it — the
+ * setting is the only dial.
+ */
+export type BuiltinReplyLanguage = "auto" | "en" | "ru";
+
+/**
  * What the built-in agent does with assistant reasoning parts when it shapes a
  * prompt. `"keep"` (default) sends them as they are, `"drop"` removes them from
  * every older turn, `"before-last-message"` keeps them only in the newest one.
@@ -2443,6 +2452,12 @@ export interface AppSettings {
    */
   builtinAllowOutsideCwd: boolean;
   /**
+   * The language the built-in agent answers in (Settings → Built-in agent).
+   * `"auto"` — the interface language decides, which is what the prompt's
+   * other lines speak; `"ru"`/`"en"` pin the answer regardless of it.
+   */
+  builtinReplyLanguage: BuiltinReplyLanguage;
+  /**
    * Tell the built-in agent that this chat draws a picture out of markdown
    * (`![shot](shot.png)`), so it shows a screenshot it saved instead of
    * answering that it cannot display images. On by default — the hint is one
@@ -2608,6 +2623,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   pluginSkills: [],
   builtinSubagents: DEFAULT_BUILTIN_SUBAGENTS,
   builtinAllowOutsideCwd: false,
+  builtinReplyLanguage: "auto",
   builtinMarkdownImages: true,
   builtinPlanTool: true,
   composerDrafts: {},

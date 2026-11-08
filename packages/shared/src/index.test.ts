@@ -556,6 +556,7 @@ describe("DEFAULT_SETTINGS", () => {
     builtinSkillModes: {},
     builtinSubagents: { enabled: false, allowAdhoc: true, agents: [] },
     builtinAllowOutsideCwd: false,
+    builtinReplyLanguage: "auto",
     builtinMarkdownImages: true,
     builtinPlanTool: true,
     composerDrafts: {},

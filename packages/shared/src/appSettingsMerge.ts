@@ -20,6 +20,7 @@ import {
   type AppSettings,
   type BuiltinContextMode,
   type BuiltinReasoningPolicy,
+  type BuiltinReplyLanguage,
   type ChatChangesMetrics,
   type ChatChipOptions,
   type ChatMetaChipId,
@@ -335,6 +336,14 @@ export function normalizeBuiltinContextMode(value: unknown): BuiltinContextMode 
 }
 
 /**
+ * Heal the answer language (Settings → Built-in agent). Anything that is not
+ * one of the three choices falls back to `auto` — the interface's language.
+ */
+export function normalizeBuiltinReplyLanguage(value: unknown): BuiltinReplyLanguage {
+  return value === "ru" || value === "en" ? value : DEFAULT_SETTINGS.builtinReplyLanguage;
+}
+
+/**
  * Heal the built-in agent's presets (Settings → Built-in agent): each row is a
  * named patch over the built-in knobs and registers as an agent of its own.
  * Malformed rows drop, ids dedupe and may not collide with a registered
@@ -530,6 +539,7 @@ export function mergeClientAppSettings(raw: unknown): AppSettings {
   merged.builtinThinkingLimit = normalizeBuiltinThinkingLimit(partial.builtinThinkingLimit);
   merged.builtinBashTimeoutSec = normalizeBuiltinBashTimeoutSec(partial.builtinBashTimeoutSec);
   normalizeBuiltinContextSettings(merged);
+  merged.builtinReplyLanguage = normalizeBuiltinReplyLanguage(merged.builtinReplyLanguage);
   merged.chatMetaChips = normalizeChatMetaChips(partial.chatMetaChips, schemaVersion);
   merged.chatAgentTurnTimeline = normalizeChatAgentTurnTimeline(
     partial.chatAgentTurnTimeline,

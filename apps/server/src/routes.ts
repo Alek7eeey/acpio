@@ -524,6 +524,7 @@ const settingsSchema = z.object({
     })
     .optional(),
   builtinAllowOutsideCwd: z.boolean().optional(),
+  builtinReplyLanguage: z.enum(["auto", "ru", "en"]).optional(),
   builtinMarkdownImages: z.boolean().optional(),
   builtinPlanTool: z.boolean().optional(),
 });

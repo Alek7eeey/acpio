@@ -17,6 +17,7 @@ import {
   normalizeBuiltinThinkingLimit,
   normalizeBuiltinBashTimeoutSec,
   normalizeBuiltinContextSettings,
+  normalizeBuiltinReplyLanguage,
   normalizeBuiltinExtraInstructions,
   normalizeBuiltinProviders,
   normalizeBuiltinPresets,
@@ -469,6 +470,7 @@ function mergeSettings(raw: unknown): AppSettings {
   if (typeof merged.builtinPlanTool !== "boolean") {
     merged.builtinPlanTool = DEFAULT_SETTINGS.builtinPlanTool;
   }
+  merged.builtinReplyLanguage = normalizeBuiltinReplyLanguage(merged.builtinReplyLanguage);
   // Composer drafts persist so typed text survives a reload. Heal the map:
   // only string keys with non-empty trimmed text survive, a bare string is the
   // draft a version before the files knew (its text alone), and the whole blob
