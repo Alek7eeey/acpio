@@ -489,9 +489,11 @@ describe("parked plan card", () => {
 
     await screen.findByText("Вот план — он в панели справа.");
 
-    // The card names the plan and carries the way into it.
+    // The card names the plan and carries its two answers: the panel itself is
+    // where the plan is read, and it opens on its own when it is composed.
     expect(screen.getByText("План готов к подтверждению")).toBeTruthy();
-    expect(screen.getByText("Открыть план")).toBeTruthy();
+    expect(screen.getByText("Одобрить")).toBeTruthy();
+    expect(screen.queryByText("Открыть план")).toBeNull();
 
     // Nothing claims the agent is generating, and nothing asks a vague question
     // the card already answers.

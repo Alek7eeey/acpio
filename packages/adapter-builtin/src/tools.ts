@@ -825,7 +825,7 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
           description:
             "Ask the reader to approve the plan and start implementing: the card above the input " +
             "offers «Открыть план» / «Одобрить» / «Отклонить», the right-hand panel offers " +
-            "«Утвердить и начать» together with the pace, and the turn waits for the answer. Call it " +
+            "«Утвердить» together with the pace, and the turn waits for the answer. Call it " +
             "once the plan is written, in the same turn, after one line of the answer saying the " +
             "plan is ready and that this card approves it. Approved, the stage turns `applying` and " +
             "the work begins; rejected, nothing is implemented and the turn ends there — the reader " +

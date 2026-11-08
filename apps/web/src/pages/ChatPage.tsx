@@ -70,7 +70,7 @@ import {
   setComposerDraftFiles,
 } from "../lib/composerDrafts";
 import { splitLinkNames } from "../lib/linkNames";
-import { isCompactPanelLayout, useChatSplitAllowed } from "../lib/panelLayout";
+import { useChatSplitAllowed } from "../lib/panelLayout";
 import { useFixedMenuPlacement } from "../lib/menuPosition";
 import { sanitizeCatalogModes, selectLiveSessionDetail, useAppStore, type PendingAttachment } from "../lib/store";
 import { buildAgentTimeline, finalAnswerPart, isSingleItemTimeline, splitQuestionPreamble, stepsPartsStillLive, turnAnswerVisible, unansweredQuestionParts, type AgentQuestionItem, type AgentTimelineItem } from "../lib/assistantTurnTimeline.js";
@@ -4389,6 +4389,16 @@ function AssistantParts({
   );
 }
 
+/** What makes a plan *this* plan: its name, its file and its steps. A step the
+ *  agent closes is a change inside the same plan — the panel stays as it is. */
+function planAutoOpenKey(payload: PlanPayload): string {
+  return [
+    payload.name ?? "",
+    payload.path ?? "",
+    (payload.todos ?? []).map((todo) => todo.content).join("|"),
+  ].join("\u0000");
+}
+
 /** Latest plan-ish part of the session, with the id of the part that carried it. */
 function findLatestPlanPart(
   session: { messages: MessageDto[] } | null,
@@ -5001,33 +5011,34 @@ function ChatThread() {
     }
   };
 
-  const planSignature = useMemo(() => {
-    if (!activePlan) return "";
-    return [
-      activePlan.name ?? "",
-      (activePlan.plan ?? "").slice(0, 120),
-      String(activePlan.todos?.length ?? 0),
-      // A stage flip is a visible change the panel should open for.
-      activePlan.stage ?? "",
-      pendingQuestion?.requestId ?? "",
-    ].join("|");
-  }, [activePlan, pendingQuestion?.requestId]);
+  /** The panel opens itself once per plan: the chat it belongs to, and the plan
+   *  it was opened for. A closed step is the same plan — its panel must not pop
+   *  back — and a chat opened with the plan already in place keeps the layout
+   *  the reader left it with. */
+  const planAutoOpenRef = useRef<{ chat: string | null; key: string | null }>({
+    chat: null,
+    key: null,
+  });
 
   useEffect(() => {
-    if (!planPending && !planSignature) return;
+    const chat = activeSession?.id ?? null;
+    const key = activePlan ? planAutoOpenKey(activePlan) : null;
+    const opened = planAutoOpenRef.current;
+    // While the detail is still on its way the thread is a stub and its plan
+    // has not arrived yet: the plan of a chat being opened is not news.
+    if (opened.chat !== chat || sessionLoading) {
+      planAutoOpenRef.current = { chat, key };
+      return;
+    }
+    if (!key || opened.key === key) return;
+    planAutoOpenRef.current = { chat, key };
+    // Composing a plan is the one moment the panel is worth taking over the
+    // chat for — that is where the plan is read and answered from. It used to
+    // be every update, which is why it was suppressed on a narrow screen.
     setConsoleOpen(false);
     setGitPanelOpen(false);
-    // Read the layout here rather than subscribing to it: a resize must not
-    // close the console or the git panel behind the user's back.
-    //
-    // A takeover panel is not worth a plan update: below 1180px the plan covers
-    // the whole chat (see the compact block in ChatPage.module.css), and omp
-    // sends one update per todo change, so auto-opening it there hid the
-    // conversation mid-turn — and re-opened it right after the user closed it.
-    // The composer's plan chip and the approval card in the thread open it on
-    // demand instead.
-    if (!isCompactPanelLayout()) setPlanPanelOpen(true);
-  }, [planPending, pendingQuestion?.requestId, planSignature, setConsoleOpen, setGitPanelOpen]);
+    setPlanPanelOpen(true);
+  }, [activePlan, activeSession?.id, sessionLoading, setConsoleOpen, setGitPanelOpen]);
 
   useEffect(() => {
     if (consoleOpen || gitPanelOpen) setPlanPanelOpen(false);
@@ -7525,7 +7536,6 @@ function ChatThread() {
       (!pendingQuestion || pendingQuestion.sessionId === activeSession?.id) ? (
         <div className={styles.inlinePromptDock}>
           <ChatInlinePrompt
-            onOpenPlan={openPlanPanel}
             onAcceptPlan={
               planPending ? (pacing) => void approvePlan("pending", pacing) : undefined
             }

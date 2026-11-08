@@ -1352,7 +1352,7 @@
     "remove": "Remove plan",
     "stageDraft": "Draft",
     "stageApplying": "Implementing",
-    "approve": "Approve and start",
+    "approve": "Approve",
     "approvePrompt": "The plan is approved — start implementing.",
     "pacing": "Pace",
     "pacingWhole": "All at once",

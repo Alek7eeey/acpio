@@ -69,13 +69,11 @@ function permissionCopy(payload: Record<string, unknown>, toolCall: ToolCallPerm
 }
 
 export function ChatInlinePrompt({
-  onOpenPlan,
   onAcceptPlan,
   onDismissPlan,
   askPace = false,
   busy = false,
 }: {
-  onOpenPlan?: () => void;
   /** Approve the plan and start the work: the harness flips the plan's stage and,
    *  when nobody's turn is parked on the card, starts the turn itself. With a
    *  plan file the pace is asked first and handed over here. */
@@ -163,7 +161,11 @@ export function ChatInlinePrompt({
     const name = String(pendingQuestion.payload.name ?? "").trim() || t("question.plan");
     const overview = String(pendingQuestion.payload.overview ?? "").trim();
     return (
-      <div className={styles.card} role="group" aria-label={t("question.plan")}>
+      <div
+        className={`${styles.card}${onDismissPlan ? ` ${styles.withClose}` : ""}`}
+        role="group"
+        aria-label={t("question.plan")}
+      >
         <div className={styles.eyebrow}>{t("question.planReady")}</div>
         <div className={styles.title}>{name}</div>
         {overview ? <p className={styles.overview}>{overview}</p> : null}
@@ -190,12 +192,10 @@ export function ChatInlinePrompt({
             </div>
           </div>
         ) : null}
+        {/* No «открыть план» here: the panel opens itself the moment the plan is
+            composed, and a second way to the same document above the input only
+            crowded the two answers the card is really about. */}
         <div className={styles.actions}>
-          {onOpenPlan ? (
-            <button type="button" className={styles.ghost} onClick={onOpenPlan}>
-              {t("question.openPlan")}
-            </button>
-          ) : null}
           <button
             type="button"
             className={styles.danger}
@@ -224,26 +224,26 @@ export function ChatInlinePrompt({
           >
             {t("question.planApprove")}
           </button>
-          {onDismissPlan ? (
-            <button
-              type="button"
-              className={`${styles.ghost} ${styles.dismiss}`}
-              disabled={busy}
-              aria-label={t("question.planDismiss")}
-              title={t("question.planDismiss")}
-              onClick={onDismissPlan}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <path
-                  d="M6 6l12 12M18 6L6 18"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                />
-              </svg>
-            </button>
-          ) : null}
         </div>
+        {onDismissPlan ? (
+          <button
+            type="button"
+            className={styles.cardClose}
+            disabled={busy}
+            aria-label={t("question.planDismiss")}
+            title={t("question.planDismiss")}
+            onClick={onDismissPlan}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <path
+                d="M6 6l12 12M18 6L6 18"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+              />
+            </svg>
+          </button>
+        ) : null}
       </div>
     );
   }

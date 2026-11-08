@@ -42,7 +42,7 @@ describe("PlanSidePanel", () => {
   it("approves a draft with the panel's own button — the only answer there", () => {
     const onApprove = vi.fn();
     renderPanel(PLAN, { onApprove });
-    fireEvent.click(screen.getByText("Approve and start"));
+    fireEvent.click(screen.getByText("Approve"));
     expect(onApprove).toHaveBeenCalledTimes(1);
     // Reworking is not an answer the panel offers: approving or nothing.
     expect(screen.queryByText("Rework")).toBeNull();
@@ -51,7 +51,7 @@ describe("PlanSidePanel", () => {
   it("asks twice for nothing: the button is dead while the approval is in flight", () => {
     const onApprove = vi.fn();
     renderPanel(PLAN, { onApprove, approving: true });
-    fireEvent.click(screen.getByText("Approve and start"));
+    fireEvent.click(screen.getByText("Approve"));
     expect(onApprove).not.toHaveBeenCalled();
   });
 
@@ -59,7 +59,7 @@ describe("PlanSidePanel", () => {
     const onPacing = vi.fn();
     renderPanel({ ...PLAN, stage: "applying" }, { onPacing });
     expect(screen.getByText("Implementing")).toBeTruthy();
-    expect(screen.queryByText("Approve and start")).toBeNull();
+    expect(screen.queryByText("Approve")).toBeNull();
     fireEvent.click(screen.getByText("One at a time"));
     expect(onPacing).toHaveBeenCalledWith("step");
   });
@@ -79,10 +79,10 @@ describe("PlanSidePanel", () => {
     renderPanel(PLAN, { pending: true, onAccept, onReject, onApprove });
     expect(screen.getByText("Awaiting")).toBeTruthy();
     // The card's own accept is the approval: one approve button, not two.
-    expect(screen.getAllByText("Approve and start")).toHaveLength(1);
+    expect(screen.getAllByText("Approve")).toHaveLength(1);
     fireEvent.click(screen.getByText("Reject"));
     expect(onReject).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByText("Approve and start"));
+    fireEvent.click(screen.getByText("Approve"));
     expect(onAccept).toHaveBeenCalledTimes(1);
   });
 
@@ -125,7 +125,7 @@ describe("PlanSidePanel", () => {
     const onApprove = vi.fn();
     const { plan: _ignored, ...bare } = PLAN;
     renderPanel({ ...bare, path: undefined, stage: undefined }, { onApprove });
-    expect(screen.queryByText("Approve and start")).toBeNull();
+    expect(screen.queryByText("Approve")).toBeNull();
     expect(screen.queryByText("Pace")).toBeNull();
   });
 });

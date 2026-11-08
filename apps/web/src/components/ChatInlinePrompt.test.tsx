@@ -34,13 +34,15 @@ afterEach(() => {
 });
 
 describe("ChatInlinePrompt — the plan card", () => {
-  it("offers exactly three answers: open the plan, approve it, reject it", () => {
-    renderPrompt({ onOpenPlan: () => {} });
-    expect(screen.getByText("Open plan")).toBeTruthy();
+  it("offers exactly two answers: approve it or reject it", () => {
+    renderPrompt({ onAcceptPlan: () => {} });
     expect(screen.getByText("Approve")).toBeTruthy();
     expect(screen.getByText("Reject")).toBeTruthy();
-    // Working on the plan is not a fourth answer: a reader who wants changes
-    // says so, and the agent stays where it is.
+    // The panel is where the plan is read, and it opens by itself when the plan
+    // is composed — a second door above the input is not an answer.
+    expect(screen.queryByText("Open plan")).toBeNull();
+    // Working on the plan is not a third answer either: a reader who wants
+    // changes says so, and the agent stays where it is.
     expect(screen.queryByText("Rework")).toBeNull();
   });
 

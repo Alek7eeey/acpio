@@ -130,12 +130,41 @@
   color: var(--text-secondary);
 }
 
-/* Out of the way, at the far end of the row: closing is not one of the answers. */
-.dismiss {
-  margin-left: auto;
+/* Closing is not one of the answers: the cross sits in the card's own corner,
+   where the reader looks for it, and the first lines keep clear of it. */
+.cardClose {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  z-index: 2;
   display: grid;
   place-items: center;
-  padding: 7px 9px;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease;
+}
+
+.cardClose:hover:not(:disabled) {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+.cardClose:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.withClose .eyebrow,
+.withClose .title {
+  padding-right: 28px;
 }
 
 .questions {

@@ -179,6 +179,110 @@ afterEach(() => {
 });
 
 describe("the plan's approval", () => {
+  it("finds the parked plan again when the chat is opened after the fact", async () => {
+    // The board draws «Ожидание ввода» from the session row; a chat opened
+    // later gets no live `question.request`, so the card has to come from the
+    // plan part that asks it. Without that the chat shows a finished turn, no
+    // card, and nothing the reader can answer.
+    const parked = session({
+      messages: [
+        {
+          ...planMessage,
+          parts: [
+            planMessage.parts[0]!,
+            {
+              ...planMessage.parts[1]!,
+              payload: { ...PLAN_PAYLOAD, requestId: "s1:237", pending: true },
+            },
+          ],
+        },
+      ],
+    });
+    useAppStore.setState({
+      settings: { ...DEFAULT_SETTINGS, locale: "ru" as const, chatMetaChips: [] },
+      sessions: [parked],
+      activeSessionId: null,
+      activeSession: null,
+      sessionLoading: true,
+      sessionDetails: {},
+      chatPaneIds: [],
+      focusedPaneIndex: 0,
+      pendingQuestion: null,
+    });
+    vi.mocked(api.getSession).mockResolvedValue(parked);
+
+    await act(() => useAppStore.getState().selectSession("s1"));
+    expect(useAppStore.getState().pendingQuestion).toMatchObject({
+      sessionId: "s1",
+      requestId: "s1:237",
+      kind: "create_plan",
+    });
+
+    // The other door to the same snapshot: the chat is already open in the tab
+    // (a board card clicked on top of it), so the refresh runs down the warm
+    // path — and that one has to find the parked plan too.
+    useAppStore.setState({ pendingQuestion: null });
+    await act(() => useAppStore.getState().selectSession("s1"));
+    expect(useAppStore.getState().pendingQuestion).toMatchObject({
+      requestId: "s1:237",
+      kind: "create_plan",
+    });
+
+    renderChat();
+    fireEvent.click(await screen.findByText("Отклонить"));
+    await waitFor(() =>
+      expect(api.answerQuestion).toHaveBeenCalledWith("s1", "s1:237", {
+        outcome: { outcome: "rejected", reason: "rejected by user" },
+      }),
+    );
+  });
+
+  it("opens the panel when a plan is composed, and only then — not on every step", async () => {
+    const withPlan = (name: string, status: string, stage = "draft"): SessionDetailDto => ({
+      ...session({ status: "idle" }),
+      messages: [
+        {
+          ...planMessage,
+          parts: [
+            planMessage.parts[0]!,
+            {
+              ...planMessage.parts[1]!,
+              payload: {
+                ...PLAN_PAYLOAD,
+                name,
+                stage,
+                todos: [
+                  { id: "e0", content: "Написать planFile.ts", status },
+                  { id: "e1", content: "Тесты на parse", status: "pending" },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    });
+    park(session({ status: "idle", messages: [] }), false);
+    renderChat();
+
+    // The plan arrives mid-chat: the panel takes over and shows it.
+    const first = withPlan("План как файл", "pending");
+    act(() => useAppStore.setState({ activeSession: first, sessionDetails: { s1: first } }));
+    expect(await screen.findByLabelText("Редактировать план")).toBeTruthy();
+
+    // The reader closes it — and neither a closed step nor the stage flipping to
+    // implementing brings it back: that is the same plan, already read.
+    fireEvent.click(screen.getByLabelText("Отмена"));
+    expect(screen.queryByLabelText("Редактировать план")).toBeNull();
+    const stepped = withPlan("План как файл", "completed", "applying");
+    act(() => useAppStore.setState({ activeSession: stepped, sessionDetails: { s1: stepped } }));
+    expect(screen.queryByLabelText("Редактировать план")).toBeNull();
+
+    // Another plan is news: it opens again.
+    const next = withPlan("Другой план", "pending");
+    act(() => useAppStore.setState({ activeSession: next, sessionDetails: { s1: next } }));
+    expect(await screen.findByLabelText("Редактировать план")).toBeTruthy();
+  });
+
   it("turns the card's approve into the plan's stage and the parked turn's answer", async () => {
     park(session(), true);
     renderChat();
@@ -207,7 +311,7 @@ describe("the plan's approval", () => {
     renderChat();
     publishPlan();
 
-    fireEvent.click(await screen.findByText("Утвердить и начать"));
+    fireEvent.click(await screen.findByText("Утвердить"));
 
     await waitFor(() =>
       expect(api.setSessionPlan).toHaveBeenCalledWith("s1", {
@@ -260,7 +364,7 @@ describe("the plan's approval", () => {
     renderChat();
     publishPlan();
 
-    const approve = (await screen.findByText("Утвердить и начать")).closest("button");
+    const approve = (await screen.findByText("Утвердить")).closest("button");
     fireEvent.click(approve!);
 
     await waitFor(() => expect((approve as HTMLButtonElement).disabled).toBe(true));

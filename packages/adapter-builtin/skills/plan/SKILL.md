@@ -38,6 +38,6 @@ The answer that carries `apply_plan` says in one line that the plan is ready, an
 
 `/plan <task>` is the whole request: no questions before the plan. Where a wrong guess would silently change the goal, write the assumption into the plan instead of asking; ask only when the goal itself is undecided.
 
-Approved (from that card, or from «Утвердить и начать» in the panel — with the pace the reader picked there: all at once or one step at a time), the plan is the contract: the steps are the order of the work, and `plan` is called again as each one starts and lands. A step the reader changes on the way is changed in the plan file first.
+Approved (from that card, or from «Утвердить» in the panel — with the pace the reader picked there: all at once or one step at a time), the plan is the contract: the steps are the order of the work, and `plan` is called again as each one starts and lands. A step the reader changes on the way is changed in the plan file first.
 
 If the plan tool is not offered in this chat, a plan as Markdown in the answer is the fallback — same steps, same checks, no `.acpio/plan.md`.

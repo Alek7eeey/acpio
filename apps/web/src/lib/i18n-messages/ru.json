@@ -1380,7 +1380,7 @@
     "remove": "Удалить план",
     "stageDraft": "Черновик",
     "stageApplying": "Реализация",
-    "approve": "Утвердить и начать",
+    "approve": "Утвердить",
     "approvePrompt": "План утверждён — приступай к реализации.",
     "pacing": "Темп",
     "pacingWhole": "Всё сразу",
