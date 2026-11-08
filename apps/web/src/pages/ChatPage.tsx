@@ -4389,6 +4389,12 @@ function AssistantParts({
   );
 }
 
+/** What a plan part holds, in one string: the agent republishes the plan by
+ *  changing this, and a hand edit stands in until it does. */
+function planPayloadSignature(payload: PlanPayload | undefined): string {
+  return payload ? JSON.stringify(payload) : "";
+}
+
 /** What makes a plan *this* plan: its name, its file and its steps. A step the
  *  agent closes is a change inside the same plan — the panel stays as it is. */
 function planAutoOpenKey(payload: PlanPayload): string {
@@ -4920,7 +4926,24 @@ function ChatThread() {
     }
     return findLatestPlanPart(activeSession, dismissedPlanIds);
   }, [planPending, pendingQuestion, activeSession, dismissedPlanIds]);
-  const activePlan = activePlanPart?.payload ?? null;
+  /** The plan the reader just wrote by hand into `.acpio/plan.md`, with the
+   *  signature of the part it replaced. Only an agent that polls its own file
+   *  republishes an edit, and a plan still waiting for its approval has nobody
+   *  to do that — so the panel would keep drawing the text the reader just
+   *  replaced and the pencil would read as broken. `base` is what keeps it
+   *  honest: as soon as the agent's own payload changes, the file is its story
+   *  again. */
+  const [handEditedPlan, setHandEditedPlan] = useState<{
+    base: string;
+    payload: PlanPayload;
+  } | null>(null);
+  const planPartSignature = planPayloadSignature(activePlanPart?.payload);
+  const activePlan =
+    (handEditedPlan && handEditedPlan.base === planPartSignature
+      ? handEditedPlan.payload
+      : null) ??
+    activePlanPart?.payload ??
+    null;
   /** Drop the plan from the panel — the thread keeps the message it came from,
    *  so it is the panel and the composer chip that go away, not the history. */
   const removeActivePlan = () => {
@@ -5004,7 +5027,12 @@ function ChatThread() {
     const sid = activeSession?.id;
     if (!sid) return;
     try {
-      await api.setSessionPlan(sid, { text });
+      // The answer carries the plan the server read back out of the file: the
+      // panel draws that at once, instead of waiting for an agent that may have
+      // no turn left to poll its own file.
+      const res = await api.setSessionPlan(sid, { text });
+      const written = res?.plan ? coercePlanPayload(res.plan) : null;
+      if (written) setHandEditedPlan({ base: planPartSignature, payload: written });
     } catch (err) {
       useAppStore.setState({ error: err instanceof Error ? err.message : String(err) });
       throw err;
@@ -5052,8 +5080,10 @@ function ChatThread() {
 
   useEffect(() => {
     setPlanPanelOpen(false);
-    // Another chat's approval says nothing about this chat's plan.
+    // Another chat's approval says nothing about this chat's plan, and neither
+    // does another chat's hand edit — not even one that happens to read alike.
     setApprovedPlanKey(null);
+    setHandEditedPlan(null);
   }, [activeSession?.id]);
 
   const setComposerMultilineIfNeeded = (next: boolean) => {

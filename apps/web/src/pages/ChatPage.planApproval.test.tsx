@@ -283,6 +283,32 @@ describe("the plan's approval", () => {
     expect(await screen.findByLabelText("Редактировать план")).toBeTruthy();
   });
 
+  it("draws the plan the reader just saved by hand: nobody is left to republish it", async () => {
+    park(session({ status: "idle", messages: [] }), false);
+    vi.mocked(api.getSessionPlan).mockResolvedValue({
+      ok: true,
+      text: "---\nstage: draft\n---\n",
+    });
+    vi.mocked(api.setSessionPlan).mockResolvedValue({
+      ok: true,
+      plan: {
+        ...PLAN_PAYLOAD,
+        overview: "Правка руками",
+      },
+    });
+    renderChat();
+    publishPlan();
+
+    fireEvent.click(await screen.findByLabelText("Редактировать план"));
+    fireEvent.change(await screen.findByRole("textbox"), {
+      target: { value: "---\nstage: draft\n---\n" },
+    });
+    expect(screen.queryByText("Правка руками")).toBeNull();
+    fireEvent.click(screen.getByText("Сохранить"));
+
+    await waitFor(() => expect(screen.getByText("Правка руками")).toBeTruthy());
+  });
+
   it("turns the card's approve into the plan's stage and the parked turn's answer", async () => {
     park(session(), true);
     renderChat();
