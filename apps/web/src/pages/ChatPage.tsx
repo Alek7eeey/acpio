@@ -4775,6 +4775,34 @@ function ChatThread() {
     };
   }, [chipMenu]);
 
+  /** Right click in the input: the quick commands it can send by itself. */
+  const [composerMenu, setComposerMenu] = useState<{ x: number; y: number } | null>(null);
+  const composerMenuRef = useRef<HTMLDivElement | null>(null);
+  const composerMenuStyle = useFixedMenuPlacement(composerMenu, composerMenuRef);
+
+  useEffect(() => {
+    if (!composerMenu) return;
+    // Same closing rules as the chip menu above: a press elsewhere, a scroll
+    // or Escape.
+    const onPointerDown = (event: Event) => {
+      if (composerMenuRef.current?.contains(event.target as Node)) return;
+      setComposerMenu(null);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setComposerMenu(null);
+    };
+    window.addEventListener("mousedown", onPointerDown);
+    window.addEventListener("touchstart", onPointerDown);
+    window.addEventListener("scroll", onPointerDown, true);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onPointerDown);
+      window.removeEventListener("touchstart", onPointerDown);
+      window.removeEventListener("scroll", onPointerDown, true);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [composerMenu]);
+
   const [attachError, setAttachError] = useState<string | null>(null);
   /** A pasted block waiting for the reader's answer: keep it as a file (link in
    *  the text, the file as an attachment) or paste it as text after all. */
@@ -6043,6 +6071,22 @@ function ChatThread() {
       textareaRef.current?.blur();
       void sendPrompt(value, sendOpts);
     }
+  };
+
+  /**
+   * The input's right-click commands. `commit+push` rides the changes chip's
+   * own path, and the two skills send what is typed as their argument — so a
+   * right click turns the draft into a plan, or into the questions about it,
+   * without retyping it.
+   */
+  const runComposerQuickCommand = (command: "commit+push" | "plan" | "ask") => {
+    setComposerMenu(null);
+    if (command === "commit+push") {
+      runGitChangesCommand("commit+push");
+      return;
+    }
+    const draft = text.trim();
+    submitMessage(`/${command}${draft ? ` ${draft}` : ""}`);
   };
 
   /** Regenerate an assistant reply: resend its user prompt as an edit. */
@@ -7828,6 +7872,27 @@ function ChatThread() {
                 document.body,
               )
             : null}
+          {composerMenu
+            ? createPortal(
+                <div
+                  ref={composerMenuRef}
+                  className={styles.msgActionMenu}
+                  style={composerMenuStyle ?? undefined}
+                  role="menu"
+                  aria-label={t("chat.composerMenu")}
+                >
+                  {showGitComposer ? (
+                    <MsgMenuItem
+                      label="commit+push"
+                      onClick={() => runComposerQuickCommand("commit+push")}
+                    />
+                  ) : null}
+                  <MsgMenuItem label="/plan" onClick={() => runComposerQuickCommand("plan")} />
+                  <MsgMenuItem label="/ask" onClick={() => runComposerQuickCommand("ask")} />
+                </div>,
+                document.body,
+              )
+            : null}
           <ComposerMetaChips
             renderSkeleton={renderSkeleton}
             settings={settings}
@@ -7921,6 +7986,10 @@ function ChatThread() {
                 const next = e.relatedTarget instanceof Element ? e.relatedTarget : null;
                 if (next?.closest('[role="listbox"]')) return;
                 setSlashMenuDismissed(true);
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setComposerMenu({ x: e.clientX, y: e.clientY });
               }}
               onClick={(e) => {
                 setCursorPos(e.currentTarget.selectionStart);

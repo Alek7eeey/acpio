@@ -295,6 +295,7 @@
     "pendingFiles": "Прикреплённые файлы",
     "removeFile": "Убрать файл",
     "copyAttachmentLink": "Скопировать ссылку на файл",
+    "composerMenu": "Команды поля ввода",
     "fileTooLarge": "Файл «{{name}}» больше 15 МБ — он пропущен",
     "tooManyFiles": "Можно прикрепить не больше 8 файлов",
     "attachmentUploading": "Загрузка…",
