@@ -348,7 +348,11 @@
   box-shadow: 0 1px 3px rgb(15 23 42 / 12%);
 }
 
-.footer button {
+/* Both footers draw the same button: a lone «Утвердить» in the draft row is the
+   same control as the pair in the review row, and it used to fall back to the
+   bare global button — a strip with the tick on top of the label. */
+.footer button,
+.footerSingle button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -378,7 +382,8 @@
   transform: none;
 }
 
-.footer button svg {
+.footer button svg,
+.footerSingle button svg {
   display: block;
   flex-shrink: 0;
 }
