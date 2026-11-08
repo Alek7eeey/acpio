@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
 //
-// Right click in the composer offers the quick commands. `/plan` and `/ask`
-// send what is typed as the skill's own argument — a draft turned into a plan
-// without being retyped — and `commit+push` rides the changes chip's path.
+// Right click in the composer offers the quick commands, and only writes them
+// into the field: the draft becomes the skill's own argument — a draft turned
+// into a plan without being retyped — and the reader's Enter is what sends it.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { DEFAULT_SETTINGS, type SessionDetailDto } from "@acpio/shared";
+import { composerDraftSnapshot, forgetComposerDraft } from "../lib/composerDrafts";
 import { useAppStore } from "../lib/store";
 import { I18nProvider } from "../lib/i18n";
 import { ChatPage } from "./ChatPage";
@@ -107,6 +108,9 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   localStorage.clear();
+  // The draft registry lives outside React and the store: the text one case
+  // typed would be waiting in the field of the next one.
+  for (const key of Object.keys(composerDraftSnapshot())) forgetComposerDraft(key);
 });
 
 function renderChat() {
@@ -120,28 +124,44 @@ function renderChat() {
 }
 
 describe("right click in the composer", () => {
-  it("sends the draft as the plan skill's argument", async () => {
+  const menuOf = (input: HTMLElement) => {
+    fireEvent.contextMenu(input);
+    return document.querySelector('[role="menu"]')!;
+  };
+
+  it("writes the draft into the field as the plan skill's argument", async () => {
     const { container } = renderChat();
     const input = container.querySelector("textarea")!;
     await userEvent.type(input, "переписать парсер");
 
-    fireEvent.contextMenu(input);
-    const menu = document.querySelector('[role="menu"]')!;
+    const menu = menuOf(input);
     expect(menu.textContent).toContain("/plan");
     expect(menu.textContent).toContain("/ask");
 
     await userEvent.click(screen.getByRole("menuitem", { name: "/plan" }));
-    expect(sendPrompt).toHaveBeenCalledWith("/plan переписать парсер", {
-      sessionId: "s1",
-    });
+    // Nothing left the input: the draft is now the command's argument, and the
+    // reader decides when it goes out.
+    expect(sendPrompt).not.toHaveBeenCalled();
+    expect(input.value).toBe("/plan переписать парсер");
+    expect(document.querySelector('[role="menu"]')).toBeNull();
   }, 20_000);
 
-  it("sends the ask skill with an empty draft as the bare command", async () => {
+  it("writes the bare command when the draft is empty", async () => {
     const { container } = renderChat();
     const input = container.querySelector("textarea")!;
 
-    fireEvent.contextMenu(input);
+    menuOf(input);
     await userEvent.click(screen.getByRole("menuitem", { name: "/ask" }));
-    expect(sendPrompt).toHaveBeenCalledWith("/ask", { sessionId: "s1" });
+    expect(sendPrompt).not.toHaveBeenCalled();
+    expect(input.value).toBe("/ask");
+  }, 20_000);
+
+  it("offers the skill commands alone", async () => {
+    const { container } = renderChat();
+    menuOf(container.querySelector("textarea")!);
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+      "/plan",
+      "/ask",
+    ]);
   }, 20_000);
 });

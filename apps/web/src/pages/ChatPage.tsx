@@ -6077,19 +6077,27 @@ function ChatThread() {
   };
 
   /**
-   * The input's right-click commands. `commit+push` rides the changes chip's
-   * own path, and the two skills send what is typed as their argument — so a
-   * right click turns the draft into a plan, or into the questions about it,
-   * without retyping it.
+   * The input's right-click commands write themselves into the field and stop
+   * there: a right click is a way to turn the draft into a plan, or into the
+   * questions about it, without retyping it — not a way to send anything. The
+   * draft becomes the skill's argument, the reader's Enter sends it.
    */
-  const runComposerQuickCommand = (command: "commit+push" | "plan" | "ask") => {
+  const insertComposerCommand = (command: "plan" | "ask") => {
     setComposerMenu(null);
-    if (command === "commit+push") {
-      runGitChangesCommand("commit+push");
-      return;
-    }
     const draft = text.trim();
-    submitMessage(`/${command}${draft ? ` ${draft}` : ""}`);
+    const next = `/${command}${draft ? ` ${draft}` : ""}`;
+    setText(next);
+    setCursorPos(next.length);
+    setComposerMultilineIfNeeded(next.includes("\n"));
+    // The field is in the way of the slash menu now: the command is chosen.
+    setSlashMenuDismissed(true);
+    window.requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(next.length, next.length);
+      syncComposerSize(el);
+    });
   };
 
   /** Regenerate an assistant reply: resend its user prompt as an edit. */
@@ -7884,14 +7892,8 @@ function ChatThread() {
                   role="menu"
                   aria-label={t("chat.composerMenu")}
                 >
-                  {showGitComposer ? (
-                    <MsgMenuItem
-                      label="commit+push"
-                      onClick={() => runComposerQuickCommand("commit+push")}
-                    />
-                  ) : null}
-                  <MsgMenuItem label="/plan" onClick={() => runComposerQuickCommand("plan")} />
-                  <MsgMenuItem label="/ask" onClick={() => runComposerQuickCommand("ask")} />
+                  <MsgMenuItem label="/plan" onClick={() => insertComposerCommand("plan")} />
+                  <MsgMenuItem label="/ask" onClick={() => insertComposerCommand("ask")} />
                 </div>,
                 document.body,
               )
