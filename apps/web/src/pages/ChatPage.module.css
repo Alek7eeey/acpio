@@ -595,6 +595,13 @@
 
 .jumpLatest svg {
   pointer-events: none;
+  transition: transform 0.18s ease;
+}
+
+/* The arrow points at the newest messages, so on hover it dips towards them. */
+.jumpLatest:hover svg,
+.jumpLatest:focus-visible svg {
+  transform: translateY(2px);
 }
 
 /* The global `button:active` press nudge carries its own transform, which
