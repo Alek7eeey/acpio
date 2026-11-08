@@ -183,12 +183,15 @@ describe("the plan's approval", () => {
     park(session(), true);
     renderChat();
 
+    // The pace is asked first: nothing starts until the reader says how.
     fireEvent.click(await screen.findByText("Одобрить"));
+    expect(api.setSessionPlan).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByText("По одному"));
 
     await waitFor(() =>
       expect(api.setSessionPlan).toHaveBeenCalledWith("s1", {
         stage: "applying",
-        pacing: "whole",
+        pacing: "step",
       }),
     );
     // The parked `apply_plan` goes on with the plan — no second prompt, and
@@ -219,6 +222,22 @@ describe("the plan's approval", () => {
       { internal: true },
     );
     expect(api.answerQuestion).not.toHaveBeenCalled();
+  });
+
+  it("closes the card with no answer clicked: the parked turn ends, nothing starts", async () => {
+    park(session(), true);
+    renderChat();
+
+    fireEvent.click(await screen.findByLabelText("Закрыть карточку и написать новый запрос"));
+
+    // A parked turn only ends by being answered — silence is not consent.
+    await waitFor(() =>
+      expect(api.answerQuestion).toHaveBeenCalledWith("s1", "r1", {
+        outcome: { outcome: "rejected", reason: "rejected by user" },
+      }),
+    );
+    expect(api.setSessionPlan).not.toHaveBeenCalled();
+    expect(api.prompt).not.toHaveBeenCalled();
   });
 
   it("answers a rejection and sends nothing else: the plan stays a draft", async () => {

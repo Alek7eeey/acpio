@@ -38,6 +38,8 @@ export function PlanSidePanel({
   onReject,
   onApprove,
   onPacing,
+  onReadText,
+  onWriteText,
   approving = false,
 }: {
   plan: PlanPayload | null;
@@ -53,14 +55,21 @@ export function PlanSidePanel({
   onReject?: () => void;
   /** Draft stage: approve the plan and start implementing. */
   onApprove?: () => void;
-  /** Applying stage: switch the pace the steps are done at. */
+  /** Switch the pace the steps are done at — before the work starts or during it. */
   onPacing?: (pacing: "whole" | "step") => void;
+  /** The plan file on disk, verbatim: what the manual editor opens. */
+  onReadText?: () => Promise<string>;
+  /** Replace the plan file with the reader's own text. */
+  onWriteText?: (text: string) => Promise<void>;
   /** An approval is already on its way — the footer must not ask twice. */
   approving?: boolean;
 }) {
   const t = useT();
   const [width, setWidth] = useState(readStoredWidth);
   const [dragging, setDragging] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [busyEdit, setBusyEdit] = useState(false);
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
   useEffect(() => {
@@ -143,9 +152,38 @@ export function PlanSidePanel({
   // is parked on it, the panel's own «approve» for a draft nobody waits on.
   const approve = reviewing ? onAccept : stage === "draft" ? onApprove : undefined;
   const canApprove = Boolean(approve) && (reviewing || todos.length > 0);
-  // The pace is the reader's before the work starts, not only after it does,
-  // and it is the switch that starts the work — so it stays reachable either way.
-  const canPace = !reviewing && Boolean(onPacing) && Boolean(stage);
+  // The pace is the reader's before the work starts, not only after it does —
+  // including while the approval card waits: that is the pace it will start at.
+  const canPace = Boolean(onPacing) && Boolean(stage);
+  // The file itself, for the reader who would rather edit the plan than the
+  // switches: only a plan that lives in a file can be edited this way.
+  const canEdit = Boolean(plan.path && onReadText && onWriteText);
+
+  const startEditing = async () => {
+    if (!onReadText) return;
+    setBusyEdit(true);
+    try {
+      setDraft(await onReadText());
+      setEditing(true);
+    } catch {
+      // The panel stays as it was; the error banner carries the reason.
+    } finally {
+      setBusyEdit(false);
+    }
+  };
+
+  const saveEditing = async () => {
+    if (!onWriteText) return;
+    setBusyEdit(true);
+    try {
+      await onWriteText(draft);
+      setEditing(false);
+    } catch {
+      // Keep the text: a failed save must not throw the reader's edit away.
+    } finally {
+      setBusyEdit(false);
+    }
+  };
 
   return (
     <aside
@@ -178,6 +216,26 @@ export function PlanSidePanel({
           ) : null}
         </div>
         <div className={styles.headerActions}>
+          {canEdit && !editing ? (
+            <button
+              type="button"
+              className={styles.editBtn}
+              disabled={busyEdit}
+              onClick={() => void startEditing()}
+              aria-label={t("planPanel.edit")}
+              title={t("planPanel.edit")}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path
+                  d="M4 20h4l10-10a2.5 2.5 0 0 0-4-4L4 16v4Z"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+          ) : null}
           {onRemove ? (
             <button
               type="button"
@@ -222,9 +280,39 @@ export function PlanSidePanel({
         </div>
       ) : null}
       <div className={styles.body}>
-        <PlanApprovalBody payload={plan} fallbackTitle={t("question.plan")} scrollable={false} />
+        {editing ? (
+          <textarea
+            className={styles.editor}
+            aria-label={t("planPanel.editHint")}
+            value={draft}
+            spellCheck={false}
+            onChange={(e) => setDraft(e.target.value)}
+          />
+        ) : (
+          <PlanApprovalBody payload={plan} fallbackTitle={t("question.plan")} scrollable={false} />
+        )}
       </div>
-      {canApprove ? (
+      {editing ? (
+        <div className={styles.footer}>
+          <button
+            type="button"
+            className={styles.danger}
+            disabled={busyEdit}
+            onClick={() => setEditing(false)}
+          >
+            <span>{t("common.cancel")}</span>
+          </button>
+          <button
+            type="button"
+            className={styles.primary}
+            disabled={busyEdit}
+            onClick={() => void saveEditing()}
+          >
+            <span>{t("planPanel.save")}</span>
+          </button>
+        </div>
+      ) : null}
+      {!editing && canApprove ? (
         <div className={reviewing ? styles.footer : styles.footerSingle}>
           {reviewing ? (
             <button
@@ -263,7 +351,7 @@ export function PlanSidePanel({
           </button>
         </div>
       ) : null}
-      {canPace ? (
+      {!editing && canPace ? (
         <div className={styles.footerPace}>
           <span className={styles.paceLabel}>{t("planPanel.pacing")}</span>
           <PlanPaceChoice value={pacing} onChange={(option) => onPacing?.(option)} />

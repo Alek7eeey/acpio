@@ -288,12 +288,19 @@ export const api = {
   /**
    * The plan file's switches: the stage and the pace. Written into
    * `.acpio/plan.md` on the server, which the agent folds back into the panel.
+   * `text` replaces the whole document — the panel's own editor.
    */
-  setSessionPlan: (id: string, patch: { stage?: "draft" | "applying"; pacing?: "whole" | "step" }) =>
+  setSessionPlan: (
+    id: string,
+    patch: { stage?: "draft" | "applying"; pacing?: "whole" | "step"; text?: string },
+  ) =>
     request<{ ok: boolean; plan?: Record<string, unknown> }>(`/api/sessions/${id}/plan`, {
       method: "POST",
       body: JSON.stringify(patch),
     }),
+  /** The plan file as it is on disk, verbatim — what the panel's editor opens. */
+  getSessionPlan: (id: string) =>
+    request<{ ok: boolean; text: string }>(`/api/sessions/${id}/plan`),
   pickDirectory: (initialPath?: string) =>
     request<{ path: string | null }>("/api/fs/pick-directory", {
       method: "POST",

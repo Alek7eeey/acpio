@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { I18nProvider } from "../lib/i18n";
 import { PlanSidePanel } from "./PlanSidePanel";
 import type { PlanPayload } from "./PlanApprovalBody";
@@ -84,6 +84,41 @@ describe("PlanSidePanel", () => {
     expect(onReject).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByText("Approve and start"));
     expect(onAccept).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets the reader pick the pace while the card still waits", () => {
+    const onPacing = vi.fn();
+    renderPanel(PLAN, { pending: true, onAccept: () => {}, onReject: () => {}, onPacing });
+    // The pace is what the approval will start at — so it is asked before it.
+    expect(screen.getByText("Pace")).toBeTruthy();
+    fireEvent.click(screen.getByText("One at a time"));
+    expect(onPacing).toHaveBeenCalledWith("step");
+  });
+
+  it("edits the plan file by hand: the file's own text, saved as typed", async () => {
+    const onReadText = vi.fn(async () => "---\nstage: draft\n---\n## Steps\n- [ ] One\n");
+    const onWriteText = vi.fn(async () => {});
+    renderPanel(PLAN, { onReadText, onWriteText });
+
+    fireEvent.click(screen.getByLabelText("Edit plan"));
+    const box = (await screen.findByRole("textbox")) as HTMLTextAreaElement;
+    expect(box.value).toContain("- [ ] One");
+
+    fireEvent.change(box, { target: { value: "---\nstage: draft\n---\n## Steps\n- [ ] Two\n" } });
+    fireEvent.click(screen.getByText("Save"));
+
+    await waitFor(() => expect(onWriteText).toHaveBeenCalledWith(expect.stringContaining("- [ ] Two")));
+    // Saved and closed: the panel is back to drawing the plan.
+    await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
+  });
+
+  it("offers no editor for a plan with no file behind it", () => {
+    const { plan: _ignored, ...bare } = PLAN;
+    renderPanel(
+      { ...bare, path: undefined, stage: undefined },
+      { onReadText: async () => "", onWriteText: async () => {} },
+    );
+    expect(screen.queryByLabelText("Edit plan")).toBeNull();
   });
 
   it("draws no switches for a plan another agent published", () => {

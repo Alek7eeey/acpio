@@ -1357,7 +1357,10 @@
     "pacing": "Pace",
     "pacingWhole": "All at once",
     "pacingStep": "One at a time",
-    "progress": "{{done}} of {{total}}"
+    "progress": "{{done}} of {{total}}",
+    "edit": "Edit plan",
+    "save": "Save",
+    "editHint": "The plan file as it is on disk: the frontmatter, the steps and the plan."
   },
   "question": {
     "plan": "Plan",
@@ -1368,6 +1371,8 @@
     "planAwaiting": "Awaiting",
     "openPlan": "Open plan",
     "planApprove": "Approve",
+    "planPace": "How should the steps be done?",
+    "planDismiss": "Close the card and write a new prompt",
     "modeSwitch": "Mode switch suggested",
     "modeSwitchTitle": "Switch to {{mode}}?",
     "modeSwitchHint": "The agent wants to change the session mode. Approve to switch, or reject to stay in the current mode.",

@@ -65,6 +65,29 @@ describe("ChatInlinePrompt — the plan card", () => {
     });
   });
 
+  it("closes the card without answering it — the harness ends the turn", () => {
+    const onDismissPlan = vi.fn();
+    renderPrompt({ onAcceptPlan: vi.fn(), onDismissPlan });
+
+    fireEvent.click(screen.getByLabelText("Close the card and write a new prompt"));
+    expect(onDismissPlan).toHaveBeenCalledTimes(1);
+    // Closing is not an answer of its own: the store still holds the question,
+    // and the page is what turns the click into a rejection.
+    expect(useAppStore.getState().pendingQuestion?.requestId).toBe("r1");
+  });
+
+  it("asks the pace first when the plan lives in a file", () => {
+    const onAcceptPlan = vi.fn();
+    renderPrompt({ onAcceptPlan, askPace: true });
+
+    fireEvent.click(screen.getByText("Approve"));
+    expect(onAcceptPlan).not.toHaveBeenCalled();
+    expect(screen.getByText("How should the steps be done?")).toBeTruthy();
+
+    fireEvent.click(screen.getByText("One at a time"));
+    expect(onAcceptPlan).toHaveBeenCalledWith("step");
+  });
+
   it("stays quiet while an answer is on its way", () => {
     const onAcceptPlan = vi.fn();
     const answerQuestion = vi.fn(async () => {});

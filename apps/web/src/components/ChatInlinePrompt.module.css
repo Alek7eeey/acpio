@@ -111,6 +111,33 @@
   background: transparent;
 }
 
+/* The pace, asked before the work starts: the card's own little popup, so the
+   answer is given here and not a second later in the panel. */
+.pacePop {
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--warning, #b45309) 24%, var(--border)),
+    0 6px 18px color-mix(in srgb, #000 12%, transparent);
+}
+
+.pacePopTitle {
+  font-size: 0.74rem;
+  font-weight: 550;
+  color: var(--text-secondary);
+}
+
+/* Out of the way, at the far end of the row: closing is not one of the answers. */
+.dismiss {
+  margin-left: auto;
+  display: grid;
+  place-items: center;
+  padding: 7px 9px;
+}
+
 .questions {
   display: grid;
   gap: 8px;

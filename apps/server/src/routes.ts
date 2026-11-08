@@ -2446,10 +2446,10 @@ export async function registerRoutes(app: FastifyInstance) {
   });
 
   /**
-   * The plan file's own switches — the stage and the pace the panel draws. The
-   * panel speaks to the agent through `.acpio/plan.md` rather than through a
-   * second channel: the agent's watcher sees the change exactly like a hand
-   * edit and republishes the plan.
+   * The plan file's own switches — the stage and the pace the panel draws — and
+   * the file itself, for the panel's editor. The panel speaks to the agent
+   * through `.acpio/plan.md` rather than through a second channel: the agent's
+   * watcher sees the change exactly like a hand edit and republishes the plan.
    */
   app.post("/api/sessions/:id/plan", async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -2457,6 +2457,9 @@ export async function registerRoutes(app: FastifyInstance) {
       .object({
         stage: z.enum(["draft", "applying"]).optional(),
         pacing: z.enum(["whole", "step"]).optional(),
+        // The reader's own edit of the document: written verbatim, frontmatter
+        // and all, because that is what editing the file means.
+        text: z.string().optional(),
       })
       .parse(req.body);
     const detail = await getSessionDetail(id);
@@ -2467,8 +2470,25 @@ export async function registerRoutes(app: FastifyInstance) {
     // an error. Only a file that is really absent is one.
     const before = readPlan(file);
     if (!before) return reply.code(404).send({ error: "No plan file" });
-    setPlanOptions(file, body, (await getSettings()).locale === "ru" ? "ru" : "en");
+    if (typeof body.text === "string") {
+      await fsp.writeFile(file, body.text, "utf8");
+    } else {
+      setPlanOptions(file, body, (await getSettings()).locale === "ru" ? "ru" : "en");
+    }
     return { ok: true, plan: readPlan(file) ?? before };
+  });
+
+  /** The plan file as it is on disk — what the panel's editor opens. */
+  app.get("/api/sessions/:id/plan", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const detail = await getSessionDetail(id);
+    if (!detail) return reply.code(404).send({ error: "Not found" });
+    try {
+      const text = await fsp.readFile(planFilePath(detail.cwd), "utf8");
+      return { ok: true, text };
+    } catch {
+      return reply.code(404).send({ error: "No plan file" });
+    }
   });
 
   app.post("/api/sessions/:id/permissions/:requestId", async (req) => {

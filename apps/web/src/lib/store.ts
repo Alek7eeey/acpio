@@ -537,9 +537,9 @@ type AppState = {
     requestId: string,
     result: Record<string, unknown>,
   ) => Promise<void>;
-  /** Flip the plan's stage or pace in `.acpio/plan.md` — the agent republishes it. */
+  /** Flip the plan's stage or pace in `.acpio/plan.md`, or replace the whole file (`text`) — the agent republishes it. */
   setSessionPlan: (
-    patch: { stage?: "draft" | "applying"; pacing?: "whole" | "step" },
+    patch: { stage?: "draft" | "applying"; pacing?: "whole" | "step"; text?: string },
     sessionId?: string,
   ) => Promise<void>;
   saveSettings: (patch: Partial<AppSettings>) => Promise<void>;

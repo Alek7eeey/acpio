@@ -4604,6 +4604,9 @@ function ChatThread() {
    *  republish of `stage: applying` (or a reworked plan, whose steps differ) is
    *  what puts the button back. */
   const [approvedPlanKey, setApprovedPlanKey] = useState<string | null>(null);
+  /** The pace the reader picked — the card's popup, the panel's switch, and the
+   *  approval that follows them all read this, not the file's lagging copy. */
+  const [planPace, setPlanPace] = useState<"whole" | "step">("whole");
   /** The git diff in the full view: portalled to the body, pinned to the viewport. */
   const [gitFullscreen, setGitFullscreen] = useState(false);
   const prevPaneCountRef = useRef(bind?.paneCount ?? 1);
@@ -4929,6 +4932,10 @@ function ChatThread() {
    */
   const planHasFile = Boolean(activePlan?.stage && activePlan?.path);
 
+  useEffect(() => {
+    setPlanPace(activePlan?.pacing === "step" ? "step" : "whole");
+  }, [activePlan?.pacing]);
+
   /** The plan as the reader approved it, stage aside: a reworked plan carries
    *  different steps, so it is a new key and can be approved again. */
   const planKey = useMemo(() => {
@@ -4951,18 +4958,47 @@ function ChatThread() {
    *  that turn goes on with the plan. A draft nobody waits on (the reader turned
    *  the card down earlier, or the agent never asked) starts with a prompt the
    *  chat never shows: they clicked a button, they typed no request. */
-  const approvePlan = async (target: "pending" | "draft") => {
+  const approvePlan = async (target: "pending" | "draft", pacing?: "whole" | "step") => {
     const sid = activeSession?.id;
     if (!sid) return;
     setApprovedPlanKey(planKey);
-    const pacing = activePlan?.pacing === "step" ? "step" : "whole";
+    // The pace comes from the reader — the card's popup or the panel's switch —
+    // never from the default the file happens to carry.
+    const pace = pacing ?? planPace;
     // The write is awaited: an answer that overtakes it starts at the old pace.
-    if (planHasFile) await setSessionPlan({ stage: "applying", pacing }, sid);
+    if (planHasFile) await setSessionPlan({ stage: "applying", pacing: pace }, sid);
     if (target === "pending") {
       void answerQuestion({ outcome: { outcome: "accepted" } });
       return;
     }
     void sendPrompt(t("planPanel.approvePrompt"), { internal: true });
+  };
+
+  /** Closing the card is not one of its answers, but it has to be one for the
+   *  agent: a parked turn only ends by being answered, and until it does the
+   *  reader's next prompt would sit in the queue. Rejected keeps the plan a
+   *  draft — it is still in the panel, and saying what to change is the point. */
+  const dismissPlanCard = () => {
+    if (!planPending) return;
+    void answerQuestion({ outcome: { outcome: "rejected", reason: "rejected by user" } });
+  };
+
+  /** The plan file itself, verbatim — what the panel's editor opens and saves. */
+  const readPlanText = async () => {
+    const sid = activeSession?.id;
+    if (!sid) throw new Error("no session");
+    const res = await api.getSessionPlan(sid);
+    return res.text ?? "";
+  };
+  const writePlanText = async (text: string) => {
+    const sid = activeSession?.id;
+    if (!sid) return;
+    try {
+      await api.setSessionPlan(sid, { text });
+    } catch (err) {
+      useAppStore.setState({ error: err instanceof Error ? err.message : String(err) });
+      throw err;
+    }
   };
 
   const planSignature = useMemo(() => {
@@ -7490,7 +7526,11 @@ function ChatThread() {
         <div className={styles.inlinePromptDock}>
           <ChatInlinePrompt
             onOpenPlan={openPlanPanel}
-            onAcceptPlan={planPending ? () => void approvePlan("pending") : undefined}
+            onAcceptPlan={
+              planPending ? (pacing) => void approvePlan("pending", pacing) : undefined
+            }
+            onDismissPlan={planPending ? dismissPlanCard : undefined}
+            askPace={planHasFile}
             busy={planApproving}
           />
         </div>
@@ -8279,9 +8319,16 @@ function ChatThread() {
           }
           onPacing={
             activePlan?.stage && activeSession
-              ? (pacing) => void setSessionPlan({ pacing }, activeSession.id)
+              ? (pacing) => {
+                  // Remembered here as well: the approval right after the switch
+                  // must use the pick, not the file the agent has not read yet.
+                  setPlanPace(pacing);
+                  void setSessionPlan({ pacing }, activeSession.id);
+                }
               : undefined
           }
+          onReadText={activeSession ? readPlanText : undefined}
+          onWriteText={activeSession ? writePlanText : undefined}
           approving={planApproving}
           onReject={
             planPending

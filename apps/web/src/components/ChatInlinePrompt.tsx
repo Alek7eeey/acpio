@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useAppStore } from "../lib/store";
 import { useT } from "../lib/i18n";
 import styles from "./ChatInlinePrompt.module.css";
@@ -70,12 +71,20 @@ function permissionCopy(payload: Record<string, unknown>, toolCall: ToolCallPerm
 export function ChatInlinePrompt({
   onOpenPlan,
   onAcceptPlan,
+  onDismissPlan,
+  askPace = false,
   busy = false,
 }: {
   onOpenPlan?: () => void;
   /** Approve the plan and start the work: the harness flips the plan's stage and,
-   *  when nobody's turn is parked on the card, starts the turn itself. */
-  onAcceptPlan?: () => void;
+   *  when nobody's turn is parked on the card, starts the turn itself. With a
+   *  plan file the pace is asked first and handed over here. */
+  onAcceptPlan?: (pacing?: "whole" | "step") => void;
+  /** Close the card without answering it: the parked turn ends, the plan stays a
+   *  draft, and the reader is free to write what to change. */
+  onDismissPlan?: () => void;
+  /** The plan lives in a file: the pace is a choice, not a default. */
+  askPace?: boolean;
   /** An answer is already on its way — the buttons must not ask twice. */
   busy?: boolean;
 }) {
@@ -85,6 +94,8 @@ export function ChatInlinePrompt({
   const pendingQuestion = useAppStore((s) => s.pendingQuestion);
   const answerPermission = useAppStore((s) => s.answerPermission);
   const answerQuestion = useAppStore((s) => s.answerQuestion);
+  // «Одобрить» opens the pace, «Всё сразу / По одному» approves with it.
+  const [paceOpen, setPaceOpen] = useState(false);
 
   if (pendingPermission) {
     const payload = pendingPermission.payload as Record<string, unknown>;
@@ -156,6 +167,29 @@ export function ChatInlinePrompt({
         <div className={styles.eyebrow}>{t("question.planReady")}</div>
         <div className={styles.title}>{name}</div>
         {overview ? <p className={styles.overview}>{overview}</p> : null}
+        {paceOpen && onAcceptPlan ? (
+          <div className={styles.pacePop} role="dialog" aria-label={t("question.planPace")}>
+            <div className={styles.pacePopTitle}>{t("question.planPace")}</div>
+            <div className={styles.actions}>
+              <button
+                type="button"
+                className={styles.primary}
+                disabled={busy}
+                onClick={() => onAcceptPlan("whole")}
+              >
+                {t("planPanel.pacingWhole")}
+              </button>
+              <button
+                type="button"
+                className={styles.ghost}
+                disabled={busy}
+                onClick={() => onAcceptPlan("step")}
+              >
+                {t("planPanel.pacingStep")}
+              </button>
+            </div>
+          </div>
+        ) : null}
         <div className={styles.actions}>
           {onOpenPlan ? (
             <button type="button" className={styles.ghost} onClick={onOpenPlan}>
@@ -176,14 +210,39 @@ export function ChatInlinePrompt({
             type="button"
             className={styles.primary}
             disabled={busy}
-            onClick={() =>
-              onAcceptPlan
-                ? onAcceptPlan()
-                : void answerQuestion({ outcome: { outcome: "accepted" } })
-            }
+            onClick={() => {
+              if (!onAcceptPlan) {
+                void answerQuestion({ outcome: { outcome: "accepted" } });
+                return;
+              }
+              if (askPace) {
+                setPaceOpen(true);
+                return;
+              }
+              onAcceptPlan();
+            }}
           >
             {t("question.planApprove")}
           </button>
+          {onDismissPlan ? (
+            <button
+              type="button"
+              className={`${styles.ghost} ${styles.dismiss}`}
+              disabled={busy}
+              aria-label={t("question.planDismiss")}
+              title={t("question.planDismiss")}
+              onClick={onDismissPlan}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path
+                  d="M6 6l12 12M18 6L6 18"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </button>
+          ) : null}
         </div>
       </div>
     );
