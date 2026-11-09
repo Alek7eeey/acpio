@@ -35,6 +35,7 @@ import {
   type ChatTreeElementId,
   type ChatTreeMenuId,
   type CustomAgentSpec,
+  type FileOpenTarget,
   type BuiltinSkillDto,
   type DiagnosticsDumpMeta,
   type SkillMode,
@@ -593,6 +594,33 @@ function ChatInteractiveConfigRows({
                 onClick={() => {
                   patch("attachDefaultSource", id);
                   void saveSettings({ attachDefaultSource: id });
+                }}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      </SettingRow>
+
+      <SettingRow label={t("settings.fileOpenTarget")} hint={t("settings.fileOpenTargetHint")}>
+        <div className={styles.actionChips}>
+          {(
+            [
+              ["storage", t("settings.fileOpenStorage")],
+              ["editor", t("settings.fileOpenEditor")],
+            ] as Array<[FileOpenTarget, string]>
+          ).map(([id, label]) => {
+            const on = (form.fileOpenTarget ?? "storage") === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                className={`${styles.actionChip}${on ? ` ${styles.actionChipOn}` : ""}`}
+                aria-pressed={on}
+                onClick={() => {
+                  patch("fileOpenTarget", id);
+                  void saveSettings({ fileOpenTarget: id });
                 }}
               >
                 {label}

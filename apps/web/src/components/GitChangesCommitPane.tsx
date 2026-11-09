@@ -23,6 +23,7 @@ import {
 } from "../lib/gitFileTree";
 import { gitStatusBadge, isGitConflictFile, isUntrackedGitFile } from "../lib/gitUi";
 import { useFixedMenuPlacement } from "../lib/menuPosition";
+import { openFileInEditor } from "../lib/fileOpen";
 import { GitDiffStats } from "./GitDiffStats";
 import { showToast } from "../lib/toast";
 import styles from "./GitChangesCommitPane.module.css";
@@ -684,6 +685,9 @@ export function GitChangesCommitPane({
   const handleOpenFile = useCallback(async () => {
     if (!menuFile || !repoRoot || isDeleted(menuFile)) return;
     const target = toRepoAbsolutePath(repoRoot, menuFile.path);
+    // The reader's choice of where a file opens (see lib/fileOpen.ts) picks the pane
+    // over the OS; a path the pane does not hold keeps the OS handler.
+    if (openFileInEditor({ path: target })) return;
     try {
       const result = await api.openPath(target);
       if (!result.ok) showToast(t("git.openFileFailed"));

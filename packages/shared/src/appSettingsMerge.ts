@@ -12,6 +12,7 @@ import {
   normalizeEditorSplit,
   normalizeEditorTheme,
   normalizeEditorToolSource,
+  normalizeFileOpenTarget,
   normalizeBuiltinProviders,
   normalizeBuiltinSubagents,
   normalizeMcpProjectFiles,
@@ -574,6 +575,7 @@ export function mergeClientAppSettings(raw: unknown): AppSettings {
   merged.chatTitleMaxLen = normalizeChatTitleMaxLen(partial.chatTitleMaxLen);
   merged.editorTheme = normalizeEditorTheme(partial.editorTheme);
   merged.editorSplit = normalizeEditorSplit(partial.editorSplit);
+  merged.fileOpenTarget = normalizeFileOpenTarget(partial.fileOpenTarget);
   merged.editorNavPlacement = normalizeEditorNavPlacement(partial.editorNavPlacement);
   merged.editorKeyDefinition = normalizeEditorKeyCombo(
     partial.editorKeyDefinition,

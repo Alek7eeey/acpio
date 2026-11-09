@@ -207,6 +207,15 @@ export type PendingAttachment = {
 /** An open code pane: its folder, the chat it belongs to and its tab count. */
 export type OpenEditor = { root: string; sessionId: string | null; tabs: number };
 
+/** A file waiting to be shown in the code pane: its folder and its path inside it. */
+export type EditorReveal = {
+  root: string;
+  rel: string;
+  line?: number;
+  col?: number;
+  seq: number;
+};
+
 type AppState = {
   settings: AppSettings;
   /** Server OS from /api/health (null until loaded). */
@@ -574,6 +583,15 @@ type AppState = {
   closeAllEditors: () => void;
   /** The open tab count an editor reports, so the pane list is not a mystery. */
   setEditorTabs: (root: string, tabs: number) => void;
+  /**
+   * A file the reader clicked and wants to see in the code pane. It waits here
+   * until the pane whose folder holds it mounts or becomes active: the click
+   * may be what turns the pane on in the first place.
+   */
+  editorReveal: EditorReveal | null;
+  revealInEditor: (request: Omit<EditorReveal, "seq">) => void;
+  /** The pane that opened the file clears the request so no other pane repeats it. */
+  consumeEditorReveal: (seq: number) => void;
   refreshBackgroundJobs: () => Promise<void>;
   stopBackgroundJob: (id: string) => Promise<void>;
   forgetBackgroundJob: (id: string) => Promise<void>;
@@ -1993,6 +2011,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   bgJobs: [],
   openEditors: [],
+  editorReveal: null,
+  revealInEditor: (request) =>
+    set((s) => ({ editorReveal: { ...request, seq: (s.editorReveal?.seq ?? 0) + 1 } })),
+  consumeEditorReveal: (seq) =>
+    set((s) => (s.editorReveal?.seq === seq ? { editorReveal: null } : {})),
   openEditor: (root, sessionId) => {
     if (!root) return;
     set((s) => {

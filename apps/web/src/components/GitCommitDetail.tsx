@@ -3,6 +3,7 @@ import type { GitChangedFileDto, GitCommitDetailDto, GitCommitFileDto } from "@a
 import { useT } from "../lib/i18n";
 import { joinRepoPath, normalizeGitPath, toRepoAbsolutePath, truncateMiddlePath } from "../lib/gitFileTree";
 import { useFixedMenuPlacement } from "../lib/menuPosition";
+import { openFileInEditor } from "../lib/fileOpen";
 import { api } from "../lib/api";
 import { GitDiffStats } from "./GitDiffStats";
 import { showToast } from "../lib/toast";
@@ -272,6 +273,9 @@ export function GitCommitDetail({
     if (!fileMenu || !repoRoot || fileMenu.deleted) return;
     const target = toRepoAbsolutePath(repoRoot, fileMenu.path);
     closeFileMenu();
+    // The reader's choice of where a file opens (see lib/fileOpen.ts) picks the pane
+    // over the OS; a path the pane does not hold keeps the OS handler.
+    if (openFileInEditor({ path: target })) return;
     try {
       const result = await api.openPath(target);
       if (!result.ok) showToast(t("git.openFileFailed"));

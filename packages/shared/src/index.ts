@@ -13,10 +13,12 @@ import {
   DEFAULT_EDITOR_NAV_PLACEMENT,
   DEFAULT_EDITOR_THEME,
   DEFAULT_EDITOR_TOOL_SOURCE,
+  DEFAULT_FILE_OPEN_TARGET,
   type EditorNavPlacement,
   type EditorSplit,
   type EditorThemeChoice,
   type EditorToolSource,
+  type FileOpenTarget,
 } from "./editorKeys.js";
 
 export {
@@ -24,18 +26,21 @@ export {
   DEFAULT_EDITOR_NAV_PLACEMENT,
   DEFAULT_EDITOR_THEME,
   DEFAULT_EDITOR_TOOL_SOURCE,
+  DEFAULT_FILE_OPEN_TARGET,
   EDITOR_KEY_ACTIONS,
   EDITOR_NAV_PLACEMENTS,
   EDITOR_SPLITS,
   EDITOR_THEMES,
   EDITOR_TOOL_SOURCES,
   EDITOR_TOOLS,
+  FILE_OPEN_TARGETS,
   isEditorKeyCombo,
   normalizeEditorKeyCombo,
   normalizeEditorNavPlacement,
   normalizeEditorSplit,
   normalizeEditorTheme,
   normalizeEditorToolSource,
+  normalizeFileOpenTarget,
 } from "./editorKeys.js";
 export type {
   EditorKeyAction,
@@ -44,6 +49,7 @@ export type {
   EditorThemeChoice,
   EditorTool,
   EditorToolSource,
+  FileOpenTarget,
 } from "./editorKeys.js";
 
 export type {
@@ -2575,6 +2581,12 @@ export interface AppSettings {
    */
   editorTheme: EditorThemeChoice;
   editorSplit: EditorSplit;
+  /**
+   * What a click on a file opens: the file itself (downloaded, opened by the OS,
+   * or shown in Explorer) or the same file in the code pane beside the chat.
+   * A binary file or one outside the chat's folder goes to the file either way.
+   */
+  fileOpenTarget: FileOpenTarget;
   /** Which end of the pane holds «назад/вперёд»: the tab strip or the status bar. */
   editorNavPlacement: EditorNavPlacement;
   /** CodeMirror notation, healed on read — see `editorKeys.ts`. */
@@ -2721,6 +2733,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   composerDrafts: {},
   editorTheme: DEFAULT_EDITOR_THEME,
   editorSplit: "off",
+  fileOpenTarget: DEFAULT_FILE_OPEN_TARGET,
   editorNavPlacement: DEFAULT_EDITOR_NAV_PLACEMENT,
   editorKeyDefinition: DEFAULT_EDITOR_KEYS.definition,
   editorKeyUsages: DEFAULT_EDITOR_KEYS.usages,

@@ -15,6 +15,21 @@ export const EDITOR_SPLITS = ["off", "left", "right"] as const;
 export type EditorSplit = (typeof EDITOR_SPLITS)[number];
 
 /**
+ * Where a click on a file sends it: to the file itself — downloaded, opened by
+ * the OS or shown in Explorer, as it has always been — or into the code pane,
+ * where it can be read and edited without leaving the chat.
+ */
+export const FILE_OPEN_TARGETS = ["storage", "editor"] as const;
+export type FileOpenTarget = (typeof FILE_OPEN_TARGETS)[number];
+export const DEFAULT_FILE_OPEN_TARGET: FileOpenTarget = "storage";
+
+export function normalizeFileOpenTarget(raw: unknown): FileOpenTarget {
+  return FILE_OPEN_TARGETS.includes(raw as FileOpenTarget)
+    ? (raw as FileOpenTarget)
+    : DEFAULT_FILE_OPEN_TARGET;
+}
+
+/**
  * Which copy of a tool the pane runs: the project's own (`auto` prefers it and
  * falls back to the bundled one), explicitly the project's, or explicitly ours.
  */

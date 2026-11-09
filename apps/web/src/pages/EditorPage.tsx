@@ -42,6 +42,7 @@ import {
   type CompletionResult,
 } from "@codemirror/autocomplete";
 import {
+  canonicalCwd,
   isEditorKeyCombo,
   type AppSettings,
   type EditorNavPlacement,
@@ -651,6 +652,10 @@ export function EditorPage({
   const sessionId = sessionProp ?? storeSession;
   const settings = useAppStore((s) => s.settings);
   const saveSettings = useAppStore((s) => s.saveSettings);
+  // A file clicked in the chat (see lib/fileOpen.ts) waits here until this pane,
+  // the one whose folder holds it, is on screen.
+  const revealRequest = useAppStore((s) => s.editorReveal);
+  const consumeEditorReveal = useAppStore((s) => s.consumeEditorReveal);
 
   const scheme: EditorScheme =
     settings.editorTheme === "auto"
@@ -1164,6 +1169,18 @@ export function EditorPage({
     },
     [activateTab, addTab, ensureDocument, tabs],
   );
+
+  /**
+   * The file a click in the chat asked for. Only the pane on screen takes it —
+   * the folders it does not hold stay mounted and would each open the file.
+   */
+  useEffect(() => {
+    if (!active || !revealRequest) return;
+    const same = (path: string) => canonicalCwd(path).toLowerCase() === canonicalCwd(root).toLowerCase();
+    if (!same(revealRequest.root)) return;
+    consumeEditorReveal(revealRequest.seq);
+    void openFile(revealRequest.rel, revealRequest.line, revealRequest.col);
+  }, [active, consumeEditorReveal, openFile, revealRequest, root]);
 
   /** Close a tab; a pinned one stays. */
   const closeTab = useCallback(

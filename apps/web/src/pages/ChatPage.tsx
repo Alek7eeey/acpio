@@ -130,6 +130,7 @@ import { notifyTurnComplete } from "../lib/notify";
 import { useFillPanelWhenChatTight } from "../lib/panelLayout";
 import { canonicalCwd } from "@acpio/shared";
 import { isImageFile } from "../lib/pathSegments";
+import { openFileInEditor } from "../lib/fileOpen";
 import { sessionTreeDisplayTitle } from "../lib/sessionTitle";
 import {
   prefersHotkeyHints,
@@ -1094,6 +1095,11 @@ function UserFileItem({
     ? `/api/sessions/${sessionId}/attachments/${encodeURIComponent(fileId)}`
     : undefined;
   const showPreview = Boolean(href) && isImageFile(name) && !compact;
+  // The attachment's own path on disk — the file part stores it, the route above
+  // reads the bytes by it — so the code pane can open the same file the chip
+  // would have downloaded. A picture or a file outside the chat's folder is
+  // refused there and keeps the download.
+  const path = typeof part.payload.path === "string" ? part.payload.path : "";
   const chip = (
     <>
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -1162,7 +1168,15 @@ function UserFileItem({
         )
       ) : null}
       {href && !missing ? (
-        <a className={styles.userFileChip} href={href} download={name} title={name}>
+        <a
+          className={styles.userFileChip}
+          href={href}
+          download={name}
+          title={name}
+          onClick={(e) => {
+            if (path && openFileInEditor({ path, sessionId })) e.preventDefault();
+          }}
+        >
           {chip}
         </a>
       ) : (
@@ -2196,6 +2210,8 @@ function PathLink({
   const open = () => {
     if (isUrl) {
       window.open(path, "_blank", "noopener,noreferrer");
+    } else if (openFileInEditor({ path })) {
+      // The reader asked for files to open in the code pane beside the chat.
     } else {
       // For files, open the parent folder so the user can see the file
       // in Explorer instead of opening the file in its default editor.

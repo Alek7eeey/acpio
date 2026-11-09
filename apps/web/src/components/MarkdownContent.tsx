@@ -4,6 +4,8 @@ import ReactMarkdown, { defaultUrlTransform, type Components, type UrlTransform 
 import remarkGfm from "remark-gfm";
 import { useT } from "../lib/i18n";
 import { lastPathSegment } from "../lib/pathSegments";
+import { absoluteFor, isAbsolutePath, openFileInEditor } from "../lib/fileOpen";
+import { selectLiveSessionDetail, useAppStore } from "../lib/store";
 import { ImageViewer, type ViewerPicture } from "./ImageViewer";
 import { toggleWrapLines, useWrapLines } from "../lib/wrapLines";
 import { ChartBlock, parseChartSpec } from "./ChartBlock";
@@ -369,9 +371,23 @@ function pathLabel(text: string): string | null {
 }
 
 /** A link in agent text. One that points at a file says the file's name. */
-function MarkdownLink({ href, children }: { href?: string; children?: ReactNode }) {
+function MarkdownLink({
+  href,
+  children,
+  sessionId,
+}: {
+  href?: string;
+  children?: ReactNode;
+  /** The chat whose folder a relative path is resolved against. */
+  sessionId?: string | null;
+}) {
   const text = childrenToPlainText(children).trim();
   const name = pathLabel(text);
+  const cwd = useAppStore((s) =>
+    sessionId ? (selectLiveSessionDetail(s, sessionId)?.cwd ?? null) : null,
+  );
+  /** The path the link names: its own text when that is a path, the destination otherwise. */
+  const target = isPathText(text) ? text : (href ?? "");
   return (
     <a
       href={href}
@@ -379,6 +395,18 @@ function MarkdownLink({ href, children }: { href?: string; children?: ReactNode 
       rel="noreferrer"
       className={styles.link}
       title={name ? text : undefined}
+      onClick={(e) => {
+        if (!target) return;
+        const abs = isAbsolutePath(target)
+          ? target
+          : cwd
+            ? absoluteFor(cwd, target)
+            : "";
+        // A file the code pane can show opens there; anything else keeps the
+        // link's own behaviour (a new tab, or nothing at all for a path the
+        // browser cannot reach).
+        if (abs && openFileInEditor({ path: abs, sessionId })) e.preventDefault();
+      }}
     >
       {name ?? friendlyLinkLabel(href, children)}
     </a>
@@ -558,7 +586,7 @@ function matchesChartFence(language?: string | null) {
 
 // Stable identity per layout mode — a fresh `components` object every render
 // remounts the whole tree.
-function makeMarkdownComponents(fitWidth: boolean): Components {
+function makeMarkdownComponents(fitWidth: boolean, sessionId: string | null): Components {
   return {
     p: ({ children }) => <p className={styles.paragraph}>{children}</p>,
     ul: ({ children }) => <ul className={styles.list}>{children}</ul>,
@@ -582,7 +610,11 @@ function makeMarkdownComponents(fitWidth: boolean): Components {
       }
       return <CodeBlock language={match?.[1]} code={value} forceWrap={fitWidth} />;
     },
-    a: ({ href, children }) => <MarkdownLink href={href}>{children}</MarkdownLink>,
+    a: ({ href, children }) => (
+      <MarkdownLink href={href} sessionId={sessionId}>
+        {children}
+      </MarkdownLink>
+    ),
     blockquote: ({ children }) => (
       <blockquote className={styles.quote}>{children as ReactNode}</blockquote>
     ),
@@ -616,7 +648,7 @@ export const MarkdownContent = memo(function MarkdownContent({
   // render remounts the whole tree (see the note above the builder).
   const components = useMemo<Components>(
     () => ({
-      ...makeMarkdownComponents(fitWidth),
+      ...makeMarkdownComponents(fitWidth, sessionId),
       img: ({ src, alt }) => (
         <MarkdownImage src={typeof src === "string" ? src : ""} alt={alt} sessionId={sessionId} />
       ),

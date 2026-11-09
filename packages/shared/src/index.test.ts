@@ -488,6 +488,7 @@ describe("DEFAULT_SETTINGS", () => {
     editorTheme: "auto",
     editorNavPlacement: "tabs",
     editorSplit: "off",
+    fileOpenTarget: "storage",
     editorKeyDefinition: "F12",
     editorKeyUsages: "Shift-F12",
     editorKeySave: "Mod-s",
