@@ -177,7 +177,13 @@ class McpConnection {
   private httpSessionId: string | null = null;
   private agent: Agent | null = null;
 
-  constructor(private readonly spec: McpServerSpec) {}
+  constructor(
+    private readonly spec: McpServerSpec,
+    /** The chat's folder: a server started at the harness's own cwd (the
+     *  server package dir) writes its files there and refuses a path in the
+     *  workspace as "outside allowed roots" — playwright-mcp does exactly that. */
+    private readonly cwd?: string,
+  ) {}
 
   async connect(): Promise<McpToolDef[]> {
     await this.request(
@@ -312,6 +318,7 @@ class McpConnection {
     // quoted, or `C:\Program Files\…` is read as the command `C:\Program`.
     const launch = mcpStdioSpawn(this.spec.command ?? "", this.spec.args ?? []);
     const child = spawn(launch.command, launch.args, {
+      ...(this.cwd ? { cwd: this.cwd } : {}),
       env: { ...childProcessEnv(), ...(this.spec.env ?? {}) },
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
@@ -444,6 +451,8 @@ export class McpManager {
     private readonly ask: AskPermission,
     /** Where a failed connection is reported: the model only sees its absence. */
     private readonly report?: (event: { kind: string; data?: Record<string, unknown> }) => void,
+    /** cwd for stdio servers — see `McpConnection`. */
+    private readonly cwd?: string,
   ) {}
 
   async ensure(): Promise<{ tools: McpToolEntry[]; warnings: string[] }> {
@@ -453,7 +462,7 @@ export class McpManager {
     const rows: Array<Record<string, unknown>> = [];
     await Promise.all(
       this.specs.map(async (spec) => {
-        const connection = new McpConnection(spec);
+        const connection = new McpConnection(spec, this.cwd);
         const started = Date.now();
         try {
           const listed = await connection.connect();

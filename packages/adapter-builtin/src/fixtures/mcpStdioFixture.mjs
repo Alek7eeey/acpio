@@ -20,7 +20,13 @@ const BASE = [
   },
 ];
 
-const TOOLS = NAMES ? NAMES.map((name, i) => ({ ...BASE[i % BASE.length], name })) : BASE;
+// FIXTURE_CWD adds a tool that answers with the process cwd — the file a stdio
+// server would write (playwright's screenshots) lands relative to it.
+const TOOLS = NAMES
+  ? NAMES.map((name, i) => ({ ...BASE[i % BASE.length], name }))
+  : process.env.FIXTURE_CWD
+    ? [...BASE, { name: "cwd", description: "Print the cwd", inputSchema: { type: "object" } }]
+    : BASE;
 
 const send = (frame) => process.stdout.write(`${JSON.stringify(frame)}\n`);
 
@@ -48,7 +54,11 @@ rl.on("line", (line) => {
     // instead of hanging the turn.
     if (process.env.FIXTURE_DIE_ON_CALL) process.exit(1);
     const text =
-      msg.params?.name === "echo" ? `<${msg.params.arguments?.text ?? ""}>` : "committed";
+      msg.params?.name === "cwd"
+        ? process.cwd()
+        : msg.params?.name === "echo"
+          ? `<${msg.params.arguments?.text ?? ""}>`
+          : "committed";
     return send({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text }] } });
   }
   send({ jsonrpc: "2.0", id: msg.id, error: { code: -32601, message: "nope" } });

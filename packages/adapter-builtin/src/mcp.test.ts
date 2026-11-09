@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { createServer, type Server } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import { fileURLToPath } from "node:url";
@@ -74,6 +75,26 @@ describe("McpManager", () => {
     ]).ensure();
     expect(tools.map((t) => t.qualifiedName).sort()).toEqual(["mcp__a_b_echo", "mcp__a_b_echo_2"]);
     expect(Object.keys(mcpToolSet(tools, { ask }))).toHaveLength(2);
+  });
+
+  it("starts a stdio server in the chat's folder, not the server package's", async () => {
+    const m = new McpManager(
+      parseMcpServers([
+        {
+          name: "fixture",
+          command: process.execPath,
+          args: [FIXTURE],
+          env: [{ name: "FIXTURE_CWD", value: "1" }],
+        },
+      ]),
+      ask,
+      undefined,
+      tmpdir(),
+    );
+    managers.push(m);
+    const { tools } = await m.ensure();
+    const cwdTool = tools.find((t) => t.qualifiedName === "mcp__fixture_cwd")!;
+    await expect(cwdTool.call({})).resolves.toEqual({ text: tmpdir(), images: [] });
   });
 
   it("calls a tool and returns its text content", async () => {

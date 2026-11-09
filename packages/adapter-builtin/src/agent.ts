@@ -819,6 +819,7 @@ export class BuiltinAgent implements InProcessAgentTransport {
       parseMcpServers(mcpServers),
       (toolCall) => this.askPermission(toolCall),
       this.opts.onDiagnostic,
+      cwd || this.opts.cwd,
     );
     this.sessionId = sessionId;
     this.cwd = cwd || this.opts.cwd;
