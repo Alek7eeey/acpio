@@ -285,6 +285,7 @@ const settingsSchema = z.object({
               contextWindow: z.number().int().min(1).max(10_000_000).optional(),
               enabled: z.boolean().optional(),
               contextWindowEdited: z.boolean().optional(),
+              efforts: z.array(z.string().min(1).max(32)).max(12).optional(),
             }),
           )
           .max(1000)
@@ -499,6 +500,7 @@ const settingsSchema = z.object({
               contextWindow: z.number().int().min(1).max(10_000_000).optional(),
               enabled: z.boolean().optional(),
               contextWindowEdited: z.boolean().optional(),
+              efforts: z.array(z.string().min(1).max(32)).max(12).optional(),
             }),
           )
           .max(1000)
@@ -804,12 +806,15 @@ export async function registerRoutes(app: FastifyInstance) {
    * Models one provider's endpoint advertises (`GET /models`). The body
    * carries the form's URL/key so the list can be fetched before Save; with
    * nothing in the body the first configured provider is the fallback.
+   * `refresh` comes from the Settings button: it also re-downloads the model
+   * registry, so the effort levels that button promises are today's.
    */
   app.post("/api/agent/builtin/models", async (req) => {
     const body = z
       .object({
         url: z.string().max(500).optional(),
         apiKey: z.string().max(500).optional(),
+        refresh: z.boolean().optional(),
         headers: z
           .array(
             z.object({
@@ -831,7 +836,10 @@ export async function registerRoutes(app: FastifyInstance) {
           // spending a turn of the rotation on a health check.
           (fallback ? (builtinProviderKeys(fallback)[0] ?? "") : "");
     const headers = body.headers !== undefined ? body.headers : fallback?.headers;
-    const result = await fetchBuiltinModelCatalog(url, apiKey, { headers });
+    const result = await fetchBuiltinModelCatalog(url, apiKey, {
+      headers,
+      forceRegistry: body.refresh === true,
+    });
     if (result.ok) return result;
     const t = serverT(await resolveLocale(req));
     return {

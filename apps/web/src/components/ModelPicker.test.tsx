@@ -302,6 +302,55 @@ describe("ModelPicker", () => {
     expect(onParamsChange).toHaveBeenCalledWith("gpt-4o", { thinking: "low" });
   });
 
+  it("shows the two built-in knobs as separate columns, Prompt and Effort API", async () => {
+    const user = userEvent.setup();
+    const onParamsChange = vi.fn();
+    renderPicker({
+      showParamsMenu: true,
+      params: [
+        {
+          id: "prompt_style",
+          name: "Prompt",
+          currentValue: "extra-low",
+          options: [
+            { value: "high", name: "High" },
+            { value: "default", name: "Default" },
+            { value: "low", name: "Low" },
+            { value: "extra-low", name: "Extra low" },
+          ],
+        },
+        {
+          id: "effort",
+          name: "Effort API",
+          currentValue: "default",
+          options: [
+            { value: "default", name: "Default" },
+            { value: "low", name: "Low" },
+            { value: "high", name: "High" },
+            { value: "max", name: "Max" },
+            { value: "off", name: "Off" },
+          ],
+        },
+      ],
+      onParamsOpen: () => {},
+      onParamsChange,
+    });
+
+    await user.click(screen.getByRole("button", { name: /GPT-4o Fast/ }));
+    await user.click(screen.getAllByRole("button", { name: /Промпт/ })[0]);
+
+    // Two groups, two titles — never both called "Effort".
+    expect(await screen.findByRole("group", { name: "Промпт" })).toBeTruthy();
+    expect(screen.getByRole("group", { name: "Effort API" })).toBeTruthy();
+    expect(screen.getByRole("menuitemradio", { name: "Extra low" })).toBeTruthy();
+    // Off lives in the wire column: the only way to stop the thinking pass.
+    await user.click(screen.getByRole("menuitemradio", { name: "Off" }));
+    expect(onParamsChange).toHaveBeenCalledWith("gpt-4o", {
+      prompt_style: "extra-low",
+      effort: "off",
+    });
+  });
+
   it("the flyout keeps the loader until the target model's params arrive", async () => {
     const user = userEvent.setup();
     let resolveOpen: () => void = () => {};

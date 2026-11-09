@@ -628,6 +628,7 @@ export const ru = {
     builtinModelsHint:
       "Модели берутся из списка /models endpoint. Отметьте те, которыми агент может пользоваться, переименуйте их или задайте окно контекста; недостающие добавьте вручную.",
     builtinModelsFetch: "Обновить список",
+    builtinModelsEfforts: "Уровни эффорта из каталога моделей: {values}",
     builtinModelsFetching: "Загрузка…",
     builtinModelsSearch: "Поиск по id или названию…",
     builtinModelsScope: "Какие модели показывать",
@@ -1236,6 +1237,8 @@ export const ru = {
     fast: "Fast",
     notFast: "Not Fast",
     effort: "Effort",
+    promptStyle: "Промпт",
+    apiEffort: "Effort API",
     context: "Context",
     none: "None",
     low: "Low",

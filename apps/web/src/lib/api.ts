@@ -220,7 +220,13 @@ export const api = {
       message?: string;
     }>(`/api/agent/models${qs ? `?${qs}` : ""}`);
   },
-  builtinModels: (body: { url: string; apiKey: string; headers?: BuiltinHeaderConfig[] }) =>
+  builtinModels: (body: {
+    url: string;
+    apiKey: string;
+    headers?: BuiltinHeaderConfig[];
+    /** Re-download the model registry too — the "Refresh list" button. */
+    refresh?: boolean;
+  }) =>
     request<BuiltinModelCatalogResult>("/api/agent/builtin/models", {
       method: "POST",
       body: JSON.stringify(body),

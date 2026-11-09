@@ -15,6 +15,12 @@ export interface BuiltinStoredSession {
    */
   thinkingOff?: boolean;
   /**
+   * Wire reasoning effort of this chat (`reasoning_effort`): a level the model
+   * declares, `off`/`none` for no thinking pass at all, or `default` (absent)
+   * to leave the field out and let the endpoint decide.
+   */
+  effort?: string;
+  /**
    * `/thinking-limit` override for this chat, chars of one step's private
    * reasoning before the fuse cuts the call. Absent = follow the global
    * `builtinThinkingLimit` setting, 0 = explicitly off here, >0 = the cap.
@@ -73,6 +79,10 @@ export function loadBuiltinSession(stateDir: string, sessionId: string): Builtin
     const maskUpTo = startedAt(parsed.maskUpTo, parsed.messages.length);
     const prunedFrom = startedAt(parsed.prunedFrom, parsed.messages.length);
     const thinkingOff = parsed.thinkingOff === true;
+    const effort =
+      typeof parsed.effort === "string" && /^[a-z0-9_-]{1,32}$/i.test(parsed.effort.trim())
+        ? parsed.effort.trim()
+        : undefined;
     const thinkingLimitRaw = parsed.thinkingLimit;
     const thinkingLimit =
       typeof thinkingLimitRaw === "number" &&
@@ -101,6 +111,7 @@ export function loadBuiltinSession(stateDir: string, sessionId: string): Builtin
       modelId: String(parsed.modelId ?? ""),
       messages: parsed.messages as ModelMessage[],
       ...(thinkingOff ? { thinkingOff: true } : {}),
+      ...(effort && effort !== "default" ? { effort } : {}),
       ...(thinkingLimit !== undefined ? { thinkingLimit } : {}),
       // A digest pointing past the stored history describes a file that has
       // since been truncated — dropping it re-summarises instead of lying.

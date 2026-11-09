@@ -273,6 +273,40 @@ describe("BuiltinModelsEditor", () => {
     expect(screen.getByText("grok-4.6")).toBeTruthy();
   });
 
+  it("adopts the effort levels the catalog reports and shows them on the row", async () => {
+    apiMock.builtinModels.mockResolvedValue({
+      ok: true,
+      models: [{ id: "deepseek-v4.1-flash", contextWindow: 1_000_000, efforts: ["low", "high", "max"] }],
+    });
+    render(
+      <Harness
+        initial={[{ id: "deepseek-v4.1-flash", label: "DS", contextWindow: 1_000_000 }]}
+      />,
+    );
+
+    expect(await screen.findByText("low · high · max")).toBeTruthy();
+    await waitFor(() =>
+      expect(JSON.parse(storedValue())[0].efforts).toEqual(["low", "high", "max"]),
+    );
+  });
+
+  it("the refresh button asks the server to re-read the model registry", async () => {
+    const user = userEvent.setup();
+    render(<Harness apiKey="sk-test" />);
+
+    await screen.findByText("gpt-5.2");
+    // The automatic fetch reuses the cached registry; only the button forces.
+    expect(apiMock.builtinModels).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole("button", { name: "Refresh list" }));
+
+    await waitFor(() => expect(apiMock.builtinModels).toHaveBeenCalledTimes(2));
+    expect(apiMock.builtinModels).toHaveBeenLastCalledWith({
+      url: "http://localhost:11434/v1",
+      apiKey: "sk-test",
+      refresh: true,
+    });
+  });
+
   it("says so when nothing is configured yet", async () => {
     const user = userEvent.setup();
     render(<Harness />);

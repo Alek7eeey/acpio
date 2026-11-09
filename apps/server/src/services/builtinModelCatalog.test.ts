@@ -61,8 +61,12 @@ beforeAll(async () => {
         "vendor-a": {
           api: `${base}/enrich`,
           models: {
-            "scoped-model": { limit: { context: 200_000 } },
+            "scoped-model": {
+              limit: { context: 200_000 },
+              reasoning_options: [{ type: "effort", values: ["low", "high", "max"] }],
+            },
             reported: { limit: { context: 999_999 } },
+            "toggle-only": { reasoning_options: [{ type: "toggle" }] },
           },
         },
         "vendor-b": {
@@ -82,6 +86,7 @@ beforeAll(async () => {
           { id: "global-model" },
           { id: "reported", context_length: 64_000 },
           { id: "strange-model" },
+          { id: "toggle-only" },
         ],
       });
       return;
@@ -203,13 +208,15 @@ describe("fetchBuiltinModelCatalog", () => {
       models: [
         // Scoped to this endpoint's base URL — the other provider's 111111
         // for the same id must not leak in.
-        { id: "scoped-model", contextWindow: 200_000 },
+        { id: "scoped-model", contextWindow: 200_000, efforts: ["low", "high", "max"] },
         // Unknown to the scoped provider, found by id across the registry.
         { id: "global-model", contextWindow: 300_000 },
         // Reported by the endpoint: the registry must not override it.
         { id: "reported", contextWindow: 64_000 },
         // Known to neither source: left exactly as bare as it came.
         { id: "strange-model" },
+        // A toggle states no levels: no effort knob, so no list either.
+        { id: "toggle-only" },
       ],
     });
   });
@@ -225,6 +232,7 @@ describe("fetchBuiltinModelCatalog", () => {
         { id: "global-model" },
         { id: "reported", contextWindow: 64_000 },
         { id: "strange-model" },
+        { id: "toggle-only" },
       ],
     });
   });

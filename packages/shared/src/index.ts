@@ -1455,6 +1455,13 @@ export interface BuiltinModelConfig {
    * is an override and survives.
    */
   contextWindowEdited?: boolean;
+  /**
+   * Reasoning-effort values the model registry knows for this model
+   * (`reasoning_options` of type `effort`). Nobody types these: the catalog
+   * fetch writes them, so the row is a snapshot of the registry rather than
+   * an override — and an unknown list (registry unreachable) leaves it as is.
+   */
+  efforts?: string[];
 }
 
 /**
@@ -1465,6 +1472,23 @@ export interface DiscoveredBuiltinModel {
   id: string;
   label?: string;
   contextWindow?: number;
+  /** Effort values the model registry states for this model (see {@link BuiltinModelConfig.efforts}). */
+  efforts?: string[];
+}
+
+/** Cap on effort values kept per model row (protects settings size). */
+const BUILTIN_MAX_EFFORTS = 12;
+const BUILTIN_MAX_EFFORT_LENGTH = 32;
+
+/** Heal a list of effort values: non-strings dropped, duplicates and blanks gone. */
+export function normalizeEffortValues(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const value of raw.slice(0, BUILTIN_MAX_EFFORTS)) {
+    const text = typeof value === "string" ? value.trim().slice(0, BUILTIN_MAX_EFFORT_LENGTH) : "";
+    if (text && !out.includes(text)) out.push(text);
+  }
+  return out;
 }
 
 /** Context window assumed for a model row that does not state one. */
@@ -1489,12 +1513,14 @@ export function normalizeBuiltinModelRows(rows: unknown): BuiltinModelConfig[] {
     const raw = Math.round(Number(r.contextWindow) || 0);
     const window =
       raw > 0 ? Math.min(raw, BUILTIN_MAX_CONTEXT_WINDOW) : BUILTIN_FALLBACK_CONTEXT_WINDOW;
+    const efforts = normalizeEffortValues(r.efforts);
     out.push({
       id,
       label: String(r.label ?? "").trim().slice(0, 120) || id,
       contextWindow: window,
       ...(r.enabled === false ? { enabled: false as const } : {}),
       ...(r.contextWindowEdited === true ? { contextWindowEdited: true as const } : {}),
+      ...(efforts.length ? { efforts } : {}),
     });
   }
   return out;
@@ -3687,6 +3713,19 @@ export function modelParamLabel(
   if (name && name.trim() && name.trim() !== value) return name.trim();
   if (v === "true") return labels?.yes ?? "Yes";
   if (v === "false") return labels?.no ?? "No";
+  // The prompt knob's own levels, for callers that have no display name to
+  // show (a transcript notice) — a picker always keeps the agent's wording.
+  if (paramId === "prompt_style") {
+    const style: Record<string, string> = {
+      high: "High",
+      default: "Default",
+      low: "Low",
+      "extra-low": "Extra low",
+      extra_low: "Extra low",
+      extralow: "Extra low",
+    };
+    if (style[v]) return style[v];
+  }
   return value;
 }
 
@@ -3773,6 +3812,8 @@ export function chatNoticeText(lines: ChatNoticeLine[], modelLabel: string): str
 
 /** Prefer stable section titles for Cursor aliases (reasoning → Effort). */
 export function modelParamSectionName(paramId: string, name?: string): string {
+  // The built-in agent's prompt-side knob: its own title, never the raw id.
+  if (paramId === "prompt_style") return "Prompt";
   const family = modelParamFamily(paramId) ?? inferParamFamily(paramId, name);
   if (family === "fast") return "Fast";
   if (family === "effort") return "Effort";

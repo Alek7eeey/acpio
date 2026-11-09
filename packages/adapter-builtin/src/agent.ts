@@ -465,11 +465,11 @@ function builtinEndpoint(
 }
 
 /**
- * Reasoning modes the ⋯ menu offers per model, in chip order (most thinking
- * first). They shape the prompt only: "High" asks for the thinking that
- * decides the design, "Low"/"Extra low" cap the private-reasoning budget,
- * "Default" leaves the prompt alone. Whether the endpoint thinks at all is a
- * separate, session-level wire switch — `/thinking` (see `thinkingOff`).
+ * The prompt-side knob (⋯ menu → "Prompt"), in chip order (most thinking
+ * first). It shapes the prompt only: "High" asks for the thinking that decides
+ * the design, "Low"/"Extra low" cap the private-reasoning budget, "Default"
+ * leaves the prompt alone. What the endpoint actually spends is the other,
+ * independent knob — `reasoning_effort` (see `effort`).
  */
 const THINKING_MODES = ["high", "default", "low", "extra-low"] as const;
 
@@ -481,6 +481,30 @@ type ThinkingMode = (typeof THINKING_MODES)[number];
  * rest ignore an unknown field.
  */
 const THINKING_DISABLED_BODY = { thinking: { type: "disabled" } };
+
+/** `effort` values that mean "no thinking pass", as opposed to a level. */
+const EFFORT_OFF = new Set(["off", "none", "disabled"]);
+
+/** Chip label of one registry effort value: `xhigh` → `XHigh`, `max` → `Max`. */
+function effortLabel(value: string): string {
+  const known: Record<string, string> = {
+    minimal: "Minimal",
+    low: "Low",
+    medium: "Medium",
+    high: "High",
+    xhigh: "XHigh",
+    max: "Max",
+  };
+  return known[value.toLowerCase()] ?? value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+/** A value the picker sent, kept only when this model can mean it. */
+function normalizeEffortValue(value: string, declared: string[]): string {
+  const level = value.trim().toLowerCase();
+  if (!level || level === "default") return "default";
+  if (EFFORT_OFF.has(level)) return declared.includes("none") ? "none" : "off";
+  return declared.includes(level) ? level : "default";
+}
 
 /** `/thinking [on|off]` — bare means "toggle". */
 const THINKING_COMMAND_RE = /^\/thinking(?:\s+(\S+))?\s*$/i;
@@ -584,6 +608,12 @@ export class BuiltinAgent implements InProcessAgentTransport {
   private thinking: ThinkingMode = "default";
   /** `/thinking off`: requests carry a body that switches the thinking pass off. */
   private thinkingOff = false;
+  /**
+   * Wire reasoning effort of this chat: a level the model declares, `off` (no
+   * thinking pass at all) or `default` (the field is left out). Independent of
+   * the prompt-side mode in `thinking` — neither knob writes the other.
+   */
+  private effort = "default";
   /**
    * `/thinking-limit`: chars of one step's private reasoning before the fuse
    * cuts the model call mid-think and the turn carries on with a reminder.
@@ -822,10 +852,23 @@ export class BuiltinAgent implements InProcessAgentTransport {
             );
           }
           this.modelId = picked.value;
-        } else if (configId === "thinking") {
+          // The new model states its own levels: a level it does not declare
+          // would go out as a request field the endpoint cannot mean.
+          if (!EFFORT_OFF.has(this.effort) && !this.selectionEfforts().includes(this.effort)) {
+            this.effort = "default";
+          }
+        } else if (configId === "prompt_style" || configId === "thinking") {
+          // `thinking` is the id this param had before the two knobs split: a
+          // client built earlier still speaks it, and both mean the same mode.
           if ((THINKING_MODES as readonly string[]).includes(value)) {
             this.thinking = value as ThinkingMode;
           }
+        } else if (configId === "effort") {
+          this.effort = normalizeEffortValue(value, this.selectionEfforts());
+          // One knob for the reader: `/thinking off` and `effort=off` are the
+          // same wire state, so neither may leave the other saying otherwise.
+          this.thinkingOff = EFFORT_OFF.has(this.effort);
+          this.persist();
         }
         return { configOptions: this.configOptions() };
       }
@@ -880,6 +923,7 @@ export class BuiltinAgent implements InProcessAgentTransport {
       : { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 };
     this.bridgeReported = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 };
     this.thinkingOff = stored?.thinkingOff === true;
+    this.effort = stored?.effort ?? "default";
     // The override may be absent (follow the global setting), 0 (off here) or
     // a cap; the effective fuse is resolved from it right away so a report
     // right after boot is not off-by-the-settings-snapshot.
@@ -910,7 +954,23 @@ export class BuiltinAgent implements InProcessAgentTransport {
     return { sessionId, configOptions: this.configOptions() };
   }
 
+  /** Effort levels the selected model declares (Settings → Models → refresh). */
+  private selectionEfforts(): string[] {
+    return resolveBuiltinModel(this.opts.settings, this.modelId)?.efforts ?? [];
+  }
+
   private configOptions() {
+    const declared = this.selectionEfforts();
+    // "off" is always offered: it is the only way to stop the endpoint's
+    // thinking pass from the picker, whatever the model declares.
+    const offValue = declared.includes("none") ? "none" : "off";
+    const effortOptions = [
+      { value: "default", name: "Default" },
+      ...declared
+        .filter((v) => !EFFORT_OFF.has(v))
+        .map((v) => ({ value: v, name: effortLabel(v) })),
+      { value: offValue, name: offValue === "none" ? "None (off)" : "Off" },
+    ];
     return [
       {
         id: "model",
@@ -926,9 +986,9 @@ export class BuiltinAgent implements InProcessAgentTransport {
         })),
       },
       {
-        id: "thinking",
+        id: "prompt_style",
         category: "model_config",
-        name: "Thinking",
+        name: "Prompt",
         type: "select",
         currentValue: this.thinking,
         options: [
@@ -937,6 +997,18 @@ export class BuiltinAgent implements InProcessAgentTransport {
           { value: "low", name: "Low" },
           { value: "extra-low", name: "Extra low" },
         ],
+      },
+      {
+        // What the endpoint spends on thinking — the model's own levels plus
+        // "off". A model that declares none still gets "off".
+        id: "effort",
+        category: "model_config",
+        name: "Effort API",
+        type: "select",
+        currentValue: effortOptions.some((o) => o.value === this.effort)
+          ? this.effort
+          : "default",
+        options: effortOptions,
       },
     ];
   }
@@ -949,6 +1021,7 @@ export class BuiltinAgent implements InProcessAgentTransport {
       modelId: this.modelId,
       messages: this.messages,
       ...(this.thinkingOff ? { thinkingOff: true } : {}),
+      ...(this.effort !== "default" ? { effort: this.effort } : {}),
       ...(this.thinkingLimitOverride !== undefined ? { thinkingLimit: this.thinkingLimitOverride } : {}),
       ...(this.compaction ? { compaction: this.compaction } : {}),
       ...(this.maskUpTo > 0 ? { maskUpTo: this.maskUpTo } : {}),
@@ -1237,6 +1310,26 @@ export class BuiltinAgent implements InProcessAgentTransport {
   // ── Context window ────────────────────────────────────────────────────────
 
   /**
+   * Body fields for the wire effort knob. `off` kills the thinking pass — for
+   * an endpoint that names levels (DeepSeek and friends) `reasoning_effort:
+   * "none"` does it, for the rest the common `thinking` switch; a declared
+   * level goes out as `reasoning_effort`; `default` sends nothing at all.
+   */
+  private reasoningBody(
+    selection: BuiltinModelSelection,
+  ): Record<string, unknown> | undefined {
+    const level = this.effort.trim().toLowerCase();
+    const declared = selection.efforts;
+    if (this.thinkingOff || EFFORT_OFF.has(level)) {
+      return declared.length
+        ? { reasoning_effort: "none", ...THINKING_DISABLED_BODY }
+        : THINKING_DISABLED_BODY;
+    }
+    if (!level || level === "default") return undefined;
+    return { reasoning_effort: level };
+  }
+
+  /**
    * Endpoint client for one selection. Rebuilt per call so `{{sessionId}}`
    * resolves to the session that is asking.
    *
@@ -1250,7 +1343,7 @@ export class BuiltinAgent implements InProcessAgentTransport {
     return builtinEndpoint(
       selection.provider,
       this.sessionId,
-      this.thinkingOff ? THINKING_DISABLED_BODY : undefined,
+      this.reasoningBody(selection),
       // The stored transcript, not the view: a pruned view is still a thinking
       // conversation, and the echo must survive the pruning.
       hasReasoning(this.messages),
@@ -1350,6 +1443,9 @@ export class BuiltinAgent implements InProcessAgentTransport {
       return { stopReason: "end_turn" };
     }
     this.thinkingOff = word ? off : !this.thinkingOff;
+    // Keep the picker's own knob in step: it shows the same wire state.
+    if (this.thinkingOff) this.effort = this.selectionEfforts().includes("none") ? "none" : "off";
+    else if (EFFORT_OFF.has(this.effort)) this.effort = "default";
     this.persist();
     this.emitUpdate({
       sessionUpdate: "agent_message_chunk",

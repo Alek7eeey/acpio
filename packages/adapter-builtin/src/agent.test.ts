@@ -696,9 +696,14 @@ describe("builtin provider routing", () => {
         dir,
       );
       const session = await call<SessionResult>("session/new", { cwd: "/w" });
-      const thinking = session.configOptions.find((o) => o.id === "thinking");
+      const thinking = session.configOptions.find((o) => o.id === "prompt_style");
       // The ⋯ menu shapes the prompt only — Off is not a mode any more.
       expect(thinking?.options?.map((o) => o.value)).toEqual(["high", "default", "low", "extra-low"]);
+      // The wire knob is a second, independent param: this model declares no
+      // levels, so it offers the default and Off and nothing else.
+      const effort = session.configOptions.find((o) => o.id === "effort");
+      expect(effort?.options?.map((o) => o.value)).toEqual(["default", "off"]);
+      expect(effort?.currentValue).toBe("default");
 
       // The wire switch is a chat command, and the slash menu announces it.
       const commands = frames
@@ -713,7 +718,7 @@ describe("builtin provider routing", () => {
       expect(stub.bodies.at(-1)?.thinking).toBeUndefined();
 
       // Low: the wire stays plain, but the budget rule rides the system prompt.
-      await call("session/set_config_option", { configId: "thinking", value: "low" });
+      await call("session/set_config_option", { configId: "prompt_style", value: "low" });
       await call("session/prompt", { prompt: [{ type: "text", text: "hi" }] });
       const low = stub.bodies.at(-1);
       expect(low?.thinking).toBeUndefined();
@@ -722,7 +727,7 @@ describe("builtin provider routing", () => {
       );
 
       // Extra low: the tighter per-step cap rides the same prompt slot.
-      await call("session/set_config_option", { configId: "thinking", value: "extra-low" });
+      await call("session/set_config_option", { configId: "prompt_style", value: "extra-low" });
       await call("session/prompt", { prompt: [{ type: "text", text: "hi" }] });
       const extra = stub.bodies.at(-1);
       expect(extra?.thinking).toBeUndefined();
@@ -733,7 +738,7 @@ describe("builtin provider routing", () => {
         "private reasoning budget is 150 words",
       );
       // High: the other direction — the design decision rides the same slot.
-      await call("session/set_config_option", { configId: "thinking", value: "high" });
+      await call("session/set_config_option", { configId: "prompt_style", value: "high" });
       await call("session/prompt", { prompt: [{ type: "text", text: "hi" }] });
       const high = stub.bodies.at(-1);
       expect(high?.thinking).toBeUndefined();
@@ -744,6 +749,7 @@ describe("builtin provider routing", () => {
         "private reasoning budget is 150 words",
       );
       // Back to default: the prompt is clean of budget rules again.
+      // The old id still means the same mode: a client built before the split.
       await call("session/set_config_option", { configId: "thinking", value: "default" });
       await call("session/prompt", { prompt: [{ type: "text", text: "hi" }] });
       const back = stub.bodies.at(-1);
@@ -769,6 +775,142 @@ describe("builtin provider routing", () => {
       await call("session/prompt", { prompt: [{ type: "text", text: "/thinking" }] });
       await call("session/prompt", { prompt: [{ type: "text", text: "hi" }] });
       expect(stub.bodies.at(-1)?.thinking).toBeUndefined();
+    } finally {
+      await stub.close();
+    }
+  });
+
+  it("sends the model's own effort levels as reasoning_effort, and Off kills the pass", async () => {
+    const stub = await startStub();
+    const dir = tempDir();
+    try {
+      const { call } = boot(
+        {
+          builtinProviders: [
+            {
+              id: "p1",
+              name: "DS",
+              url: stub.url,
+              apiKey: "",
+              models: [
+                {
+                  id: "deepseek-v4.1-flash",
+                  label: "DS",
+                  contextWindow: 1_000_000,
+                  efforts: ["low", "high", "max"],
+                },
+              ],
+            },
+          ],
+        },
+        dir,
+      );
+      const session = await call<SessionResult>("session/new", { cwd: "/w" });
+      const effort = session.configOptions.find((o) => o.id === "effort");
+      // The model's levels in registry order, the default first, Off last.
+      expect(effort?.options?.map((o) => o.value)).toEqual(["default", "low", "high", "max", "off"]);
+
+      await call("session/set_config_option", { configId: "effort", value: "max" });
+      await call("session/prompt", { prompt: [{ type: "text", text: "hi" }] });
+      expect(stub.bodies.at(-1)?.reasoning_effort).toBe("max");
+      // The prompt-side knob is untouched by the wire one.
+      expect(stub.bodies.at(-1)?.thinking).toBeUndefined();
+
+      await call("session/set_config_option", { configId: "effort", value: "off" });
+      await call("session/prompt", { prompt: [{ type: "text", text: "hi" }] });
+      // Both shapes at once: the level-aware endpoints read `none`, the rest
+      // read the common `thinking` switch.
+      expect(stub.bodies.at(-1)?.reasoning_effort).toBe("none");
+      expect(stub.bodies.at(-1)?.thinking).toEqual({ type: "disabled" });
+      // Off is the same wire state `/thinking off` sets, and it survives a restart.
+      expect(loadBuiltinSession(dir, session.sessionId)?.effort).toBe("off");
+      expect(loadBuiltinSession(dir, session.sessionId)?.thinkingOff).toBe(true);
+
+      await call("session/set_config_option", { configId: "effort", value: "default" });
+      await call("session/prompt", { prompt: [{ type: "text", text: "hi" }] });
+      expect(stub.bodies.at(-1)?.reasoning_effort).toBeUndefined();
+      expect(stub.bodies.at(-1)?.thinking).toBeUndefined();
+
+      // A level this model does not declare never reaches the wire.
+      const refused = await call<{ configOptions: SessionResult["configOptions"] }>(
+        "session/set_config_option",
+        { configId: "effort", value: "xhigh" },
+      );
+      expect(refused.configOptions.find((o) => o.id === "effort")?.currentValue).toBe("default");
+    } finally {
+      await stub.close();
+    }
+  });
+
+  it("keeps the two knobs independent across every combination", async () => {
+    const stub = await startStub();
+    const dir = tempDir();
+    const systemOf = () =>
+      String(
+        (stub.bodies.at(-1)?.messages as Array<Record<string, unknown>> | undefined)?.[0]?.content ??
+          "",
+      );
+    try {
+      const { call } = boot(
+        {
+          builtinProviders: [
+            {
+              id: "p1",
+              name: "DS",
+              url: stub.url,
+              apiKey: "",
+              models: [
+                {
+                  id: "deepseek-v4.1-flash",
+                  label: "DS",
+                  contextWindow: 1_000_000,
+                  efforts: ["low", "high", "max"],
+                },
+              ],
+            },
+          ],
+        },
+        dir,
+      );
+      await call("session/new", { cwd: "/w" });
+
+      // The prompt rider each style adds (null = the prompt stays clean).
+      const styles: Array<[string, string | null]> = [
+        ["default", null],
+        ["high", "the case that will part a working change from a broken one"],
+        ["low", "private reasoning budget is 150 words"],
+        ["extra-low", "capped at 3 sentences per step"],
+      ];
+      // The wire field each level sends (undefined = the field is left out).
+      const levels: Array<[string, unknown]> = [
+        ["default", undefined],
+        ["low", "low"],
+        ["high", "high"],
+        ["max", "max"],
+        ["off", "none"],
+      ];
+
+      for (const [style, marker] of styles) {
+        await call("session/set_config_option", { configId: "prompt_style", value: style });
+        for (const [level, wire] of levels) {
+          await call("session/set_config_option", { configId: "effort", value: level });
+          await call("session/prompt", { prompt: [{ type: "text", text: "hi" }] });
+          const combo = `${style}/${level}`;
+          const body = stub.bodies.at(-1) ?? {};
+          expect(body.reasoning_effort, combo).toBe(wire);
+          // Off is the only level that also flips the common `thinking` switch.
+          expect(body.thinking, combo).toEqual(level === "off" ? { type: "disabled" } : undefined);
+          const system = systemOf();
+          if (marker) expect(system, combo).toContain(marker);
+          // Neither knob writes the other: exactly one rider is in the prompt,
+          // and the wire level never appears there.
+          for (const [other, otherMarker] of styles) {
+            if (other === style || !otherMarker) continue;
+            expect(system, combo).not.toContain(otherMarker);
+          }
+          if (level !== "default") expect(system, combo).not.toContain(`reasoning_effort`);
+        }
+      }
     } finally {
       await stub.close();
     }

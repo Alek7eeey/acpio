@@ -318,6 +318,12 @@ describe("modelParamLabel", () => {
     ["effort", "unknown", undefined, undefined, "Unknown"],
     ["effort", "", undefined, undefined, ""],
     ["reasoning", "off", undefined, undefined, "Off"],
+    // the built-in agent's prompt-side knob: same four levels, same spelling
+    ["prompt_style", "extra-low", undefined, undefined, "Extra low"],
+    // a picker's own option name still wins over the mapping
+    ["prompt_style", "extra-low", "Extra low", undefined, "Extra low"],
+    ["prompt_style", "high", undefined, undefined, "High"],
+    ["prompt_style", "default", undefined, undefined, "Default"],
     // effort value falls back to a labeled name
     ["effort", "huge", "high", undefined, "High"],
     // family inferred from the name for unknown ids
@@ -346,6 +352,9 @@ describe("modelParamSectionName", () => {
     ["thinking", undefined, "Effort"],
     ["effort", "Reasoning", "Effort"],
     ["reasoning_effort", undefined, "Effort"],
+    // the built-in agent's prompt-side knob keeps its own title
+    ["prompt_style", undefined, "Prompt"],
+    ["prompt_style", "Стиль", "Prompt"],
     ["context", undefined, "Context"],
     ["context", "Window", "Window"],
     ["context_size", undefined, "Context"],

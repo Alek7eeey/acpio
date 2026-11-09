@@ -28,6 +28,11 @@ export interface BuiltinCatalogOptions {
   registryUrl?: string;
   /** Extra headers from the provider row; override Accept/Authorization. */
   headers?: BuiltinHeaderConfig[];
+  /**
+   * Re-download the model registry instead of reusing the cached copy — set by
+   * the Settings button, whose whole point is a fresh effort list.
+   */
+  forceRegistry?: boolean;
 }
 
 /** `GET {endpoint}/models` against an OpenAI-compatible endpoint. */
@@ -108,18 +113,21 @@ export async function fetchBuiltinModelCatalog(
     });
   }
   // Most OpenAI-compatible endpoints list bare `id/object/created` rows with
-  // no window at all. Fill those from the model registry — matched against
-  // this endpoint's base URL first (the vendor's own limits), then by id
-  // across the registry. A window the endpoint itself reported always wins;
-  // an unavailable registry leaves the row exactly as bare as it was.
-  if (models.some((m) => !m.contextWindow)) {
-    const registry = await loadModelRegistry(opts.registryUrl);
-    if (registry) {
-      for (const model of models) {
-        if (model.contextWindow) continue;
+  // no window and no effort levels at all. Fill both from the model registry —
+  // matched against this endpoint's base URL first (the vendor's own limits),
+  // then by id across the registry. A value the endpoint itself reported always
+  // wins; an unavailable registry leaves the row exactly as bare as it was.
+  const registry = await loadModelRegistry(opts.registryUrl, {
+    force: opts.forceRegistry === true,
+  });
+  if (registry) {
+    for (const model of models) {
+      if (!model.contextWindow) {
         const window = registry.contextFor(base, model.id) ?? registry.contextOf(model.id);
         if (window) model.contextWindow = Math.min(window, MAX_CONTEXT_WINDOW);
       }
+      const efforts = registry.effortsFor(base, model.id) ?? registry.effortsOf(model.id);
+      if (efforts) model.efforts = efforts;
     }
   }
   return { ok: true, models };

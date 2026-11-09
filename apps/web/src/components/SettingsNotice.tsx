@@ -1,4 +1,9 @@
-import type { ChatNoticeLine, MessageDto } from "@acpio/shared";
+import {
+  modelParamLabel,
+  modelParamSectionName,
+  type ChatNoticeLine,
+  type MessageDto,
+} from "@acpio/shared";
 import { useT } from "../lib/i18n";
 import styles from "./SettingsNotice.module.css";
 
@@ -21,7 +26,16 @@ export function settingsNoticeLines(message: MessageDto): ChatNoticeLine[] {
       const to = String(row.to ?? "").trim();
       if (!from || !to) continue;
       if (row.kind === "param") {
-        out.push({ kind: "param", label: String(row.label ?? "").trim(), from, to });
+        // Notices written before the prompt knob had a title carry its raw id;
+        // re-titling on read fixes those rows instead of leaving them stale.
+        const stored = String(row.label ?? "").trim();
+        const titled = stored === "prompt_style";
+        out.push({
+          kind: "param",
+          label: modelParamSectionName(stored),
+          from: titled ? modelParamLabel(stored, from) : from,
+          to: titled ? modelParamLabel(stored, to) : to,
+        });
       } else {
         out.push({ kind: "model", from, to });
       }

@@ -70,6 +70,9 @@ function activeParamChips(
     const opt = param.options.find((o) => o.value === value);
     const full = optionLabel(param, value, opt?.name, labels);
     if (family === "effort") {
+      // "default" is the absence of a choice — a chip for it would claim a
+      // setting the request does not carry.
+      if (value.toLowerCase() === "default") continue;
       chips.push({
         key: param.id,
         label: shortEffortChip(full),
@@ -165,15 +168,25 @@ function resolveParamValues(
 
 type AnchorRect = { top: number; left: number; bottom: number; right: number };
 
+/**
+ * Width of the params panel. Two knobs side by side need the extra room; one
+ * column of radios keeps the narrow panel it always had.
+ */
+function flyoutWidth(params: ModelParamDto[]): number {
+  return params.some((p) => p.id === "prompt_style") ? 400 : 280;
+}
+
 /** Place flyout outside the model menu so the selected row stays visible. */
 function flyoutStyle(
   btn: AnchorRect,
   menu: AnchorRect | null,
   flyoutHeight: number,
+  /** Wider panel for two columns of radios; one column keeps the narrow one. */
+  flyoutWidth = 280,
 ): { top: number; left: number; width: number; maxHeight: number } {
   const margin = 12;
   const gap = 8;
-  const width = Math.min(280, window.innerWidth - margin * 2);
+  const width = Math.min(flyoutWidth, window.innerWidth - margin * 2);
   const maxHeight = Math.min(360, window.innerHeight - margin * 2);
   const measured = Math.min(Math.max(flyoutHeight, 120), maxHeight);
   const height = measured;
@@ -608,7 +621,15 @@ export function ModelPicker({
   const refineFlyoutPosition = () => {
     const el = paramsPopupRef.current;
     if (!el || !paramsAnchor) return;
-    const layout = flyoutStyle(paramsAnchor, menuAnchor, el.offsetHeight);
+    // The two-knob panel keeps its wider width on every re-measure: this
+    // effect rewrites `style.width`, so a width passed only at render time
+    // would be overwritten the moment the flyout is placed.
+    const layout = flyoutStyle(
+      paramsAnchor,
+      menuAnchor,
+      el.offsetHeight,
+      flyoutWidth(flyoutParams),
+    );
     el.style.top = `${layout.top}px`;
     el.style.left = `${layout.left}px`;
     el.style.width = `${layout.width}px`;
@@ -693,11 +714,37 @@ export function ModelPicker({
     }
   };
 
+  /**
+   * Section title of one param. The built-in agent's two knobs must never read
+   * the same: the shared helper calls every effort-family id "Effort", which
+   * is exactly the confusion this split exists to remove.
+   */
+  const paramTitle = (param: ModelParamDto, twoKnobs: boolean, chipList = false): string => {
+    if (param.id === "prompt_style") return t("models.promptStyle");
+    if (twoKnobs && param.id === "effort") return t("models.apiEffort");
+    // Inside the flyout the Fast section reads "auto"; the trigger's own
+    // tooltip keeps the plain "Fast" it always had.
+    if (!chipList && modelParamFamily(param.id) === "fast") return t("models.auto");
+    return modelParamSectionName(param.id, param.name);
+  };
+
   const renderParamSections = () => {
-    const shown = flyoutBusy
+    const loaded = flyoutBusy
       ? flyoutParams.filter((p) => modelParamFamily(p.id) === "fast")
       : flyoutParams;
     const target = paramsFor ?? model;
+    // The built-in agent is the only one with two knobs: the prompt-side style
+    // and the wire effort. Their section titles must never read the same, and
+    // they sit side by side so the live one is visible next to the frozen one.
+    const twoKnobs = loaded.some((p) => p.id === "prompt_style");
+    // Left column is the prompt style (set once per chat), right is the wire
+    // effort (changed whenever) — the shared sort ranks the wire knob first,
+    // which would put the busy column on the left.
+    const shown = twoKnobs
+      ? [...loaded].sort(
+          (a, b) => Number(b.id === "prompt_style") - Number(a.id === "prompt_style"),
+        )
+      : loaded;
     const sections = shown.map((param) => {
       const current =
         flyoutValues[param.id] ??
@@ -705,8 +752,7 @@ export function ModelPicker({
         param.options[0]?.value ??
         "";
       const family = modelParamFamily(param.id);
-      const title =
-        family === "fast" ? t("models.auto") : modelParamSectionName(param.id, param.name);
+      const title = paramTitle(param, twoKnobs);
 
       if (family === "fast") {
         const onValues = new Set(
@@ -779,7 +825,7 @@ export function ModelPicker({
     });
     return (
       <>
-        {sections}
+        {twoKnobs ? <div className={styles.paramColumns}>{sections}</div> : sections}
         {flyoutBusy ? (
           <div className={styles.paramsLoader} aria-busy="true">
             <span className={styles.paramsSpinner} aria-hidden />
@@ -790,8 +836,12 @@ export function ModelPicker({
     );
   };
 
-  const paramsLabel = (paramsFor ? flyoutParams : visibleParams)
-    .map((p) => modelParamSectionName(p.id, p.name))
+  const shownParams = paramsFor ? flyoutParams : visibleParams;
+  /** The built-in agent is the one harness with two knobs — it needs two columns. */
+  const twoKnobs = flyoutParams.some((p) => p.id === "prompt_style");
+  const panelWidth = flyoutWidth(flyoutParams);
+  const paramsLabel = shownParams
+    .map((p) => paramTitle(p, shownParams.some((x) => x.id === "prompt_style"), true))
     .join(", ");
   const showMore = showParamsMenu ?? visibleParams.length > 0;
   const rowParamsBusy = (modelValue: string) =>
@@ -1080,7 +1130,14 @@ export function ModelPicker({
           <div
             ref={paramsPopupRef}
             className={styles.paramsFlyout}
-            style={flyoutStyle(paramsAnchor, menuAnchor, 240)}
+            style={flyoutStyle(
+              paramsAnchor,
+              menuAnchor,
+              // Tall enough for the longer of the two columns, so neither a
+              // scrollbar nor a cut-off row appears next to the labels.
+              twoKnobs ? 300 : 240,
+              panelWidth,
+            )}
             role="dialog"
             aria-label={paramsLabel || t("common.params")}
           >

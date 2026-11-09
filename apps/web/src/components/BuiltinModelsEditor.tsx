@@ -13,6 +13,8 @@ type EditorRow = {
   label: string;
   contextWindow: number;
   enabled: boolean;
+  /** Effort levels the model registry states for this model (empty = none). */
+  efforts: string[];
   /** Written to settings — only then does removal have something to drop. */
   inSettings: boolean;
   /** Not advertised by the endpoint — a hand-added row (meaningful after a fetch). */
@@ -67,11 +69,16 @@ export function BuiltinModelsEditor({
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState({ id: "", label: "", contextWindow: "" });
 
-  const load = async () => {
+  const load = async (refresh = false) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await api.builtinModels({ url: endpointUrl, apiKey, headers });
+      const res = await api.builtinModels({
+        url: endpointUrl,
+        apiKey,
+        headers,
+        ...(refresh ? { refresh: true } : {}),
+      });
       if (res.ok) {
         setCatalog(res.models);
         setFetched(true);
@@ -99,18 +106,29 @@ export function BuiltinModelsEditor({
   }, [endpointUrl]);
 
   /**
-   * Adopt freshly fetched windows into rows the user never typed one for, so
-   * the form saves what the sources now report; a typed override stays put.
+   * Adopt freshly fetched windows and effort levels into rows, so the form
+   * saves what the sources now report; a typed window override stays put. An
+   * unknown effort list (registry unreachable) leaves the row alone instead of
+   * wiping what the last successful refresh learned.
    */
   useEffect(() => {
     if (!fetched) return;
     let changed = false;
     const next = value.map((row) => {
-      if (row.contextWindowEdited) return row;
       const found = catalog.find((m) => m.id === row.id);
-      if (!found?.contextWindow || found.contextWindow === row.contextWindow) return row;
-      changed = true;
-      return { ...row, contextWindow: found.contextWindow };
+      let out = row;
+      if (
+        !row.contextWindowEdited &&
+        found?.contextWindow &&
+        found.contextWindow !== row.contextWindow
+      ) {
+        out = { ...out, contextWindow: found.contextWindow };
+      }
+      if (found?.efforts?.length && found.efforts.join("|") !== (row.efforts ?? []).join("|")) {
+        out = { ...out, efforts: found.efforts };
+      }
+      if (out !== row) changed = true;
+      return out;
     });
     if (changed) onChange(next);
   }, [catalog, fetched, value, onChange]);
@@ -129,6 +147,7 @@ export function BuiltinModelsEditor({
         id,
         label: cfg?.label || found?.label || id,
         contextWindow: effectiveWindow(cfg, found),
+        efforts: cfg?.efforts ?? found?.efforts ?? [],
         // Only rows written to settings are enabled; a catalog row nobody
         // ticked has never been offered to the agent.
         enabled: cfg ? cfg.enabled !== false : false,
@@ -170,6 +189,7 @@ export function BuiltinModelsEditor({
     // A typed window becomes an override from now on; an untouched row follows
     // whatever the sources report (the fetch may be newer than settings).
     const edited = patch.contextWindowEdited === true || existing?.contextWindowEdited === true;
+    const efforts = found?.efforts ?? existing?.efforts ?? [];
     const next: BuiltinModelConfig = {
       id,
       label: patch.label ?? existing?.label ?? found?.label ?? id,
@@ -182,6 +202,9 @@ export function BuiltinModelsEditor({
       // created by editing an untouched catalog row must say false explicitly.
       enabled: patch.enabled ?? (existing ? existing.enabled !== false : false),
       ...(edited ? { contextWindowEdited: true } : {}),
+      // Effort levels belong to the fetch, not to the form: keep whatever the
+      // row or the catalog knows so a tick does not erase them.
+      ...(efforts.length ? { efforts } : {}),
     };
     onChange(existing ? value.map((m) => (m.id === id ? next : m)) : [...value, next]);
   };
@@ -260,7 +283,7 @@ export function BuiltinModelsEditor({
         <button
           type="button"
           className={styles.btn}
-          onClick={() => void load()}
+          onClick={() => void load(true)}
           disabled={loading}
         >
           {loading ? t("settings.builtinModelsFetching") : t("settings.builtinModelsFetch")}
@@ -363,6 +386,14 @@ export function BuiltinModelsEditor({
                 <span className={styles.id}>{row.id}</span>
                 {row.custom ? (
                   <span className={styles.tag}>{t("settings.builtinModelsCustomTag")}</span>
+                ) : null}
+                {row.efforts.length ? (
+                  <span
+                    className={styles.tag}
+                    title={t("settings.builtinModelsEfforts", { values: row.efforts.join(", ") })}
+                  >
+                    {row.efforts.join(" · ")}
+                  </span>
                 ) : null}
               </label>
               <input

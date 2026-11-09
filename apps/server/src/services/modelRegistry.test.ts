@@ -39,6 +39,14 @@ beforeAll(async () => {
         "no-limit": { limit: {} },
         "no-row": null,
         tri: { limit: { context: 64_000 } },
+        "effort-model": {
+          limit: { context: 200_000 },
+          reasoning_options: [{ type: "effort", values: ["low", "high", "max"] }],
+        },
+        "toggle-model": {
+          limit: { context: 100_000 },
+          reasoning_options: [{ type: "toggle" }],
+        },
       },
     },
     "vendor-b": {
@@ -47,6 +55,7 @@ beforeAll(async () => {
         "kimi-k3": { limit: { context: 999_999 } },
         dupe: { limit: { context: 1_000 } },
         tri: { limit: { context: 7_000 } },
+        "effort-model": { reasoning_options: [{ type: "effort", values: ["high", "max"] }] },
       },
     },
     "vendor-c": {
@@ -97,6 +106,28 @@ describe("loadModelRegistry", () => {
     expect(registry!.contextOf("unknown-model")).toBeUndefined();
     // Unknown base URL never sees the scoped map.
     expect(registry!.contextFor("https://elsewhere.example/v1", "kimi-k3")).toBeUndefined();
+  });
+
+  it("reads effort levels per provider and across the registry", async () => {
+    const registry = await loadModelRegistry(`${base}/registry.json`);
+    expect(registry!.effortsFor(`${base}/v1`, "effort-model")).toEqual(["low", "high", "max"]);
+    // Another base URL states its own (shorter) list.
+    expect(registry!.effortsFor(`${base}/v2`, "effort-model")).toEqual(["high", "max"]);
+    // A toggle states no levels at all — the model has no effort knob.
+    expect(registry!.effortsFor(`${base}/v1`, "toggle-model")).toBeUndefined();
+    expect(registry!.effortsOf("toggle-model")).toBeUndefined();
+    // Global vote: one list each, the tie goes to the longer one.
+    expect(registry!.effortsOf("EFFORT-MODEL")).toEqual(["low", "high", "max"]);
+    expect(registry!.effortsOf("unknown-model")).toBeUndefined();
+    expect(registry!.effortsFor("https://elsewhere.example/v1", "effort-model")).toBeUndefined();
+  });
+
+  it("force re-downloads the registry instead of reusing the cached copy", async () => {
+    await loadModelRegistry(`${base}/registry.json`);
+    await loadModelRegistry(`${base}/registry.json`);
+    expect(hits).toBe(1);
+    await loadModelRegistry(`${base}/registry.json`, { force: true });
+    expect(hits).toBe(2);
   });
 
   it("downloads once per URL and skips an explicitly disabled registry", async () => {

@@ -609,6 +609,7 @@ export const en = {
     builtinModelsHint:
       "Models come from the endpoint's /models list. Tick the ones the agent may use, rename them or set their context window; add whatever is missing by hand.",
     builtinModelsFetch: "Refresh list",
+    builtinModelsEfforts: "Effort levels from the model catalog: {values}",
     builtinModelsFetching: "Loading…",
     builtinModelsSearch: "Search by id or name…",
     builtinModelsScope: "Which models to show",
@@ -1215,6 +1216,8 @@ export const en = {
     fast: "Fast",
     notFast: "Not Fast",
     effort: "Effort",
+    promptStyle: "Prompt",
+    apiEffort: "Effort API",
     context: "Context",
     none: "None",
     low: "Low",

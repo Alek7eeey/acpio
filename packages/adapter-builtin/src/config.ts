@@ -26,6 +26,12 @@ export interface BuiltinModelSelection {
   /** Wire id sent to the endpoint. */
   modelId: string;
   contextWindow: number;
+  /**
+   * Reasoning-effort levels the model registry states for this model (Settings
+   * → Built-in agent → Models, written by "Refresh list"). Empty means the
+   * model declares none — the composer then offers only "off".
+   */
+  efforts: string[];
 }
 
 /** Provider rows, healed on read (settings may predate the current shape). */
@@ -57,6 +63,7 @@ function configuredSelections(settings: AppSettings): BuiltinModelSelection[] {
         provider,
         modelId: model.id,
         contextWindow: model.contextWindow,
+        efforts: model.efforts ?? [],
       });
     }
   }
