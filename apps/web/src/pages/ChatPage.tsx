@@ -6136,10 +6136,11 @@ function ChatThread() {
   };
 
   /**
-   * The input's right-click commands write themselves into the field and stop
-   * there: a right click is a way to turn the draft into a plan, or into the
-   * questions about it, without retyping it — not a way to send anything. The
-   * draft becomes the skill's argument, the reader's Enter sends it.
+   * The skill commands of the input's right-click menu write themselves into
+   * the field and stop there: a right click is a way to turn the draft into a
+   * plan, or into the questions about it, without retyping it — not a way to
+   * send anything. The draft becomes the skill's argument, the reader's Enter
+   * sends it.
    */
   const insertComposerCommand = (command: "plan" | "ask") => {
     setComposerMenu(null);
@@ -8005,6 +8006,21 @@ function ChatThread() {
                 >
                   <MsgMenuItem label="/plan" onClick={() => insertComposerCommand("plan")} />
                   <MsgMenuItem label="/ask" onClick={() => insertComposerCommand("ask")} />
+                  {/* The git rows act instead of writing into the field: a commit is
+                      the agent's job, and the chip sends it the same way. They need
+                      a repo, or there is nothing to commit. */}
+                  {git.status?.repo
+                    ? (["commit", "commit+push"] as const).map((command) => (
+                        <MsgMenuItem
+                          key={command}
+                          label={command}
+                          onClick={() => {
+                            setComposerMenu(null);
+                            runGitChangesCommand(command);
+                          }}
+                        />
+                      ))
+                    : null}
                 </div>,
                 document.body,
               )

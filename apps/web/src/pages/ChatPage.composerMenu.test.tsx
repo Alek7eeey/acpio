@@ -26,6 +26,27 @@ vi.mock("../lib/api", () => {
   };
 });
 vi.mock("../lib/useSessionSocket", () => ({ useSessionSocket: () => {} }));
+// The git rows of the menu depend on the composer's repo: the hook answers
+// with whatever the case set, no socket and no git behind it.
+const gitMock = vi.hoisted(() => ({ status: null as unknown }));
+vi.mock("../components/ComposerGitBar", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    useGitStatus: () => ({
+      status: gitMock.status,
+      loading: false,
+      awaiting: false,
+      refresh: async () => {},
+      checkout: async () => {},
+      deleteBranch: async () => ({ ok: true }),
+      branchBusy: false,
+      branchesLoading: false,
+      loadBranches: async () => {},
+      applyStatus: () => {},
+    }),
+  };
+});
 
 if (!window.matchMedia) {
   window.matchMedia = ((query: string) => ({
@@ -80,6 +101,7 @@ const sendPrompt = vi.fn(async () => {});
 beforeEach(() => {
   const detail = emptyChat();
   sendPrompt.mockClear();
+  gitMock.status = null;
   useAppStore.setState({
     settings: { ...DEFAULT_SETTINGS, locale: "ru" as const, chatMetaChips: [] },
     sessions: [detail],
@@ -165,5 +187,26 @@ describe("right click in the composer", () => {
       "/plan",
       "/ask",
     ]);
+  }, 20_000);
+
+  it("sends commit straight to the agent from a repo", async () => {
+    gitMock.status = {
+      repo: "C:/proj",
+      branch: "main",
+      dirty: true,
+      files: [],
+      additions: 1,
+      deletions: 0,
+      conflict: false,
+    };
+    const { container } = renderChat();
+    const menu = menuOf(container.querySelector("textarea")!);
+    expect(menu.textContent).toContain("commit+push");
+
+    await userEvent.click(screen.getByRole("menuitem", { name: "commit" }));
+    // The rows act, they do not write into the draft: nothing to retype or send.
+    expect(sendPrompt).toHaveBeenCalledTimes(1);
+    expect(sendPrompt.mock.calls[0]?.[0]).toBe("commit");
+    expect(document.querySelector('[role="menu"]')).toBeNull();
   }, 20_000);
 });
