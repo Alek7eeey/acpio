@@ -375,6 +375,21 @@ function planFinishNudge(locale: string, steps: PlanEntry[]): string {
 }
 
 /**
+ * What the model reads when its turn ends with a plan written and the reader
+ * never asked: `apply_plan` is the card above the input, and a plan announced in
+ * the answer without it leaves a promise with nothing to click.
+ */
+function planApprovalNudge(locale: string, path: string): string {
+  return locale === "ru"
+    ? `План записан в ${path}, но одобрения никто не просил: карточки над вводом нет, и ` +
+        "читателю нечего ответить. Вызови `apply_plan` сейчас и дождись его ответа — до " +
+        "одобрения ничего не делай."
+    : `The plan is written to ${path}, but nobody was asked to approve it: no card sits ` +
+        "above the input and the reader has nothing to answer. Call `apply_plan` now and " +
+        "wait for their answer — implement nothing until it comes.";
+}
+
+/**
  * A relay in front of a thinking model demands its own reasoning back: an
  * assistant message without a `reasoning_content` string makes the whole
  * request fail with `400 … The reasoning_content in the thinking mode must be
@@ -484,6 +499,14 @@ const THINKING_LIMIT_DEFAULT_CHARS = 3_000;
  * with its answer rather than spun in place.
  */
 const PLAN_FINISH_NUDGES = 2;
+
+/**
+ * How many times a turn is sent back to ask for the approval it forgot. Two, on
+ * the same reasoning as the finish nudges: a reminder reaches a model that lost
+ * the call, and a model that will not ask has to be let go with its answer
+ * rather than spun in place.
+ */
+const PLAN_APPROVAL_NUDGES = 2;
 
 /**
  * What "High" appends: the opposite failure to Extra low's — a model that
@@ -625,6 +648,12 @@ export class BuiltinAgent implements InProcessAgentTransport {
    */
   private planPublished = "";
   private planEpoch = 0;
+  /**
+   * How many times this session asked the reader to approve a plan. A turn that
+   * ends without the count moving forgot the call, not got a refusal — the
+   * refusal is an answer and must not be asked again (see `prompt`).
+   */
+  private planApprovals = 0;
   /** Polls `.acpio/plan.md` while the session is open — see `watchPlan`. */
   private planWatch: NodeJS.Timeout | undefined;
   /** Archive of bulky tool results for this session, when offloading is on. */
@@ -1040,6 +1069,7 @@ export class BuiltinAgent implements InProcessAgentTransport {
   private async approvePlan(state: PlanState): Promise<boolean> {
     const plan = this.planFrame(state);
     delete plan.sessionUpdate;
+    this.planApprovals += 1;
     try {
       const res = await this.rpc.request<{ outcome?: { outcome?: string } }>(
         "builtin/plan_approval",
@@ -1934,6 +1964,7 @@ export class BuiltinAgent implements InProcessAgentTransport {
       // The plan as it stands before this turn: a plan written later is this
       // turn's own promise, an older one is not (see the nudge below).
       const planEpochAtStart = this.planEpoch;
+      const planApprovalsAtStart = this.planApprovals;
       let outcome = await runTurnWithRetry(turn, retryOpts);
       if (outcome.reasoningLimitHit && !abort.signal.aborted) {
         // The fuse spent its continuations and the turn is still silent: on
@@ -1950,6 +1981,35 @@ export class BuiltinAgent implements InProcessAgentTransport {
         } finally {
           this.thinkingLimit = cap;
         }
+      }
+      // The turn that wrote a plan owes the reader a button. `apply_plan` is the
+      // card above the input, and a turn that ends without it leaves a promise
+      // nobody can answer (seen: a one-line "the card above the input approves
+      // it" over a plan no card had ever asked about). A refusal moved the count
+      // too — the reader answered, so there is nothing forgotten to remind of.
+      for (let asked = 1; !abort.signal.aborted && asked <= PLAN_APPROVAL_NUDGES; asked += 1) {
+        if (outcome.failure || outcome.reasoningLimitHit) break;
+        if (outcome.stopReason !== "end_turn" && outcome.stopReason !== "max_tokens") break;
+        if (this.planEpoch === planEpochAtStart) break;
+        if (this.planApprovals !== planApprovalsAtStart) break;
+        const plan = this.planState;
+        // Only a plan that could actually be approved: no steps or no problem
+        // and `apply_plan` would refuse the call it is being sent back for.
+        if (!plan || plan.stage !== "draft") break;
+        if (!plan.entries.length || !(plan.problem ?? "").trim()) break;
+        if (folded !== outcome) {
+          keepResponse(outcome);
+          folded = outcome;
+        }
+        this.messages = [
+          ...this.messages,
+          userContent([
+            { type: "text", text: planApprovalNudge(live.locale, this.planDisplayPath()) },
+          ]),
+        ];
+        this.persist();
+        retryOpts.note("План записан, но не одобрен: прошу модель поднять карточку одобрения.");
+        outcome = await runTurnWithRetry(turn, retryOpts);
       }
       // The turn that wrote a plan owes its steps: the panel is what the reader
       // watches, and a turn ending with half of it open is work abandoned

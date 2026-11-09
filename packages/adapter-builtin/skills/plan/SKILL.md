@@ -39,7 +39,7 @@ A plan always says the problem and its solution: the reader approves those two, 
 
 Call `apply_plan` and stop there: the panel asks the reader to approve the plan or edit it, and the turn ends with that answer. Do not implement "just the first step" while waiting, and do not start because the plan looks obvious.
 
-The answer that carries `apply_plan` says in one line that the plan is ready, and stops there. The card above the input carries the three answers: `Open plan` opens the whole plan, `Approve` starts the work, `Reject` ends the turn with nothing implemented — the reader then says what to change, and only that brings the plan back to the file. One line: the steps themselves live in the panel, not in the answer. Label them in the reader's own language.
+The answer that carries `apply_plan` says nothing about the plan being ready — no "the plan is ready", no "this card approves it": the card above the input already says the plan is ready and carries the three answers: `Open plan` opens the whole plan, `Approve` starts the work, `Reject` ends the turn with nothing implemented — the reader then says what to change, and only that brings the plan back to the file. The turn ends with the call: the steps themselves live in the panel, not in the answer.
 
 `/plan <task>` is the whole request: no questions before the plan. Where a wrong guess would silently change the goal, write the assumption into the plan instead of asking; ask only when the goal itself is undecided.
 

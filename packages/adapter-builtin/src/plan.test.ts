@@ -294,6 +294,36 @@ it("never pushes a plan the reader has not approved", async () => {
   }
 });
 
+it("sends the model back to raise the card it announced but never asked for", async () => {
+  // Seen in a real chat: the model published the plan, wrote "the card above the
+  // input approves it" and ended the turn — `apply_plan` was never called, so no
+  // card was drawn and the reader had nothing to answer.
+  const { frames, bodies, prompt, close } = await boot([
+    {
+      tool: {
+        name: "plan",
+        args: {
+          ...DOCUMENT,
+          entries: [{ content: "Fix it", status: "completed" }],
+        },
+      },
+    },
+    { text: "План готов — карточка над вводом открывает его и просит одобрения." },
+    { tool: { name: "apply_plan", args: {} } },
+    { text: "Начинаю." },
+  ]);
+  try {
+    await prompt("сделай");
+    // plan, the nudge, the call it forgot, and the answer after the approval.
+    expect(bodies).toHaveLength(4);
+    expect(lastMessageText(bodies[2] ?? {})).toContain("`apply_plan`");
+    // The card is really raised: the approval flipped the stage the panel draws.
+    expect(planUpdates(frames).some((update) => update.stage === "applying")).toBe(true);
+  } finally {
+    await close();
+  }
+});
+
 it("leaves the model alone when the reader asked for one step at a time", async () => {
   const { bodies, prompt, close } = await boot([
     { tool: { name: "plan", args: { entries: STEPS } } },
@@ -341,7 +371,9 @@ it("keeps one chat's plan out of the other chat in the same folder", async () =>
   const folder = mkdtempSync(join(tmpdir(), "acpio-plan-two-chats-"));
   const a = await boot(
     [
-      { tool: { name: "plan", args: { ...DOCUMENT, entries: STEPS } } },
+      // No `problem`: this plan is not up for approval, the file's ownership is
+      // what this test is about.
+      { tool: { name: "plan", args: { name: DOCUMENT.name, entries: STEPS } } },
       { text: "План готов." },
       // A closes its steps later on: the file moves under the other chat's watcher.
       { tool: { name: "plan", args: { entries: CLOSED } } },
