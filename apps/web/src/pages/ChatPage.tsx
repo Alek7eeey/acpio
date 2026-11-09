@@ -6144,7 +6144,9 @@ function ChatThread() {
   const insertComposerCommand = (command: "plan" | "ask") => {
     setComposerMenu(null);
     const draft = text.trim();
-    const next = `/${command}${draft ? ` ${draft}` : ""}`;
+    // The space belongs to the command, empty draft or not: the caret lands
+    // after it, so what is typed next is the argument, not the name.
+    const next = `/${command} ${draft}`;
     setText(next);
     setCursorPos(next.length);
     setComposerMultilineIfNeeded(next.includes("\n"));

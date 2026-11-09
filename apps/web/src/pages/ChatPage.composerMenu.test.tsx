@@ -146,14 +146,16 @@ describe("right click in the composer", () => {
     expect(document.querySelector('[role="menu"]')).toBeNull();
   }, 20_000);
 
-  it("writes the bare command when the draft is empty", async () => {
+  it("writes the bare command with the space its argument follows", async () => {
     const { container } = renderChat();
     const input = container.querySelector("textarea")!;
 
     menuOf(input);
     await userEvent.click(screen.getByRole("menuitem", { name: "/ask" }));
     expect(sendPrompt).not.toHaveBeenCalled();
-    expect(input.value).toBe("/ask");
+    // The caret sits after the space: typing continues the argument instead of
+    // growing the command's name.
+    expect(input.value).toBe("/ask ");
   }, 20_000);
 
   it("offers the skill commands alone", async () => {
