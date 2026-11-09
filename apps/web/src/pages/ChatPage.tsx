@@ -6152,18 +6152,19 @@ function ChatThread() {
   };
 
   /**
-   * The skill commands of the input's right-click menu write themselves into
-   * the field and stop there: a right click is a way to turn the draft into a
-   * plan, or into the questions about it, without retyping it — not a way to
-   * send anything. The draft becomes the skill's argument, the reader's Enter
-   * sends it.
+   * Every row of the input's right-click menu writes itself into the field and
+   * stops there: a right click is a way to turn the draft into a plan, into the
+   * questions about it, or into a commit of it, without retyping it — not a way
+   * to send anything. The draft becomes the command's argument, the reader's
+   * Enter sends it.
    */
-  const insertComposerCommand = (command: "plan" | "ask") => {
+  const insertComposerCommand = (command: "plan" | "ask" | GitChangesAgentCommand) => {
     setComposerMenu(null);
     const draft = text.trim();
     // The space belongs to the command, empty draft or not: the caret lands
     // after it, so what is typed next is the argument, not the name.
-    const next = `/${command} ${draft}`;
+    const name = command === "plan" || command === "ask" ? `/${command}` : command;
+    const next = `${name} ${draft}`;
     setText(next);
     setCursorPos(next.length);
     setComposerMultilineIfNeeded(next.includes("\n"));
@@ -8022,18 +8023,15 @@ function ChatThread() {
                 >
                   <MsgMenuItem label="/plan" onClick={() => insertComposerCommand("plan")} />
                   <MsgMenuItem label="/ask" onClick={() => insertComposerCommand("ask")} />
-                  {/* The git rows act instead of writing into the field: a commit is
-                      the agent's job, and the chip sends it the same way. They need
-                      a repo, or there is nothing to commit. */}
+                  {/* The git rows write into the field like the skill ones: the
+                      chip's own menu is what sends a commit straight. They need a
+                      repo, or there is nothing to commit. */}
                   {git.status?.repo
                     ? (["commit", "commit+push"] as const).map((command) => (
                         <MsgMenuItem
                           key={command}
                           label={command}
-                          onClick={() => {
-                            setComposerMenu(null);
-                            runGitChangesCommand(command);
-                          }}
+                          onClick={() => insertComposerCommand(command)}
                         />
                       ))
                     : null}

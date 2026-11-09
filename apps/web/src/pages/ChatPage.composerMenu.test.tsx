@@ -189,7 +189,7 @@ describe("right click in the composer", () => {
     ]);
   }, 20_000);
 
-  it("sends commit straight to the agent from a repo", async () => {
+  it("writes the git command into the field instead of sending it", async () => {
     gitMock.status = {
       repo: "C:/proj",
       branch: "main",
@@ -200,13 +200,15 @@ describe("right click in the composer", () => {
       conflict: false,
     };
     const { container } = renderChat();
-    const menu = menuOf(container.querySelector("textarea")!);
+    const input = container.querySelector("textarea")!;
+    await userEvent.type(input, "переписать парсер");
+    const menu = menuOf(input);
     expect(menu.textContent).toContain("commit+push");
 
-    await userEvent.click(screen.getByRole("menuitem", { name: "commit" }));
-    // The rows act, they do not write into the draft: nothing to retype or send.
-    expect(sendPrompt).toHaveBeenCalledTimes(1);
-    expect(sendPrompt.mock.calls[0]?.[0]).toBe("commit");
+    await userEvent.click(screen.getByRole("menuitem", { name: "commit+push" }));
+    // Same as the skill rows: the command waits in the field for Enter.
+    expect(sendPrompt).not.toHaveBeenCalled();
+    expect(input.value).toBe("commit+push переписать парсер");
     expect(document.querySelector('[role="menu"]')).toBeNull();
   }, 20_000);
 });
