@@ -240,7 +240,14 @@ nothing to `npm i -g` and no separate login — the only requirement is an OpenA
 endpoint it can reach.
 
 - **Settings → Built-in agent** — the providers: add as many OpenAI-compatible
-  endpoints as you like (name + URL + one or more API keys), each with its own models.
+  endpoints as you like (a name and one or more API keys), each with its own models.
+  Picking a known vendor as the provider is picking its template: the endpoint, the extra
+  headers the endpoint asks for and the request body it understands land in the row at
+  once, and those rows step out of the way — the card shows the name, the keys and the
+  spend row, and its **Advanced settings** switch brings them back already filled in for a
+  hand edit. **Other** is an endpoint of your own and comes with nothing, so every field is
+  there to type. The spend row is per key: with more than one key it puts a picker above the
+  numbers (**Key 1**, **Key 2** …), and a key is read the first time it is looked at.
   Several keys on one provider are a pool, and the row picks how it is spent:
   **Rotate every request** takes the next key for every new request, so a handful of keys
   works as one bigger quota, while **Switch on exhaustion** keeps one key in use — one
@@ -256,11 +263,11 @@ endpoint it can reach.
   (an offline server keeps the assumed 128k); a window you type yourself is an override
   that later refreshes do not replace. Only ticked models are offered in pickers; the agent
   picks the change up on save, and every model runs on the provider that owns it. Each
-  provider also takes extra HTTP headers (Settings → Built-in agent → Extra HTTP headers)
-  that are sent with every request to it — for endpoints that require their own headers,
-  e.g. `x-opencode-session`; write `{{sessionId}}` in a value and it is replaced with the
-  chat's session id at request time (rows with that placeholder are skipped when the
-  settings page probes `/models`, where no session exists).
+  provider also takes extra HTTP headers (Settings → Built-in agent → Providers →
+  Advanced settings) that are sent with every request to it — for endpoints that require
+  their own headers, e.g. `x-opencode-session`; write `{{sessionId}}` in a value and it is
+  replaced with the chat's session id at request time (rows with that placeholder are
+  skipped when the settings page probes `/models`, where no session exists).
 - Tools: `read`, `glob`, `grep`, `write`, `edit`, `bash`, `ask` and `plan`. `glob`/`grep` search the
   workspace directly (no shelling out to `find`/`grep`), `edit` takes every replacement of
   a file as one batched call and refuses an ambiguous or overlapping anchor instead of

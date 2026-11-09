@@ -563,9 +563,13 @@ export const en = {
     builtinProviderDisable: "Turn off",
     builtinProviderKind: "Provider",
     builtinProviderKindHint:
-      "Whose API this is. A known provider adds the Spend row: the limits and balance it reports itself.",
+      "Whose API this is. A known provider is a template: it fills in the endpoint, the extra headers and the request body itself, and adds the Spend row — the limits and balance it reports.",
     builtinProviderKindOther: "Other",
+    builtinAdvancedTitle: "Advanced settings",
+    builtinAdvancedHint:
+      "The endpoint, the extra headers and the extra request body come with the provider's template. Switch this on to change them by hand.",
     builtinSpendTitle: "Spend",
+    builtinSpendKey: "Key {{n}}",
     builtinSpendHint: "What this key has left — the provider's own words, as of the moment it was read.",
     builtinSpendRefresh: "Refresh",
     builtinSpendLoading: "Reading limits…",

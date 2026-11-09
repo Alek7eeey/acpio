@@ -8,6 +8,38 @@
   min-width: 0;
 }
 
+/* A pool of keys: the picker is the row's own, so the numbers below it always
+   belong to the key that is lit. */
+.keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.key {
+  padding: var(--settings-btn-pad-y) var(--settings-btn-pad-x);
+  border: 1px solid var(--border);
+  border-radius: var(--settings-control-radius);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--settings-btn-size);
+  font-weight: var(--settings-btn-weight);
+  cursor: pointer;
+}
+
+.key:hover {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--text) 25%, var(--border));
+  background: var(--bg-tertiary);
+}
+
+.keyOn {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+}
+
 .toolbar {
   display: flex;
   align-items: center;

@@ -614,8 +614,9 @@ describe("Built-in providers", () => {
     expect(cards[2]!.hasAttribute("open")).toBe(true);
   });
 
-  // The kind is what the whole spend row hangs on: a known provider prefills
-  // its endpoint and gets its limits read, an unknown one gets neither.
+  // The kind is a template: a known provider fills in its endpoint — no typing
+  // of a URL to start with, and no field to type it into — and gets its limits
+  // read; an unknown one keeps every field and gets neither.
   it("adds a provider of a chosen kind and reads its limits", async () => {
     const user = userEvent.setup();
     apiMock.builtinLimits.mockClear();
@@ -631,7 +632,10 @@ describe("Built-in providers", () => {
     const cards = providerCards(container);
     expect(cards).toHaveLength(3);
     expect(cardSummary(cards[2]!).textContent).toContain("DeepSeek");
-    // The endpoint came with the kind — no typing of a URL to start with.
+    // The template is in force: the endpoint row waits behind "Advanced
+    // settings", already filled with what the choice stands for.
+    expect(screen.queryByLabelText("DeepSeek · Endpoint")).toBeNull();
+    await user.click(screen.getByLabelText("DeepSeek · Advanced settings"));
     const url = screen.getByLabelText("DeepSeek · Endpoint") as HTMLInputElement;
     expect(url.value).toBe("https://api.deepseek.com/v1");
 
@@ -647,7 +651,7 @@ describe("Built-in providers", () => {
 
   // OpenCode bills in two plans: the choice names the plan and prefills its
   // endpoint, while the kind — and the limits API behind it — stays one.
-  it("adds OpenCode Go with its own endpoint", async () => {
+  it("adds OpenCode Go with its own endpoint and its session header", async () => {
     const user = userEvent.setup();
     apiMock.builtinLimits.mockClear();
     const { container } = renderProviders();
@@ -656,13 +660,70 @@ describe("Built-in providers", () => {
 
     const cards = providerCards(container);
     expect(cardSummary(cards[2]!).textContent).toContain("OpenCode Go");
+    await user.click(screen.getByLabelText("OpenCode Go · Advanced settings"));
     const url = screen.getByLabelText("OpenCode Go · Endpoint") as HTMLInputElement;
     expect(url.value).toBe("https://opencode.ai/zen/go/v1");
+    // The endpoint asks for the session it belongs to — the template sends it.
+    expect((screen.getByLabelText("Header 1") as HTMLInputElement).value).toBe(
+      "x-opencode-session",
+    );
+    expect((screen.getByLabelText("Value 1") as HTMLInputElement).value).toBe("{{sessionId}}");
     await waitFor(() =>
       expect(apiMock.builtinLimits).toHaveBeenCalledWith(
         expect.objectContaining({ kind: "opencode", url: "https://opencode.ai/zen/go/v1" }),
       ),
     );
+  });
+
+  // Limits are per key: a pool gets a picker, and every key is read on its own
+  // the first time it is looked at.
+  it("reads the spend of every key of a pool", async () => {
+    const user = userEvent.setup();
+    apiMock.builtinLimits.mockClear();
+    const { container } = renderProviders([
+      {
+        id: "p1",
+        name: "DeepSeek",
+        url: "https://api.deepseek.com/v1",
+        kind: "deepseek",
+        apiKeys: ["sk-1", "sk-2"],
+        models: [],
+      },
+    ]);
+
+    await user.click(cardSummary(providerCards(container)[0]!));
+
+    // Unfolding the card reads the first key of the pool.
+    await waitFor(() =>
+      expect(apiMock.builtinLimits).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "deepseek", apiKey: "sk-1" }),
+      ),
+    );
+
+    // Two keys mean a picker with one chip each; the first is lit.
+    const picker = screen.getByRole("group", { name: "Spend" });
+    const chips = within(picker).getAllByRole("button");
+    expect(chips).toHaveLength(2);
+    expect(chips[0]!.getAttribute("aria-pressed")).toBe("true");
+
+    apiMock.builtinLimits.mockResolvedValueOnce({
+      ok: true,
+      meters: [{ key: "balance", amount: 12, unit: "USD" }],
+      fetchedAt: "2026-11-07T10:05:00.000Z",
+    });
+    await user.click(within(picker).getByRole("button", { name: "Key 2" }));
+    await waitFor(() =>
+      expect(apiMock.builtinLimits).toHaveBeenCalledWith(
+        expect.objectContaining({ apiKey: "sk-2" }),
+      ),
+    );
+    // The numbers on screen are the second key's, not the first one's.
+    expect(await screen.findByText("12 USD")).toBeTruthy();
+
+    // Each key keeps its own snapshot: going back costs no second read.
+    apiMock.builtinLimits.mockClear();
+    await user.click(within(picker).getByRole("button", { name: "Key 1" }));
+    expect(apiMock.builtinLimits).not.toHaveBeenCalled();
   });
 
   it("gives the plain endpoint no spend row at all", async () => {
@@ -675,7 +736,42 @@ describe("Built-in providers", () => {
 
     await addProvider(user, "Other");
     expect(screen.queryByText("Unnamed provider 3 · Spend")).toBeNull();
+    // No template means nothing to hide: the endpoint is there to be typed.
+    expect(screen.getByLabelText("Unnamed provider 3 · Endpoint")).toBeTruthy();
+    expect(screen.queryByLabelText("Unnamed provider 3 · Advanced settings")).toBeNull();
     expect(apiMock.builtinLimits).not.toHaveBeenCalled();
+  });
+
+  // Picking a vendor on an existing row is picking its template: the rows the
+  // template fills in go away, and switching back to "Other" brings them back.
+  it("hides the rows a template fills and shows them again on demand", async () => {
+    const user = userEvent.setup();
+    const { container } = renderProviders();
+    // Both cards sit in the DOM (a folded `<details>` keeps its body), so the
+    // kind picker is read out of the card being edited.
+    const card = providerCards(container)[1]!;
+    await user.click(cardSummary(card));
+
+    // A row entered by hand: its kind is "Other", so nothing hides its rows.
+    expect(screen.getByLabelText("OpenRouter · Endpoint")).toBeTruthy();
+    expect(screen.queryByLabelText("OpenRouter · Advanced settings")).toBeNull();
+
+    await user.click(within(card).getByRole("button", { name: "Other" }));
+    await user.click(screen.getByRole("option", { name: "Moonshot" }));
+
+    // The choice filled the endpoint in and put the row out of the way.
+    expect(screen.queryByLabelText("OpenRouter · Endpoint")).toBeNull();
+    await user.click(screen.getByLabelText("OpenRouter · Advanced settings"));
+    const url = screen.getByLabelText("OpenRouter · Endpoint") as HTMLInputElement;
+    expect(url.value).toBe("https://api.moonshot.ai/v1");
+
+    // Back to an endpoint of its own: every field returns, nothing is lost.
+    await user.click(within(card).getByRole("button", { name: "Moonshot" }));
+    await user.click(screen.getByRole("option", { name: "Other" }));
+    expect(screen.queryByLabelText("OpenRouter · Advanced settings")).toBeNull();
+    expect((screen.getByLabelText("OpenRouter · Endpoint") as HTMLInputElement).value).toBe(
+      "https://api.moonshot.ai/v1",
+    );
   });
 
   // A search hunts for single rows, which live inside the folded cards: the

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { BuiltinHeaderConfig, BuiltinLimitMeter } from "@acpio/shared";
+import { normalizeBuiltinKeyList } from "@acpio/shared";
 import { api } from "../lib/api";
 import { useT } from "../lib/i18n";
 import styles from "./BuiltinProviderLimits.module.css";
@@ -24,11 +25,21 @@ function moment(value: string): string {
   return Number.isNaN(at.getTime()) ? value : at.toLocaleString();
 }
 
+/** What one key answered when it was asked — a quota is a moment, not a state. */
+interface KeySnapshot {
+  meters: BuiltinLimitMeter[];
+  fetchedAt: string | null;
+  error: string | null;
+}
+
 /**
- * What one key has left, read from the provider itself (Settings → Built-in
+ * What a key has left, read from the provider itself (Settings → Built-in
  * agent → Providers → the spend row). A snapshot, not a chart: it is read when
- * the card is first opened, on demand after that, and it says when it was read
- * — a quota is true for a moment, and this row never pretends otherwise.
+ * the key is first looked at, on demand after that, and it says when it was
+ * read — a quota is true for a moment, and this row never pretends otherwise.
+ *
+ * Limits are per key, so a pool gets a picker: every key keeps its own
+ * snapshot, and switching to a key reads it the first time.
  *
  * Only a provider of a known kind renders this at all: an endpoint we know
  * nothing about has no limits API to ask, so it gets no row (see
@@ -37,76 +48,110 @@ function moment(value: string): string {
 export function BuiltinProviderLimits({
   kind,
   endpointUrl,
-  apiKey,
+  apiKeys,
   headers,
   open,
 }: {
   kind: string;
   endpointUrl: string;
-  /** The pool's first key — reading limits spends no tokens, so one is enough. */
-  apiKey: string;
+  /** The provider's key pool, in the order its key fields show them. */
+  apiKeys: string[];
   headers?: BuiltinHeaderConfig[];
   /** The card is unfolded: nothing is asked for a provider nobody is looking at. */
   open: boolean;
 }) {
   const t = useT();
-  const [meters, setMeters] = useState<BuiltinLimitMeter[]>([]);
-  const [fetchedAt, setFetchedAt] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [asked, setAsked] = useState(false);
+  const pool = normalizeBuiltinKeyList(apiKeys);
+  const [snapshots, setSnapshots] = useState<Record<string, KeySnapshot>>({});
+  const [picked, setPicked] = useState("");
+  const [loadingKey, setLoadingKey] = useState<string | null>(null);
 
-  const load = async () => {
-    setLoading(true);
-    setError(null);
+  // The picked key while it is still in the pool, the first one otherwise: a
+  // key deleted from the list must not leave the row pointing at nothing.
+  const shown = pool.includes(picked) ? picked : (pool[0] ?? "");
+  const snapshot = snapshots[shown];
+  const loading = loadingKey === shown;
+
+  const load = async (apiKey: string) => {
+    setLoadingKey(apiKey);
+    let next: KeySnapshot;
     try {
       const res = await api.builtinLimits({ kind, url: endpointUrl, apiKey, headers });
-      if (res.ok) {
-        setMeters(res.meters);
-        setFetchedAt(res.fetchedAt);
-      } else {
-        setMeters([]);
-        setFetchedAt(null);
-        setError(res.error);
-      }
+      next = res.ok
+        ? { meters: res.meters, fetchedAt: res.fetchedAt, error: null }
+        : { meters: [], fetchedAt: null, error: res.error };
     } catch (err) {
-      setMeters([]);
-      setFetchedAt(null);
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setAsked(true);
-      setLoading(false);
+      next = {
+        meters: [],
+        fetchedAt: null,
+        error: err instanceof Error ? err.message : String(err),
+      };
     }
+    setSnapshots((prev) => ({ ...prev, [apiKey]: next }));
+    setLoadingKey((current) => (current === apiKey ? null : current));
   };
 
   /**
-   * Read once, when the card is first unfolded — the endpoint and the key may
+   * Read once, when the card is first unfolded — the endpoint and the keys may
    * still be typing, and a refresh is one click away after that.
    */
-  const autoFetched = useRef(false);
+  const autoRead = useRef(false);
   useEffect(() => {
-    if (!open || autoFetched.current || !endpointUrl.trim()) return;
-    autoFetched.current = true;
-    void load();
+    if (!open || autoRead.current || !endpointUrl.trim()) return;
+    autoRead.current = true;
+    void load(pool[0] ?? "");
   }, [open, endpointUrl]);
+
+  const pick = (apiKey: string) => {
+    setPicked(apiKey);
+    if (!snapshots[apiKey]) void load(apiKey);
+  };
 
   return (
     <div className={styles.limits}>
+      {/* One key needs no picker; a pool does — each key has its own quota and
+          the row shows one of them at a time. */}
+      {pool.length > 1 ? (
+        <div className={styles.keys} role="group" aria-label={t("settings.builtinSpendTitle")}>
+          {pool.map((apiKey, index) => {
+            const on = apiKey === shown;
+            return (
+              <button
+                key={apiKey}
+                type="button"
+                className={`${styles.key}${on ? ` ${styles.keyOn}` : ""}`}
+                aria-pressed={on}
+                onClick={() => pick(apiKey)}
+              >
+                {t("settings.builtinSpendKey", { n: index + 1 })}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+
       <div className={styles.toolbar}>
         <span className={styles.stamp}>
-          {fetchedAt ? t("settings.builtinSpendFetchedAt", { time: moment(fetchedAt) }) : ""}
+          {snapshot?.fetchedAt
+            ? t("settings.builtinSpendFetchedAt", { time: moment(snapshot.fetchedAt) })
+            : ""}
         </span>
-        <button type="button" className={styles.btn} onClick={() => void load()} disabled={loading}>
+        <button
+          type="button"
+          className={styles.btn}
+          onClick={() => void load(shown)}
+          disabled={loading}
+        >
           {loading ? t("settings.builtinSpendLoading") : t("settings.builtinSpendRefresh")}
         </button>
       </div>
 
-      {error ? <p className={styles.error}>{error}</p> : null}
-      {!error && asked && !loading && meters.length === 0 ? (
+      {snapshot?.error ? <p className={styles.error}>{snapshot.error}</p> : null}
+      {snapshot && !snapshot.error && !loading && snapshot.meters.length === 0 ? (
         <p className={styles.note}>{t("settings.builtinSpendEmpty")}</p>
       ) : null}
 
-      {meters.map((meter, index) => {
+      {(snapshot?.meters ?? []).map((meter, index) => {
         // A pair of amounts and a percent are both a bar; a lone amount (a
         // wallet) is a number with nothing to compare it to.
         const spent =

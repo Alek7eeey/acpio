@@ -1648,9 +1648,18 @@ export const BUILTIN_PROVIDER_KINDS: readonly BuiltinProviderKind[] = [
 export const BUILTIN_PROVIDER_KIND_DEFAULT: BuiltinProviderKind = "other";
 
 /**
+ * The header OpenCode's endpoints ask for: the session the request belongs to.
+ * Sent as is elsewhere, so the chat id goes in at request time.
+ */
+const OPENCODE_SESSION_HEADERS: readonly BuiltinHeaderConfig[] = [
+  { name: "x-opencode-session", value: "{{sessionId}}" },
+];
+
+/**
  * What the add-provider picker offers and what a new row starts as: the vendor
- * name it is stored under and the endpoint its models and limits live behind.
- * Everything else (keys, models, headers) stays the user's to fill.
+ * name it is stored under, the endpoint its models and limits live behind, and
+ * the extra headers and body the endpoint asks for. Keys and models stay the
+ * user's to fill.
  */
 export interface BuiltinProviderPreset {
   /**
@@ -1664,18 +1673,29 @@ export interface BuiltinProviderPreset {
   name: string;
   /** Endpoint a provider of this choice starts with (`""` for other). */
   url: string;
+  /** Extra headers the endpoint asks for; absent = none. */
+  headers?: readonly BuiltinHeaderConfig[];
+  /** Extra request-body JSON the endpoint understands; absent = none. */
+  body?: string;
 }
 
 export const BUILTIN_PROVIDER_PRESETS: readonly BuiltinProviderPreset[] = [
   // OpenCode bills in two. The Go subscription metres rolling/weekly/monthly
   // windows and serves them off the go/ base; the plain Zen base is
   // pay-as-you-go, and the limits API is the same one.
-  { id: "opencode-go", kind: "opencode", name: "OpenCode Go", url: "https://opencode.ai/zen/go/v1" },
+  {
+    id: "opencode-go",
+    kind: "opencode",
+    name: "OpenCode Go",
+    url: "https://opencode.ai/zen/go/v1",
+    headers: OPENCODE_SESSION_HEADERS,
+  },
   {
     id: "opencode-zen",
     kind: "opencode",
     name: "OpenCode Zen",
     url: "https://opencode.ai/zen/v1",
+    headers: OPENCODE_SESSION_HEADERS,
   },
   { id: "deepseek", kind: "deepseek", name: "DeepSeek", url: "https://api.deepseek.com/v1" },
   {
@@ -1687,6 +1707,21 @@ export const BUILTIN_PROVIDER_PRESETS: readonly BuiltinProviderPreset[] = [
   { id: "moonshot", kind: "moonshot", name: "Moonshot", url: "https://api.moonshot.ai/v1" },
   { id: "other", kind: "other", name: "", url: "" },
 ];
+
+/**
+ * The template a kind stands for (Settings → Built-in agent → Providers): what
+ * choosing that vendor fills in — the endpoint, the headers it asks for and the
+ * body it understands. `null` for `"other"`, which is an endpoint we know
+ * nothing about, so every field stays the user's to type.
+ *
+ * The first choice of the vendor is the one applied (OpenCode's Go plan for
+ * OpenCode): a plan is a row's own business, the vendor is what the kind names.
+ */
+export function builtinProviderTemplate(kind: unknown): BuiltinProviderPreset | null {
+  const vendor = normalizeBuiltinProviderKind(kind);
+  if (vendor === BUILTIN_PROVIDER_KIND_DEFAULT) return null;
+  return BUILTIN_PROVIDER_PRESETS.find((preset) => preset.kind === vendor) ?? null;
+}
 
 /**
  * What the kind picker of an existing row names each vendor. Brand names, so

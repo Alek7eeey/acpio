@@ -25,6 +25,7 @@ import {
   BUILTIN_PROVIDER_KIND_NAMES,
   BUILTIN_PROVIDER_KINDS,
   BUILTIN_PROVIDER_PRESETS,
+  builtinProviderTemplate,
   hasBuiltinProviderLimits,
   normalizeBuiltinProviderKind,
   type BuiltinSubagentsSetting,
@@ -1777,6 +1778,12 @@ export function SettingsPage() {
    * any of the rows.
    */
   const [openProviderCards, setOpenProviderCards] = useState<string[]>([]);
+  /**
+   * Providers whose advanced rows (endpoint, headers, body) are shown: a
+   * known kind brings its own template, so those rows stay out of the way
+   * until the user asks for them. A view, not a setting — like the fold above.
+   */
+  const [advancedProviderCards, setAdvancedProviderCards] = useState<string[]>([]);
   /** The add-provider chooser is open: the kind decides the name and endpoint. */
   const [addProviderOpen, setAddProviderOpen] = useState(false);
   const providerSearchActive = settingsQuery.trim().length > 0;
@@ -3669,6 +3676,22 @@ export function SettingsPage() {
                         : [...prev, provider.id]
                       : prev.filter((id) => id !== provider.id),
                   );
+                // A known kind brings its template: the endpoint, the headers
+                // it asks for and the body it understands are filled in, so
+                // the rows below hide behind "Advanced settings" — a search
+                // shows them, since the hit may be in one of them.
+                const template = builtinProviderTemplate(provider.kind);
+                const advancedOpen = advancedProviderCards.includes(provider.id);
+                // No template, nothing is filled in — so nothing is hidden.
+                const advanced = !template || providerSearchActive || advancedOpen;
+                const setAdvanced = (next: boolean) =>
+                  setAdvancedProviderCards((prev) =>
+                    next
+                      ? prev.includes(provider.id)
+                        ? prev
+                        : [...prev, provider.id]
+                      : prev.filter((id) => id !== provider.id),
+                  );
                 return (
                   <details
                     key={provider.id}
@@ -3747,9 +3770,50 @@ export function SettingsPage() {
                                   ? t("settings.builtinProviderKindOther")
                                   : BUILTIN_PROVIDER_KIND_NAMES[kind],
                             }))}
-                            onChange={(value) => update({ kind: value as BuiltinProviderKind })}
+                            onChange={(value) => {
+                              const kind = value as BuiltinProviderKind;
+                              const next = builtinProviderTemplate(kind);
+                              // Choosing a template fills what it stands for;
+                              // an endpoint we know nothing about ("other")
+                              // keeps whatever the row already holds.
+                              update(
+                                next
+                                  ? {
+                                      kind,
+                                      url: next.url,
+                                      ...(next.headers
+                                        ? { headers: next.headers.map((row) => ({ ...row })) }
+                                        : {}),
+                                      ...(next.body !== undefined ? { body: next.body } : {}),
+                                    }
+                                  : { kind },
+                              );
+                            }}
                           />
                         </SettingRow>
+                        {/* Only a template has something to hide: with the
+                            fields already filled in, the row is here for the
+                            reader who wants to change one of them. */}
+                        {template ? (
+                          <SettingRow
+                            layout="stack"
+                            label={`${displayName} · ${t("settings.builtinAdvancedTitle")}`}
+                            hint={t("settings.builtinAdvancedHint")}
+                            terms={[
+                              t("settings.builtinAdvancedTitle"),
+                              t("settings.builtinAdvancedHint"),
+                              t("settings.builtinUrlTitle"),
+                              t("settings.builtinHeadersTitle"),
+                              t("settings.builtinBodyTitle"),
+                            ]}
+                          >
+                            <Toggle
+                              checked={advancedOpen}
+                              onChange={setAdvanced}
+                              label={`${displayName} · ${t("settings.builtinAdvancedTitle")}`}
+                            />
+                          </SettingRow>
+                        ) : null}
                         <SettingRow
                           layout="stack"
                           label={nameLabel}
@@ -3765,22 +3829,24 @@ export function SettingsPage() {
                             aria-label={nameLabel}
                           />
                         </SettingRow>
-                        <SettingRow
-                          layout="stack"
-                          label={urlLabel}
-                          hint={t("settings.builtinUrlHint")}
-                          terms={[provider.url]}
-                        >
-                          <input
-                            type="text"
-                            autoComplete="off"
-                            spellCheck={false}
-                            value={provider.url}
-                            onChange={(e) => update({ url: e.target.value })}
-                            placeholder="https://api.openai.com/v1"
-                            aria-label={urlLabel}
-                          />
-                        </SettingRow>
+                        {advanced ? (
+                          <SettingRow
+                            layout="stack"
+                            label={urlLabel}
+                            hint={t("settings.builtinUrlHint")}
+                            terms={[provider.url]}
+                          >
+                            <input
+                              type="text"
+                              autoComplete="off"
+                              spellCheck={false}
+                              value={provider.url}
+                              onChange={(e) => update({ url: e.target.value })}
+                              placeholder="https://api.openai.com/v1"
+                              aria-label={urlLabel}
+                            />
+                          </SettingRow>
+                        ) : null}
                         <SettingRow
                           layout="stack"
                           label={keyLabel}
@@ -3849,41 +3915,45 @@ export function SettingsPage() {
                             <BuiltinProviderLimits
                               kind={normalizeBuiltinProviderKind(provider.kind)}
                               endpointUrl={provider.url}
-                              // Reading limits spends no tokens, so the pool's
-                              // first key is the one that answers.
-                              apiKey={keys[0] ?? ""}
+                              // Limits are per key: the row lets the user pick
+                              // which one of the pool it reads.
+                              apiKeys={keys}
                               headers={provider.headers}
                               open={open}
                             />
                           </SettingRow>
                         ) : null}
-                        <SettingRow
-                          layout="stack"
-                          label={`${displayName} · ${t("settings.builtinHeadersTitle")}`}
-                          hint={t("settings.builtinHeadersHint", { sessionId: "{{sessionId}}" })}
-                          terms={[provider.name]}
-                        >
-                          <BuiltinHeadersEditor
-                            value={provider.headers ?? []}
-                            onChange={(headers) => update({ headers })}
-                          />
-                        </SettingRow>
-                        <SettingRow
-                          layout="stack"
-                          label={`${displayName} · ${t("settings.builtinBodyTitle")}`}
-                          hint={t("settings.builtinBodyHint")}
-                          terms={[provider.name, t("settings.builtinBodyTitle")]}
-                        >
-                          <textarea
-                            className={styles.mcpFilesInput}
-                            rows={3}
-                            spellCheck={false}
-                            value={provider.body ?? ""}
-                            onChange={(e) => update({ body: e.target.value })}
-                            aria-label={`${displayName} · ${t("settings.builtinBodyTitle")}`}
-                            placeholder={'{"thinking":{"type":"disabled"}}'}
-                          />
-                        </SettingRow>
+                        {advanced ? (
+                          <SettingRow
+                            layout="stack"
+                            label={`${displayName} · ${t("settings.builtinHeadersTitle")}`}
+                            hint={t("settings.builtinHeadersHint", { sessionId: "{{sessionId}}" })}
+                            terms={[provider.name]}
+                          >
+                            <BuiltinHeadersEditor
+                              value={provider.headers ?? []}
+                              onChange={(headers) => update({ headers })}
+                            />
+                          </SettingRow>
+                        ) : null}
+                        {advanced ? (
+                          <SettingRow
+                            layout="stack"
+                            label={`${displayName} · ${t("settings.builtinBodyTitle")}`}
+                            hint={t("settings.builtinBodyHint")}
+                            terms={[provider.name, t("settings.builtinBodyTitle")]}
+                          >
+                            <textarea
+                              className={styles.mcpFilesInput}
+                              rows={3}
+                              spellCheck={false}
+                              value={provider.body ?? ""}
+                              onChange={(e) => update({ body: e.target.value })}
+                              aria-label={`${displayName} · ${t("settings.builtinBodyTitle")}`}
+                              placeholder={'{"thinking":{"type":"disabled"}}'}
+                            />
+                          </SettingRow>
+                        ) : null}
                         <SettingRow
                           layout="stack"
                           label={modelsLabel}
@@ -4014,6 +4084,12 @@ export function SettingsPage() {
                                 url: preset.url,
                                 apiKeys: [],
                                 models: [],
+                                // The choice is a template: its headers and
+                                // body are already the row's own.
+                                ...(preset.headers
+                                  ? { headers: preset.headers.map((row) => ({ ...row })) }
+                                  : {}),
+                                ...(preset.body !== undefined ? { body: preset.body } : {}),
                                 // An absent kind is "other", so it is not stored.
                                 ...(preset.kind === "other" ? {} : { kind: preset.kind }),
                               },

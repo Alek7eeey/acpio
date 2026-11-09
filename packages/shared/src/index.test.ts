@@ -40,6 +40,7 @@ import {
   parseBuiltinBody,
   BUILTIN_PROVIDER_KINDS,
   BUILTIN_PROVIDER_PRESETS,
+  builtinProviderTemplate,
 } from "@acpio/shared";
 
 describe("parseModelWire", () => {
@@ -1247,6 +1248,21 @@ describe("BuiltinProviderKind", () => {
       expect(preset.name).not.toBe("");
       expect(preset.url.startsWith("https://")).toBe(true);
     }
+  });
+
+  // Choosing a vendor is choosing its template: the endpoint, the headers the
+  // endpoint asks for and the body it understands land in the row at once.
+  it("fills a row with the template of its kind", () => {
+    expect(builtinProviderTemplate("opencode")).toMatchObject({
+      url: "https://opencode.ai/zen/go/v1",
+      headers: [{ name: "x-opencode-session", value: "{{sessionId}}" }],
+    });
+    expect(builtinProviderTemplate("deepseek")?.url).toBe("https://api.deepseek.com/v1");
+    // Nothing to fill in for a vendor that asks for nothing beyond its base,
+    // and no template at all for an endpoint we know nothing about.
+    expect(builtinProviderTemplate("moonshot")?.body).toBeUndefined();
+    expect(builtinProviderTemplate("other")).toBeNull();
+    expect(builtinProviderTemplate(undefined)).toBeNull();
   });
 });
 
