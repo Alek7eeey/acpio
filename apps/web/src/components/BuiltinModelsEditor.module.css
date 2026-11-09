@@ -128,8 +128,13 @@
   list-style: none;
   margin: 0;
   padding: 0;
-  max-height: min(340px, 50vh);
-  overflow: auto;
+  /* No max-height/overflow: the list used to be a scroller of its own
+     (min(340px, 50vh)) inside the settings page's scroller, so a wheel over it
+     scrolled the catalog instead of the page — and the page stopped a couple of
+     hundred pixels short of its bottom, leaving «Добавить провайдера» and
+     «Сохранить» out of reach until the whole catalog had been scrolled through.
+     One scroller per page: this list is part of the page's own scroll, so the
+     bottom of the page is always the bottom of its content. */
   border: 1px solid var(--border-soft);
   border-radius: var(--settings-control-radius);
   background: var(--surface);
