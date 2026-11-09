@@ -403,6 +403,27 @@
   font-weight: 700;
 }
 
+/* Laid out to fit the column it is given — a plan is read in a panel, and a
+   table that scrolls sideways there is a table nobody finishes reading. The
+   cells break; the wrapper never asks for more room than it has. */
+.fitWidth .tableWrap {
+  overflow-x: hidden;
+}
+
+.fitWidth .th {
+  white-space: normal;
+}
+
+.fitWidth .th,
+.fitWidth .td {
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+.fitWidth .codeBlock {
+  overflow: hidden;
+}
+
 @media (max-width: 899px) {
   .codePre {
     max-height: none;

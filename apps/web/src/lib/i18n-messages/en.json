@@ -1386,6 +1386,8 @@
     "pacingStep": "One at a time",
     "progress": "{{done}} of {{total}}",
     "edit": "Edit plan",
+    "expand": "Expand to full screen",
+    "collapse": "Exit full screen",
     "save": "Save",
     "editHint": "The plan file as it is on disk: the frontmatter, the steps and the plan."
   },

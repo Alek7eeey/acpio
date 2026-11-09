@@ -303,6 +303,17 @@ export function systemPrompt(
           ),
         ]
       : []),
+    // Numbers are the one thing prose is worst at: both the chat and the plan
+    // draw a table and a `chart` block, so the reader compares instead of
+    // reading a list of figures.
+    t(
+      "Numbers the reader has to compare belong in a Markdown table, or in a ```chart block " +
+        'carrying JSON — {"type":"bar"|"line"|"pie","title":"…","data":[{"label":"…","value":1}]} — ' +
+        "which the chat and the plan draw.",
+      "Числа, которые читателю надо сравнить, — таблица Markdown или блок ```chart с JSON " +
+        '({"type":"bar"|"line"|"pie","title":"…","data":[{"label":"…","value":1}]}), ' +
+        "его рисуют и чат, и план.",
+    ),
     "",
     // Four laws that hold whatever the task is: everything narrower belongs to
     // a skill, so a skill can never argue with a rule that already answered its

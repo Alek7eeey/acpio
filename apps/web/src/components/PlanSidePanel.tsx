@@ -13,7 +13,7 @@ import styles from "./PlanSidePanel.module.css";
 
 const WIDTH_KEY = "acpio.planPanelWidth.v1";
 const WIDTH_MIN = 280;
-const WIDTH_MAX = 720;
+const WIDTH_MAX = 1100;
 const WIDTH_DEFAULT = 380;
 
 function readStoredWidth() {
@@ -67,6 +67,9 @@ export function PlanSidePanel({
   const t = useT();
   const [width, setWidth] = useState(readStoredWidth);
   const [dragging, setDragging] = useState(false);
+  // Full screen is a reading mode of its own: the plan takes the whole window
+  // and the chat underneath stops stealing the width the panel needs.
+  const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [busyEdit, setBusyEdit] = useState(false);
@@ -101,8 +104,9 @@ export function PlanSidePanel({
     const onMove = (e: PointerEvent) => {
       const drag = dragRef.current;
       if (!drag) return;
-      // Dragging left grows the right panel.
-      const max = Math.min(WIDTH_MAX, Math.floor(window.innerWidth * 0.55));
+      // Dragging left grows the right panel — up to a fifth of the window still
+      // left for the chat.
+      const max = Math.min(WIDTH_MAX, Math.floor(window.innerWidth * 0.8));
       const next = drag.startWidth - (e.clientX - drag.startX);
       setWidth(Math.min(max, Math.max(WIDTH_MIN, next)));
     };
@@ -119,6 +123,17 @@ export function PlanSidePanel({
       window.removeEventListener("pointercancel", onUp);
     };
   }, [dragging]);
+
+  // Escape leaves the full-screen mode and nothing else: the panel itself stays
+  // where it was, the way a reader who just wanted the chat back expects.
+  useEffect(() => {
+    if (!expanded) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setExpanded(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [expanded]);
 
   useEffect(() => {
     if (!dragging) return;
@@ -197,11 +212,11 @@ export function PlanSidePanel({
 
   return (
     <aside
-      className={`${styles.panel}${fillPane ? ` ${styles.panelFill}` : ""} ${dragging ? styles.resizing : ""}`}
+      className={`${styles.panel}${fillPane ? ` ${styles.panelFill}` : ""}${expanded ? ` ${styles.panelExpanded}` : ""} ${dragging ? styles.resizing : ""}`}
       aria-label={t("planPanel.title")}
       style={{ ["--plan-panel-width"]: `${width}px` } as CSSProperties}
     >
-      {!fillPane ? (
+      {!fillPane && !expanded ? (
       <div
         className={styles.splitter}
         onPointerDown={onSplitterDown}
@@ -226,6 +241,34 @@ export function PlanSidePanel({
           ) : null}
         </div>
         <div className={styles.headerActions}>
+          <button
+            type="button"
+            className={styles.expandBtn}
+            aria-pressed={expanded}
+            onClick={() => setExpanded((prev) => !prev)}
+            aria-label={t(expanded ? "planPanel.collapse" : "planPanel.expand")}
+            title={t(expanded ? "planPanel.collapse" : "planPanel.expand")}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+              {expanded ? (
+                <path
+                  d="M9 4v5H4M15 20v-5h5M4 9l5-5M20 15l-5 5"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              ) : (
+                <path
+                  d="M14 4h6v6M20 4l-6 6M10 20H4v-6M4 20l6-6"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              )}
+            </svg>
+          </button>
           {canEdit && !editing ? (
             <button
               type="button"

@@ -3,7 +3,7 @@
   position: relative;
   flex: 0 0 var(--plan-panel-width);
   width: var(--plan-panel-width);
-  max-width: min(70vw, 100%);
+  max-width: min(80vw, 100%);
   min-width: 0;
   min-height: 0;
   display: flex;
@@ -32,6 +32,33 @@
 
 .panelFill .body {
   padding: 16px clamp(16px, 4vw, 48px);
+}
+
+/* Full screen: the plan takes the window, chat and all. Fixed rather than wide —
+   the panel is drawn inside the chat's column, and a column cannot be talked
+   into the rest of the screen. */
+.panelExpanded {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: none;
+  box-shadow: none;
+  animation: none;
+}
+
+.panelExpanded .body {
+  padding: 20px clamp(16px, 5vw, 72px);
+}
+
+.panelExpanded .header,
+.panelExpanded .meta,
+.panelExpanded .footer,
+.panelExpanded .footerSingle,
+.panelExpanded .footerPace {
+  padding-left: clamp(16px, 5vw, 72px);
+  padding-right: clamp(16px, 5vw, 72px);
 }
 
 .resizing {
@@ -174,7 +201,8 @@
 }
 
 .removeBtn,
-.editBtn {
+.editBtn,
+.expandBtn {
   width: 32px;
   height: 32px;
   display: grid;
@@ -197,10 +225,17 @@
   background: var(--surface);
 }
 
-.editBtn:hover:not(:disabled) {
+.editBtn:hover:not(:disabled),
+.expandBtn:hover {
   color: var(--text);
   border-color: color-mix(in srgb, var(--text-secondary) 45%, var(--border));
   background: var(--surface);
+}
+
+.expandBtn[aria-pressed="true"] {
+  color: color-mix(in srgb, var(--accent) 72%, var(--text));
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
 }
 
 .editBtn:disabled {
@@ -553,6 +588,16 @@
     border-left: none;
     box-shadow: none;
     background: color-mix(in srgb, var(--bg-secondary) 55%, var(--surface));
+  }
+
+  /* The overlay layout parks the panel inside the chat's column; full screen
+     still means the whole window, so the fixed rule comes back on top. */
+  .panelExpanded {
+    position: fixed;
+    inset: 0;
+    z-index: 70;
+    width: 100%;
+    max-width: none;
   }
 
   .splitter {

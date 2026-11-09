@@ -154,22 +154,24 @@ export function PlanApprovalBody({
       {problem ? (
         <div className={styles.planSection}>
           <div className={styles.planSectionLabel}>{t("question.planProblem")}</div>
-          <p className={styles.planOverview}>{problem}</p>
+          {/* The same body the steps are drawn in: what is broken is what the
+              reader approves, not a caption to it. */}
+          <MarkdownContent text={problem} fitWidth />
         </div>
       ) : null}
       {overview ? (
         problem ? (
           <div className={styles.planSection}>
             <div className={styles.planSectionLabel}>{t("question.planSolution")}</div>
-            <p className={styles.planOverview}>{overview}</p>
+            <MarkdownContent text={overview} fitWidth />
           </div>
         ) : (
-          <p className={styles.planOverview}>{overview}</p>
+          <MarkdownContent text={overview} fitWidth />
         )
       ) : null}
       {plan ? (
         <div className={`${styles.planMarkdown} ${scrollable ? "" : styles.planMarkdownFree}`}>
-          <MarkdownContent text={plan} />
+          <MarkdownContent text={plan} fitWidth />
         </div>
       ) : null}
       {todos.length > 0 ? (

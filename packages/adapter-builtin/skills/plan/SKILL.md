@@ -32,6 +32,7 @@ A plan always says the problem and its solution: the reader approves those two, 
 - Every step names its check — a test, a command, the thing the reader will look at. A step without one is a wish; split it or drop it.
 - The step touching the most callers goes first, while the plan is still cheap to change; name what it can break.
 - An unknown becomes its own step (read X, measure Y) instead of a guess written as a fact.
+- Numbers the reader has to compare (measurements, statistics, a summary) go in a Markdown table or a ```` ```chart ```` block of JSON: `{"type":"bar"|"line"|"pie","title":"…","data":[{"label":"…","value":1}]}`. The panel draws both, and a list of figures is not read.
 - The reasoning section says which alternatives were dropped and why one line each — that is what the reader is actually approving.
 
 ## Closing

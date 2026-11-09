@@ -91,6 +91,8 @@
   display: grid;
   gap: 12px;
   min-width: 0;
+  /* A plan is read in a column: nothing in it asks for a sideways scroll. */
+  overflow-wrap: anywhere;
 }
 
 .planTitle {
@@ -99,13 +101,6 @@
   font-weight: 750;
   letter-spacing: -0.02em;
   line-height: 1.3;
-}
-
-.planOverview {
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: 0.95rem;
-  line-height: 1.45;
 }
 
 .planMarkdown {
@@ -191,6 +186,7 @@
 
 .planTodoLabel {
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .planTodo[data-status="completed"] .planTodoLabel,

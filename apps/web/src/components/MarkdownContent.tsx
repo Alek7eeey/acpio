@@ -6,6 +6,7 @@ import { useT } from "../lib/i18n";
 import { lastPathSegment } from "../lib/pathSegments";
 import { ImageViewer, type ViewerPicture } from "./ImageViewer";
 import { toggleWrapLines, useWrapLines } from "../lib/wrapLines";
+import { ChartBlock, parseChartSpec } from "./ChartBlock";
 import hljs from "highlight.js/lib/core";
 import bash from "highlight.js/lib/languages/bash";
 import c from "highlight.js/lib/languages/c";
@@ -263,9 +264,19 @@ function WrapButton() {
   );
 }
 
-function CodeBlock({ language, code }: { language?: string; code: string }) {
+function CodeBlock({
+  language,
+  code,
+  forceWrap,
+}: {
+  language?: string;
+  code: string;
+  /** Laid out to fit a column whatever the reader's wrap setting says. */
+  forceWrap?: boolean;
+}) {
   const t = useT();
-  const wrap = useWrapLines();
+  const wrapSetting = useWrapLines();
+  const wrap = forceWrap ?? wrapSetting;
   const label = languageLabel(language) ?? t("common.code");
   const highlighted = useMemo(() => highlightCode(code, language), [code, language]);
 
@@ -274,7 +285,7 @@ function CodeBlock({ language, code }: { language?: string; code: string }) {
       <div className={styles.codeToolbar}>
         <span className={styles.codeLang}>{label}</span>
         <div className={styles.codeActions}>
-          <WrapButton />
+          {forceWrap ? null : <WrapButton />}
           <CopyButton text={code} />
         </div>
       </div>
@@ -298,6 +309,13 @@ type MarkdownContentProps = {
   className?: string;
   /** The chat whose folder a local image path is resolved against. */
   sessionId?: string | null;
+  /**
+   * Fit the width the text is given rather than its natural one: code wraps
+   * (whatever the reader's wrapping setting says) and a wide table breaks its
+   * cells instead of asking for a sideways scroll. A plan is read in a narrow
+   * column, so that is where its text lives.
+   */
+  fitWidth?: boolean;
 };
 
 function childrenToPlainText(children: ReactNode): string {
@@ -532,40 +550,54 @@ export function MarkdownImage({
   );
 }
 
-// Stable identity — a fresh `components` object every render remounts the whole tree.
-const markdownComponents: Components = {
-  p: ({ children }) => <p className={styles.paragraph}>{children}</p>,
-  ul: ({ children }) => <ul className={styles.list}>{children}</ul>,
-  ol: ({ children }) => <ol className={styles.list}>{children}</ol>,
-  li: ({ children }) => <li className={styles.listItem}>{children}</li>,
-  h1: ({ children }) => <h1 className={styles.heading}>{children}</h1>,
-  h2: ({ children }) => <h2 className={styles.heading}>{children}</h2>,
-  h3: ({ children }) => <h3 className={styles.heading}>{children}</h3>,
-  pre: ({ children }) => <>{children}</>,
-  code: ({ className: codeClass, children }) => {
-    const match = /language-([\w#+-]+)/.exec(codeClass ?? "");
-    const value = String(children).replace(/\n$/, "");
-    const isBlock = Boolean(match) || value.includes("\n");
-    if (!isBlock) {
-      return <code className={styles.inlineCode}>{children}</code>;
-    }
-    return <CodeBlock language={match?.[1]} code={value} />;
-  },
-  a: ({ href, children }) => <MarkdownLink href={href}>{children}</MarkdownLink>,
-  blockquote: ({ children }) => (
-    <blockquote className={styles.quote}>{children as ReactNode}</blockquote>
-  ),
-  table: ({ children }) => (
-    <div className={styles.tableWrap}>
-      <table className={styles.table}>{children}</table>
-    </div>
-  ),
-  thead: ({ children }) => <thead className={styles.thead}>{children}</thead>,
-  tbody: ({ children }) => <tbody>{children}</tbody>,
-  tr: ({ children }) => <tr className={styles.tr}>{children}</tr>,
-  th: ({ children }) => <th className={styles.th}>{children}</th>,
-  td: ({ children }) => <td className={styles.td}>{children}</td>,
-};
+/** Fences this renderer draws itself — anything else stays a code block. */
+function matchesChartFence(language?: string | null) {
+  const lang = normalizeLang(language);
+  return lang === "chart" || lang === "graph";
+}
+
+// Stable identity per layout mode — a fresh `components` object every render
+// remounts the whole tree.
+function makeMarkdownComponents(fitWidth: boolean): Components {
+  return {
+    p: ({ children }) => <p className={styles.paragraph}>{children}</p>,
+    ul: ({ children }) => <ul className={styles.list}>{children}</ul>,
+    ol: ({ children }) => <ol className={styles.list}>{children}</ol>,
+    li: ({ children }) => <li className={styles.listItem}>{children}</li>,
+    h1: ({ children }) => <h1 className={styles.heading}>{children}</h1>,
+    h2: ({ children }) => <h2 className={styles.heading}>{children}</h2>,
+    h3: ({ children }) => <h3 className={styles.heading}>{children}</h3>,
+    pre: ({ children }) => <>{children}</>,
+    code: ({ className: codeClass, children }) => {
+      const match = /language-([\w#+-]+)/.exec(codeClass ?? "");
+      const value = String(children).replace(/\n$/, "");
+      const isBlock = Boolean(match) || value.includes("\n");
+      if (!isBlock) {
+        return <code className={styles.inlineCode}>{children}</code>;
+      }
+      // A fence the renderer can draw is drawn; one it cannot read stays code.
+      if (matchesChartFence(match?.[1])) {
+        const spec = parseChartSpec(value);
+        if (spec) return <ChartBlock spec={spec} />;
+      }
+      return <CodeBlock language={match?.[1]} code={value} forceWrap={fitWidth} />;
+    },
+    a: ({ href, children }) => <MarkdownLink href={href}>{children}</MarkdownLink>,
+    blockquote: ({ children }) => (
+      <blockquote className={styles.quote}>{children as ReactNode}</blockquote>
+    ),
+    table: ({ children }) => (
+      <div className={styles.tableWrap}>
+        <table className={styles.table}>{children}</table>
+      </div>
+    ),
+    thead: ({ children }) => <thead className={styles.thead}>{children}</thead>,
+    tbody: ({ children }) => <tbody>{children}</tbody>,
+    tr: ({ children }) => <tr className={styles.tr}>{children}</tr>,
+    th: ({ children }) => <th className={styles.th}>{children}</th>,
+    td: ({ children }) => <td className={styles.td}>{children}</td>,
+  };
+}
 
 const remarkPlugins = [remarkGfm];
 
@@ -574,27 +606,28 @@ export const MarkdownContent = memo(function MarkdownContent({
   streaming = false,
   className,
   sessionId = null,
+  fitWidth = false,
 }: MarkdownContentProps) {
   // Render the server buffer directly. Each incoming chunk becomes visible
   // immediately; no synthetic typing or delayed catch-up animation.
   const rendered = useMemo(() => quoteImagePaths(expandSourceCitations(text)), [text]);
   // `img` closes over this chat's id, so a path in the text becomes a URL on the
-  // chat's own file route. One object per id — a fresh one on every render
-  // remounts the whole tree (see the note above markdownComponents).
+  // chat's own file route. One object per id and layout — a fresh one on every
+  // render remounts the whole tree (see the note above the builder).
   const components = useMemo<Components>(
     () => ({
-      ...markdownComponents,
+      ...makeMarkdownComponents(fitWidth),
       img: ({ src, alt }) => (
         <MarkdownImage src={typeof src === "string" ? src : ""} alt={alt} sessionId={sessionId} />
       ),
     }),
-    [sessionId],
+    [sessionId, fitWidth],
   );
   if (!text.trim()) return null;
 
   return (
     <div
-      className={`${styles.root}${streaming ? ` ${styles.streaming}` : ""}${className ? ` ${className}` : ""}`}
+      className={`${styles.root}${streaming ? ` ${styles.streaming}` : ""}${fitWidth ? ` ${styles.fitWidth}` : ""}${className ? ` ${className}` : ""}`}
     >
       <div className={styles.body}>
         <ReactMarkdown
