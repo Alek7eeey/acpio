@@ -9,6 +9,7 @@ import cookie from "@fastify/cookie";
 import websocket from "@fastify/websocket";
 import fastifyStatic from "@fastify/static";
 import { pinResolvedSessionModels, reconcileStaleSessions, repairStoredCwds } from "./services/sessions.js";
+import { seedBuiltinEffortsOnce } from "./services/builtinEffortsSeed.js";
 import { notifyBackgroundJobDone, resumeInterruptedTurns } from "./acp/sessionManager.js";
 import { setBackgroundJobDoneHandler } from "./services/backgroundJobs.js";
 import { resetBackgroundJobLogs } from "./services/bgLogs.js";
@@ -151,6 +152,16 @@ async function main() {
   } catch (err) {
     console.error("[sessions] model pin failed", err);
   }
+
+  // Effort levels for the built-in picker, filled in on their own the first
+  // time only: an update that adds the knob must not land the reader in a
+  // picker with nothing but "Default" and "Off". Later refreshes are the
+  // Settings button's job, so this pass runs once per install.
+  void seedBuiltinEffortsOnce()
+    .then((filled) => {
+      if (filled > 0) console.log(`[builtin] effort levels fetched for ${filled} provider(s)`);
+    })
+    .catch((err) => console.error("[builtin] effort seed failed", err));
 
   // Chats and folders stored in the pre-fix cwd form (a drive root written as
   // the drive-relative "C:") cannot boot any agent — rewrite them in place.

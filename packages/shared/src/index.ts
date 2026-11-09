@@ -2295,6 +2295,14 @@ export interface AppSettings {
    */
   builtinProviders: BuiltinProviderConfig[];
   /**
+   * Whether the effort levels were already fetched on their own (the first
+   * boot after they existed). One automatic attempt per install: a picker with
+   * nothing but "Default" and "Off" looks broken, and nothing tells the reader
+   * that the Settings button is what fills it. After that only "Refresh list"
+   * goes to the network.
+   */
+  builtinEffortsSeeded: boolean;
+  /**
    * Plugins added by hand in Settings → Plugins: one bundle each, no config
    * file. The config source stays the way to point at several at once; an id
    * listed in both resolves to the entry here (the most explicit wins).
@@ -2690,6 +2698,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   anthropicApiKey: "",
   openaiApiKey: "",
   builtinProviders: [],
+  builtinEffortsSeeded: false,
   pluginEntries: [],
   pluginProviders: {},
   builtinMaxOutputTokens: 16_384,

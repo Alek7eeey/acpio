@@ -478,6 +478,7 @@ describe("DEFAULT_SETTINGS", () => {
     anthropicApiKey: "",
     openaiApiKey: "",
     builtinProviders: [],
+    builtinEffortsSeeded: false,
     builtinMaxOutputTokens: 16_384,
     builtinTurnRetryAttempts: 5,
     builtinThinkingLimit: 0,

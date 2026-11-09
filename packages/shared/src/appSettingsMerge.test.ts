@@ -324,6 +324,12 @@ describe("mergeClientAppSettings", () => {
     expect(mergeClientAppSettings({ chatTreeRecentLimit: Number.NaN }).chatTreeRecentLimit).toBe(0);
   });
 
+  it("keeps the one-shot effort seed a boolean the server owns", () => {
+    expect(mergeClientAppSettings({}).builtinEffortsSeeded).toBe(false);
+    expect(mergeClientAppSettings({ builtinEffortsSeeded: true }).builtinEffortsSeeded).toBe(true);
+    expect(mergeClientAppSettings({ builtinEffortsSeeded: "yes" }).builtinEffortsSeeded).toBe(false);
+  });
+
   it("heals the built-in agent's output ceiling", () => {
     expect(mergeClientAppSettings({}).builtinMaxOutputTokens).toBe(
       DEFAULT_SETTINGS.builtinMaxOutputTokens,

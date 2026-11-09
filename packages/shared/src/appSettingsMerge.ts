@@ -546,6 +546,8 @@ export function mergeClientAppSettings(raw: unknown): AppSettings {
   // Folds a pre-provider payload into `builtinProviders` and rewrites stored
   // builtin model values to their composite form.
   normalizeBuiltinProviders(merged);
+  // Server-owned: a form submit carrying it must not reset the one-shot flag.
+  merged.builtinEffortsSeeded = partial.builtinEffortsSeeded === true;
   merged.builtinMaxOutputTokens = normalizeBuiltinMaxOutputTokens(partial.builtinMaxOutputTokens);
   merged.builtinTurnRetryAttempts = normalizeBuiltinTurnRetryAttempts(
     partial.builtinTurnRetryAttempts,
