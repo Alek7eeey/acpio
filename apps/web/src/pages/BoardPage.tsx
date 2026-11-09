@@ -2732,10 +2732,11 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
             {t("chat.colProgress")}
           </span>
         ) : null}
-        {column.anchor === "wait" && task.status === "waiting" ? (
+        {task.status === "waiting" ? (
           /* The agent asked and is standing still. Without this mark a card
              parked on a question reads exactly like one whose turn merely
-             ended — both sit in Wait until the user acts. */
+             ended — and a lane of the reader's own keeps the card where it
+             was, so the mark has to follow the status, not the lane. */
           <span className={styles.waitRow} title={t("common.waitingInput")}>
             <span className={styles.waitDot} aria-hidden />
             {t("common.waitingInput")}

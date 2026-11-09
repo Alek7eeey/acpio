@@ -419,6 +419,25 @@ describe("BoardPage custom columns", () => {
     ).toBeNull();
   });
 
+  // The mark belongs to the status, not to the lane: a card parked on a
+  // question in a lane of the reader's own says so exactly as it does in Wait.
+  it("marks a parked question in a lane of its own", async () => {
+    const question: SessionDto = {
+      ...finishedTask,
+      status: "waiting",
+    };
+    useAppStore.setState({
+      boards: [{ ...board, columns: [...defaultBoardColumns(), review] }],
+      boardSessions: [{ ...question, boardColumnId: "col-review" }],
+    });
+    const { container } = renderBoard();
+    await screen.findByText("Finished task");
+
+    const lane = container.querySelector('[data-column="col-review"]') as HTMLElement;
+    const card = lane.querySelector('[data-task-id="t2"]') as HTMLElement;
+    expect(within(card).getByText("Waiting for input")).toBeTruthy();
+  });
+
   it("places a card in another lane when it is dragged there", async () => {
     useAppStore.setState({
       boards: [{ ...board, columns: [...defaultBoardColumns(), review] }],
