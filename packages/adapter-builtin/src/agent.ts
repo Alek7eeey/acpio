@@ -174,10 +174,12 @@ const RULES: ReadonlyArray<{ id: string; text: string; ru: string }> = [
     id: "plan",
     text:
       "A plan is made in three cases only: the user asks for one, the `plan` skill is invoked " +
-      "(`/plan <task>`), or the change is large — many files, or the steps are not clear yet — " +
-      "and you say so before starting. With none of the three, do the work straight away and " +
-      "publish no plan. Otherwise the plan goes into the file `.acpio/plan.md` before the first " +
-      "step: a title, an `## Overview` of a line or two, the steps as `- [ ]` lines under " +
+      "(`/plan <task>`), or the work is genuinely large — a refactor across subsystems, a " +
+      "feature that cannot land in one turn, or steps whose order is still unknown — and you say " +
+      "so before starting. Everything else is done straight away with no plan: a bugfix or a " +
+      "small feature touching five or ten files is still small work, however many edits it " +
+      "takes. With none of the three, do the work and publish no plan. Otherwise the plan goes " +
+      "into the file `.acpio/plan.md` before the first step: a title, an `## Overview` of a line " +
       "`## Шаги` (`- [~]` while you work one, `- [x]` when it lands), then the files, the " +
       "reasoning and how it will be checked in the sections after them. Write it with the `plan` " +
       "tool, or with `write`/`edit` and then `plan` with no arguments to republish it; call " +
@@ -189,10 +191,12 @@ const RULES: ReadonlyArray<{ id: string; text: string; ru: string }> = [
       "stopped. The reader watches the right-hand panel — never repeat the plan in the answer.",
     ru:
       "План составляется только в трёх случаях: пользователь его просит, вызван скилл `plan` " +
-      "(`/plan <задача>`), или изменение крупное — много файлов либо шаги пока не ясны — и ты " +
-      "говоришь об этом до начала работы. Ни одного из трёх нет — делай работу сразу и никакого " +
-      "плана не публикуй. Иначе план идёт в файл `.acpio/plan.md` до первого шага: заголовок, " +
-      "`## Overview` в одну-две строки, шаги строками `- [ ]` под `## Шаги` (`- [~]`, пока шаг " +
+      "(`/plan <задача>`), или работа действительно крупная — рефакторинг через несколько " +
+      "подсистем, фича, которая не влезает в один ход, либо порядок шагов пока неизвестен — и ты " +
+      "говоришь об этом до начала работы. Всё остальное делается сразу и без плана: багфикс или " +
+      "мелкая фича на пять-десять файлов — это всё ещё мелкая работа, сколько бы правок она ни " +
+      "заняла. Ни одного из трёх нет — делай работу и никакого плана не публикуй. Иначе план идёт " +
+      "в файл `.acpio/plan.md` до первого шага: заголовок, `## Overview` в одну-две строки, шаги " +
       "в работе, `- [x]`, когда он закрыт), затем файлы, обоснование и способ проверки в " +
       "разделах после них. Пиши его инструментом `plan` или через `write`/`edit` и потом `plan` " +
       "без аргументов, чтобы опубликовать заново; вызывай `plan` снова, когда шаг начинается и " +

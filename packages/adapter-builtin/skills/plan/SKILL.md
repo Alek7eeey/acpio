@@ -1,6 +1,6 @@
 ---
 name: plan
-description: Plan a task before touching code — the turn ends with a plan the reader approves, not with a half-done implementation. Use for "/plan", "plan it first", "plan only", "no code yet", "break it into steps", any request to design an approach before anything is changed, or a change you judge too large to start without one.
+description: Plan a task before touching code — the turn ends with a plan the reader approves, not with a half-done implementation. Use for "/plan", "plan it first", "plan only", "no code yet", "break it into steps", any request to design an approach before anything is changed, or work genuinely too large to start without one (a refactor across subsystems, a feature that takes several turns, steps still unknown — not a bugfix or a small feature on five or ten files).
 ---
 
 # Plan
@@ -11,9 +11,9 @@ A plan is made in three cases only:
 
 - the user asks for one — "plan it first", "make a plan", "plan only";
 - the skill is invoked — `/plan <task>`;
-- you find the change large: many files, or the steps are not clear yet — and you say so before starting.
+- you find the work genuinely large: a refactor across subsystems, a feature that cannot land in one turn, or steps whose order is still unknown — and you say so before starting.
 
-With none of the three the work is done straight away and nothing goes to the panel: a plan nobody asked for is a plan the reader scrolls past.
+Everything else is done straight away with no plan: a bugfix or a small feature touching five or ten files is still small work, however many edits it takes — a plan nobody asked for is a plan the reader scrolls past.
 
 ## The turn
 

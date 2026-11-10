@@ -199,8 +199,10 @@ describe("system prompt rules", () => {
     expect(prompt).toContain("A plan is made in three cases only");
     expect(prompt).toContain("the user asks for one");
     expect(prompt).toContain("`/plan <task>`");
-    expect(prompt).toContain("many files");
+    expect(prompt).toContain("genuinely large");
+    expect(prompt).toContain("five or ten files");
     expect(prompt).toContain("publish no plan");
+    expect(build([], "", true, "ru")).toContain("пять-десять файлов");
   });
 
   it("names rules a skill's `supersedes` may refer to", () => {
