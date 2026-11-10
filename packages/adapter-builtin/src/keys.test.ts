@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { BuiltinProviderConfig } from "@acpio/shared";
-import { nextProviderKey, providerFetch, resetProviderKeyCursors } from "./keys.js";
+import {
+  nextProviderKey,
+  providerFetch,
+  resetProviderKeyCursors,
+  type KeySpendProbe,
+} from "./keys.js";
 
 const provider = (over: Partial<BuiltinProviderConfig> = {}): BuiltinProviderConfig => ({
   id: "p1",
@@ -25,6 +30,11 @@ function recorder(responses: Array<Response | (() => Response)>) {
 const ok = () => new Response("{}", { status: 200 });
 const quota = () =>
   new Response('{"error":{"message":"You exceeded your current quota"}}', { status: 429 });
+
+/** A vendor's answer per key: percent spent, or `null` for "reports no quota". */
+function spendTable(table: Record<string, number | null>): KeySpendProbe {
+  return async (_provider, apiKey) => table[apiKey] ?? null;
+}
 
 beforeEach(() => resetProviderKeyCursors());
 
@@ -85,9 +95,10 @@ describe("providerFetch", () => {
     const call = providerFetch(provider(), fetchMock);
     expect((await call("http://x/v1/chat/completions", {})).status).toBe(200);
     expect(seen).toEqual(["Bearer sk-one", "Bearer sk-two"]);
-    // A 400 that says nothing about money answers the caller as it came.
+    // A 400 that says nothing about money answers the caller as it came — on
+    // the key that still serves, since the refused one is out of the pool.
     expect((await call("http://x/v1/chat/completions", {})).status).toBe(400);
-    expect(seen[2]).toBe("Bearer sk-one");
+    expect(seen[2]).toBe("Bearer sk-two");
   });
 
   it("counts revoked and unpaid keys as spent", async () => {
@@ -134,6 +145,64 @@ describe("providerFetch", () => {
   });
 });
 
+describe("providerFetch with what the vendor reports", () => {
+  it("balances every request onto the least spent key in smart mode", async () => {
+    const { seen, fetchMock } = recorder([ok]);
+    const call = providerFetch(provider({ apiKeyMode: "smart" }), fetchMock, spendTable({
+      "sk-one": 90,
+      "sk-two": 10,
+    }));
+    for (let i = 0; i < 3; i++) await call("http://x/v1/chat/completions", { method: "POST" });
+    expect(seen).toEqual(["Bearer sk-two", "Bearer sk-two", "Bearer sk-two"]);
+  });
+
+  it("never sends a request to a key the vendor calls spent", async () => {
+    const { seen, fetchMock } = recorder([ok]);
+    const call = providerFetch(provider(), fetchMock, spendTable({ "sk-one": 100, "sk-two": 20 }));
+    for (let i = 0; i < 3; i++) await call("http://x/v1/chat/completions", { method: "POST" });
+    // Rotate order would take sk-one first; a 100 % key is stepped over instead.
+    expect(seen).toEqual(["Bearer sk-two", "Bearer sk-two", "Bearer sk-two"]);
+  });
+
+  it("falls back to the rotation when the vendor reports no quota", async () => {
+    const { seen, fetchMock } = recorder([ok]);
+    const unknowns = vi.fn(async () => null);
+    const call = providerFetch(provider({ apiKeyMode: "smart" }), fetchMock, unknowns);
+    for (let i = 0; i < 3; i++) await call("http://x/v1/chat/completions", { method: "POST" });
+    // A wallet, an unknown vendor, a failed read: nothing to compare, so the
+    // pool still spreads instead of pinning one key.
+    expect(seen).toEqual(["Bearer sk-one", "Bearer sk-two", "Bearer sk-one"]);
+  });
+
+  it("reads a key once per minute, not once per request", async () => {
+    const { fetchMock } = recorder([ok]);
+    const probe = vi.fn(spendTable({ "sk-one": 10, "sk-two": 20 }));
+    const call = providerFetch(provider({ apiKeyMode: "smart" }), fetchMock, probe);
+    for (let i = 0; i < 3; i++) await call("http://x/v1/chat/completions", { method: "POST" });
+    expect(probe).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a refused key out of the pool while another one is left", async () => {
+    const { seen, fetchMock, calls } = recorder([quota, ok]);
+    const call = providerFetch(provider({ apiKeyMode: "smart" }), fetchMock, spendTable({}));
+    expect((await call("http://x/v1/chat/completions", {})).status).toBe(200);
+    expect(seen).toEqual(["Bearer sk-one", "Bearer sk-two"]);
+    // sk-one is out of the pool for a while now, so the next request goes
+    // straight to sk-two instead of knocking and retrying again.
+    calls.mockClear();
+    await call("http://x/v1/chat/completions", {});
+    expect(calls).toHaveBeenCalledTimes(1);
+    expect(seen.at(-1)).toBe("Bearer sk-two");
+  });
+
+  it("still asks the endpoint when every key is out — its answer, not ours", async () => {
+    const { fetchMock, calls } = recorder([quota]);
+    const call = providerFetch(provider(), fetchMock, spendTable({ "sk-one": 100, "sk-two": 100 }));
+    expect((await call("http://x/v1/chat/completions", {})).status).toBe(429);
+    expect(calls).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("nextProviderKey", () => {
   it("consumes keys in rotate mode and hands out one in exhausted mode", () => {
     const rotating = provider();
@@ -145,6 +214,17 @@ describe("nextProviderKey", () => {
     const sticky = provider({ apiKeyMode: "exhausted" });
     expect(nextProviderKey(sticky)).toBe("sk-one");
     expect(nextProviderKey(sticky)).toBe("sk-one");
+  });
+
+  it("hands out the least spent key in smart mode, once it is known", async () => {
+    const { fetchMock } = recorder([ok]);
+    const call = providerFetch(provider({ apiKeyMode: "smart" }), fetchMock, spendTable({
+      "sk-one": 80,
+      "sk-two": 5,
+    }));
+    await call("http://x/v1/chat/completions", {});
+    // The reading the request took is what a title call picks its key from.
+    expect(nextProviderKey(provider({ apiKeyMode: "smart" }))).toBe("sk-two");
   });
 
   it("reads a legacy single key and comes back empty without any", () => {

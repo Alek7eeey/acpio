@@ -74,6 +74,20 @@ export {
 export { nextProviderKey, providerFetch, resetProviderKeyCursors } from "./keys.js";
 
 /**
+ * What a key has left, read from its own vendor (Settings → Built-in agent →
+ * Providers → the spend row). The pool reads the same answer to skip a key at
+ * 100 % and to balance a smart pool, so the reader is exported with it.
+ */
+export {
+  builtinKeySpentPercent,
+  fetchBuiltinProviderLimits,
+  type BuiltinLimitMeter,
+  type BuiltinLimitsErrorCode,
+  type BuiltinLimitsOptions,
+  type BuiltinLimitsResult,
+} from "./limits.js";
+
+/**
  * Built-in harness: the agent runs inside the server instead of being spawned,
  * so there is no CLI to install and no `command`/`args` to configure. Everything
  * user-facing lives in Settings → Built-in agent: one or more OpenAI-compatible

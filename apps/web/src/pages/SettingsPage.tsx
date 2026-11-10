@@ -3834,6 +3834,7 @@ export function SettingsPage() {
                             terms={[
                               t("settings.builtinKeyModeRotate"),
                               t("settings.builtinKeyModeExhausted"),
+                              t("settings.builtinKeyModeSmart"),
                             ]}
                           >
                             <div className={styles.keyModeChips}>
@@ -3841,6 +3842,7 @@ export function SettingsPage() {
                                 [
                                   ["rotate", t("settings.builtinKeyModeRotate")],
                                   ["exhausted", t("settings.builtinKeyModeExhausted")],
+                                  ["smart", t("settings.builtinKeyModeSmart")],
                                 ] as const satisfies readonly (readonly [BuiltinKeyMode, string])[]
                               ).map(([mode, label]) => {
                                 const on = normalizeBuiltinKeyMode(provider.apiKeyMode) === mode;

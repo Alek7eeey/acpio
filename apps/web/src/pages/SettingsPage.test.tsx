@@ -564,10 +564,16 @@ describe("Built-in providers", () => {
 
     const rotate = screen.getByRole("button", { name: "Rotate every request" });
     const exhaust = screen.getByRole("button", { name: "Switch on exhaustion" });
+    const smart = screen.getByRole("button", { name: "Smart: least spent" });
     // A list of keys is there to be spread, so that is what it defaults to.
     expect(rotate.getAttribute("aria-pressed")).toBe("true");
     await user.click(exhaust);
     expect(exhaust.getAttribute("aria-pressed")).toBe("true");
+    // The third mode is the balance by what each key has spent.
+    await user.click(smart);
+    expect(smart.getAttribute("aria-pressed")).toBe("true");
+    expect(exhaust.getAttribute("aria-pressed")).toBe("false");
+    await user.click(exhaust);
 
     await user.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(apiMock.updateSettings).toHaveBeenCalled());
@@ -579,6 +585,15 @@ describe("Built-in providers", () => {
       apiKeys: ["sk-1", "sk-2"],
       apiKeyMode: "exhausted",
     });
+
+    // And the smart mode is saved as it is picked.
+    await user.click(smart);
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(apiMock.updateSettings).toHaveBeenCalled());
+    const smartPatch = apiMock.updateSettings.mock.calls.at(-1)?.[0] as {
+      builtinProviders?: Array<{ id: string; apiKeyMode?: string }>;
+    };
+    expect(smartPatch.builtinProviders?.[0]).toMatchObject({ id: "p1", apiKeyMode: "smart" });
   });
 
   // The leaf used to paint the name, endpoint, key, headers and model rows of

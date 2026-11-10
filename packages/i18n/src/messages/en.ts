@@ -590,9 +590,10 @@ export const en = {
     builtinKeysRemove: "Remove key",
     builtinKeyMode: "Key mode",
     builtinKeyModeHint:
-      "Rotate: every new request takes the next key, so a set of keys works as one bigger quota. Switch on exhaustion: the same key stays in use until the endpoint answers that it is spent (401/402/403/429) — then the same request is resent with the next key.",
+      "Rotate: every new request takes the next key, so a set of keys works as one bigger quota. Switch on exhaustion: the same key stays in use until the endpoint answers that it is spent (401/402/403/429) — then the same request is resent with the next key. Smart: every request goes to the key whose quota is least spent, as the provider itself reports it. A key that has used 100% of its quota gets no requests and answers no error.",
     builtinKeyModeRotate: "Rotate every request",
     builtinKeyModeExhausted: "Switch on exhaustion",
+    builtinKeyModeSmart: "Smart: least spent",
     builtinHeadersTitle: "Extra HTTP headers",
     builtinHeadersHint:
       "Sent with every agent request to this provider. {{sessionId}} in a value is replaced with the chat's session id; rows carrying it are skipped for the model-list probe.",

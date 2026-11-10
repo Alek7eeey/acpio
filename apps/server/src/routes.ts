@@ -6,8 +6,9 @@ import { and, eq } from "drizzle-orm";
 import { db } from "./db/client.js";
 import { messages, messageParts, sessions } from "./db/schema.js";
 import { defaultSessionTitle, errorMessage } from "@acpio/i18n";
-import type { BuiltinProviderKind } from "@acpio/shared";
-import { BUILD_INFO, EDITOR_NAV_PLACEMENTS, EDITOR_SPLITS, EDITOR_THEMES, EDITOR_TOOL_SOURCES, FILE_OPEN_TARGETS, CONSOLE_TERMINAL_LIMITS, CUSTOM_AGENT_MAX, BUILTIN_MAX_OUTPUT_TOKENS_MAX, BUILTIN_TURN_RETRY_ATTEMPTS_MIN, BUILTIN_TURN_RETRY_ATTEMPTS_MAX, BUILTIN_THINKING_LIMIT_MAX, BUILTIN_BASH_TIMEOUT_SEC_MIN, BUILTIN_BASH_TIMEOUT_SEC_MAX, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MIN, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MAX, BUILTIN_KEEP_RECENT_PERCENT_MIN, BUILTIN_KEEP_RECENT_PERCENT_MAX, BUILTIN_MAX_SUMMARY_TOKENS_MAX, BUILTIN_PRUNE_TOOL_RESULTS_KEEP_LAST_MAX, CHAT_TITLE_MAX_LEN_MIN, CHAT_TITLE_MAX_LEN_MAX, isShellSession, canonicalCwd, normalizeBuiltinSubagents, normalizeSkillModes, BUILTIN_PRESET_MAX, normalizeBuiltinPresets, SHELL_SESSION_PROVIDER, titleFromTaskDescription, titleFromUserText, titleFromSlashCommand, builtinProviderKeys, BUILTIN_MAX_PROVIDER_KEYS, BUILTIN_MAX_KEY_LENGTH, BUILTIN_PROVIDER_KINDS } from "@acpio/shared";
+import type { BuiltinKeyMode, BuiltinProviderKind } from "@acpio/shared";
+import { BUILD_INFO, EDITOR_NAV_PLACEMENTS, EDITOR_SPLITS, EDITOR_THEMES, EDITOR_TOOL_SOURCES, FILE_OPEN_TARGETS, CONSOLE_TERMINAL_LIMITS, CUSTOM_AGENT_MAX, BUILTIN_MAX_OUTPUT_TOKENS_MAX, BUILTIN_TURN_RETRY_ATTEMPTS_MIN, BUILTIN_TURN_RETRY_ATTEMPTS_MAX, BUILTIN_THINKING_LIMIT_MAX, BUILTIN_BASH_TIMEOUT_SEC_MIN, BUILTIN_BASH_TIMEOUT_SEC_MAX, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MIN, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MAX, BUILTIN_KEEP_RECENT_PERCENT_MIN, BUILTIN_KEEP_RECENT_PERCENT_MAX, BUILTIN_MAX_SUMMARY_TOKENS_MAX, BUILTIN_PRUNE_TOOL_RESULTS_KEEP_LAST_MAX, CHAT_TITLE_MAX_LEN_MIN, CHAT_TITLE_MAX_LEN_MAX, isShellSession, canonicalCwd, normalizeBuiltinSubagents, normalizeSkillModes, BUILTIN_PRESET_MAX, normalizeBuiltinPresets, SHELL_SESSION_PROVIDER, titleFromTaskDescription, titleFromUserText, titleFromSlashCommand, BUILTIN_MAX_PROVIDER_KEYS, BUILTIN_MAX_KEY_LENGTH, BUILTIN_PROVIDER_KINDS, BUILTIN_KEY_MODES } from "@acpio/shared";
+import { nextProviderKey } from "@acpio/adapter-builtin";
 import {
   buildSettingsFile,
   forgetMcpFolderConfig,
@@ -268,7 +269,11 @@ const settingsSchema = z.object({
         // has not been updated cannot silently drop a configured key — healing
         // folds both into `apiKeys`.
         apiKeys: z.array(z.string().max(BUILTIN_MAX_KEY_LENGTH)).max(BUILTIN_MAX_PROVIDER_KEYS).optional(),
-        apiKeyMode: z.enum(["rotate", "exhausted"]).optional(),
+        // The modes are the shared list, so a third one cannot be added to the
+        // UI and dropped by this schema on save.
+        apiKeyMode: z
+          .enum(BUILTIN_KEY_MODES as unknown as [BuiltinKeyMode, ...BuiltinKeyMode[]])
+          .optional(),
         // Which vendor the endpoint is (Settings → Built-in agent → Providers).
         // Zod strips what it does not know, so a kind missing here is dropped on
         // save and the spend row disappears again — the list is the shared one.
@@ -830,9 +835,9 @@ export async function registerRoutes(app: FastifyInstance) {
     const apiKey =
       body.apiKey !== undefined
         ? body.apiKey
-        : // A probe is one call: it uses the pool's first key rather than
-          // spending a turn of the rotation on a health check.
-          (fallback ? (builtinProviderKeys(fallback)[0] ?? "") : "");
+        : // A probe is one call: it takes the key the pool would use next, so a
+          // key at 100 % is stepped over instead of answering an error.
+          (fallback ? nextProviderKey(fallback) : "");
     const headers = body.headers !== undefined ? body.headers : fallback?.headers;
     const result = await fetchBuiltinModelCatalog(url, apiKey, {
       headers,
@@ -877,13 +882,9 @@ export async function registerRoutes(app: FastifyInstance) {
     const fallback = settings.builtinProviders[0];
     const kind = body.kind !== undefined ? body.kind : fallback?.kind;
     const url = body.url !== undefined ? body.url : (fallback?.url ?? "");
-    // Reading limits spends no tokens, so the pool's first key is the one.
+    // Reading limits spends no tokens, so any key that is not spent will do.
     const apiKey =
-      body.apiKey !== undefined
-        ? body.apiKey
-        : fallback
-          ? (builtinProviderKeys(fallback)[0] ?? "")
-          : "";
+      body.apiKey !== undefined ? body.apiKey : fallback ? nextProviderKey(fallback) : "";
     const headers = body.headers !== undefined ? body.headers : fallback?.headers;
     const result = await fetchBuiltinProviderLimits(url, apiKey, kind, { headers });
     if (result.ok) return result;

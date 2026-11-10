@@ -1593,7 +1593,8 @@ export interface BuiltinProviderConfig {
   apiKeys: string[];
   /**
    * How the list above is spent: `"rotate"` (the default) takes the next key on
-   * every request, `"exhausted"` keeps one until the endpoint says it is spent.
+   * every request, `"exhausted"` keeps one until the endpoint says it is spent,
+   * `"smart"` takes the key with the least spent quota.
    */
   apiKeyMode?: BuiltinKeyMode;
   /**
@@ -1643,11 +1644,13 @@ export interface BuiltinProviderConfig {
  * Providers). `"rotate"` spreads every request over the list, so a set of keys
  * behaves as one bigger quota; `"exhausted"` stays on one key — the cached
  * prefix, the bill, the raise all stay in one place — and moves on only when
- * the endpoint answers that the key is out.
+ * the endpoint answers that the key is out; `"smart"` balances every request
+ * onto the key whose quota is least spent, as the vendor reports it. In every
+ * mode a key whose quota is at 100 % gets no requests at all.
  */
-export type BuiltinKeyMode = "rotate" | "exhausted";
+export type BuiltinKeyMode = "rotate" | "exhausted" | "smart";
 
-export const BUILTIN_KEY_MODES: readonly BuiltinKeyMode[] = ["rotate", "exhausted"];
+export const BUILTIN_KEY_MODES: readonly BuiltinKeyMode[] = ["rotate", "exhausted", "smart"];
 
 /** Absent `apiKeyMode` means rotate: a list of keys is there to be spread. */
 export const BUILTIN_KEY_MODE_DEFAULT: BuiltinKeyMode = "rotate";

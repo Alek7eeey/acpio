@@ -1,9 +1,9 @@
 import {
-  builtinProviderKeys,
   type AppSettings,
   type BuiltinModelConfig,
   type BuiltinProviderConfig,
 } from "@acpio/shared";
+import { nextProviderKey } from "@acpio/adapter-builtin";
 import { fetchBuiltinModelCatalog } from "./builtinModelCatalog.js";
 import { getSettings, updateSettings } from "./settings.js";
 
@@ -51,11 +51,11 @@ export async function seedBuiltinEffortsOnce(): Promise<number> {
   let answered = 0;
   const patched = new Map<string, BuiltinProviderConfig>();
   for (const provider of targets) {
-    const result = await fetchBuiltinModelCatalog(
-      provider.url,
-      builtinProviderKeys(provider)[0] ?? "",
-      { headers: provider.headers, forceRegistry: true },
-    );
+    // The key the pool would use next: a key at 100 % is not asked at all.
+    const result = await fetchBuiltinModelCatalog(provider.url, nextProviderKey(provider), {
+      headers: provider.headers,
+      forceRegistry: true,
+    });
     if (!result.ok) continue;
     answered += 1;
     const found = new Map<string, string[]>();

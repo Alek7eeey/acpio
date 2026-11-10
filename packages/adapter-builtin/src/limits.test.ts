@@ -1,9 +1,10 @@
-// Limits fetcher for Settings → Built-in agent → Providers: real HTTP against
-// a local server, so the URL each kind asks, the auth header and the payload
-// shapes are exercised end to end.
+// Limits fetcher: real HTTP against a local server, so the URL each kind asks,
+// the auth header and the payload shapes are exercised end to end. The pool in
+// `keys.ts` reads the same answer to decide which key a request may use.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import http from "node:http";
-import { fetchBuiltinProviderLimits } from "./builtinProviderLimits.js";
+import { builtinKeySpentPercent, fetchBuiltinProviderLimits } from "./limits.js";
+import type { BuiltinLimitMeter } from "@acpio/shared";
 
 function portOf(server: http.Server): number {
   const addr = server.address();
@@ -265,5 +266,21 @@ describe("fetchBuiltinProviderLimits", () => {
         withCase("shapeless"),
       ),
     ).toEqual({ ok: false, code: "unexpected" });
+  });
+});
+
+describe("builtinKeySpentPercent", () => {
+  it("takes the worst bucket the vendor reports", () => {
+    expect(builtinKeySpentPercent([{ key: "rolling", percent: 1 }, { key: "monthly", percent: 100 }])).toBe(100);
+    expect(builtinKeySpentPercent([{ key: "credits", used: 5.5, total: 20 }])).toBe(27.5);
+    // An over-spent wallet is still just done, not 130 %.
+    expect(builtinKeySpentPercent([{ key: "credits", used: 26, total: 20 }])).toBe(100);
+  });
+
+  it("says nothing when the vendor reports no quota", () => {
+    // A wallet balance is not a share: `null` leaves the pool in rotation order.
+    const meters: BuiltinLimitMeter[] = [{ key: "balance", amount: 110, unit: "CNY" }];
+    expect(builtinKeySpentPercent(meters)).toBeNull();
+    expect(builtinKeySpentPercent([])).toBeNull();
   });
 });

@@ -468,6 +468,7 @@ function settingsRowHints(t: TranslateFn): Record<SettingsLeaf, string[]> {
       t("settings.builtinKeyModeHint"),
       t("settings.builtinKeyModeRotate"),
       t("settings.builtinKeyModeExhausted"),
+      t("settings.builtinKeyModeSmart"),
       t("settings.builtinHeadersHint", { sessionId: "{{sessionId}}" }),
       t("settings.builtinModelsHint"),
       t("settings.builtinProvidersHint"),
