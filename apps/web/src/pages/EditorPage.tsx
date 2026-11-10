@@ -201,6 +201,12 @@ type MenuRequest = { x: number; y: number; pos: number; up?: boolean };
 /** Держать в согласии с `.menu { min-width }`: по ней меню сдвигается от края. */
 const MENU_MIN_WIDTH = 230;
 
+/** Держать в согласии с `.popover { width }`: по ней панель прижимается к кнопке. */
+const PANEL_WIDTH = 300;
+
+/** Где встать поповеру настроек: над кнопкой, а не у правого края окна. */
+type PanelPlacement = { left: number; bottom: number; maxHeight: number };
+
 /** A file and its diff are two tabs over one document, as in VS Code. */
 type EditorTab = { path: string; kind: "file" | "diff"; pinned: boolean };
 
@@ -743,6 +749,9 @@ export function EditorPage({
   }, [treeDragging]);
   const [menu, setMenu] = useState<MenuRequest | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
+  // Привязка считается в момент нажатия: панель висит там, где кнопка, а не
+  // у правого края окна — панель редактора бывает узкой и стоит слева от чата.
+  const [panelPlacement, setPanelPlacement] = useState<PanelPlacement | null>(null);
   const [treeTab, setTreeTab] = useState<"files" | "changes">("files");
   const [changeView, setChangeView] = useState<ChangeView>(readChangeView);
 
@@ -1927,8 +1936,37 @@ export function EditorPage({
       {/* Всё, что раньше жило в шапке, — хоткеи, правый клик и статус-бар: строку
           на кнопки не тратим, высота нужна документу. */}
       <div className={styles.headerTools}>
-        {panelOpen ? (
-          <div className={styles.popover} role="dialog" aria-label="Настройки редактора">
+        {panelOpen && panelPlacement ? (
+          <div
+            className={styles.popover}
+            role="dialog"
+            aria-label="Настройки редактора"
+            style={{
+              left: panelPlacement.left,
+              bottom: panelPlacement.bottom,
+              maxHeight: panelPlacement.maxHeight,
+            }}
+          >
+            <div className={styles.popoverHead}>
+              <span className={styles.popoverTitle}>Настройки редактора</span>
+              <button
+                type="button"
+                className={styles.popoverClose}
+                title="Закрыть настройки"
+                aria-label="Закрыть настройки"
+                onClick={() => setPanelOpen(false)}
+              >
+                <svg viewBox="0 0 16 16" aria-hidden>
+                  <path
+                    d="M4 4l8 8M12 4l-8 8"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </button>
+            </div>
             <label className={styles.field}>
               <span>Тема редактора</span>
               <select
@@ -2444,7 +2482,26 @@ export function EditorPage({
           className={`${styles.barChip} ${styles.barAction}`}
           aria-expanded={panelOpen}
           title="Настройки редактора"
-          onClick={() => setPanelOpen((open) => !open)}
+          onClick={(event) => {
+            if (panelOpen) {
+              setPanelOpen(false);
+              return;
+            }
+            const box = event.currentTarget.getBoundingClientRect();
+            const maxLeft = window.innerWidth - PANEL_WIDTH - 8;
+            // Правый край панели — у правого края кнопки, как у меню в VS Code.
+            // Не влезает (панель редактора у левого края) — ведём от левого края кнопки.
+            const rightAligned = box.right - PANEL_WIDTH;
+            setPanelPlacement({
+              left: Math.max(
+                8,
+                Math.min(rightAligned >= 8 ? rightAligned : box.left, maxLeft),
+              ),
+              bottom: Math.max(8, window.innerHeight - box.top + 6),
+              maxHeight: Math.max(200, box.top - 14),
+            });
+            setPanelOpen(true);
+          }}
         >
           <svg viewBox="0 0 16 16" aria-hidden className={styles.barGear}>
             <path

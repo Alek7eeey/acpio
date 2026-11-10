@@ -164,17 +164,16 @@
   color: var(--text-secondary);
 }
 
-/* Только поповер: сам он висит над статус-баром, кнопка живёт в нём. */
+/* Только поповер: сам он встаёт над кнопкой-шестерёнкой, кнопка живёт в статус-баре. */
 .headerTools {
   position: static;
   flex: none;
   height: 0;
 }
 
+/* `left`/`bottom` приходят из замеров кнопки — панель висит там, куда нажали. */
 .popover {
   position: fixed;
-  right: 8px;
-  bottom: 28px;
   z-index: 40;
   max-height: calc(100vh - 80px);
   overflow: auto;
@@ -188,6 +187,42 @@
   background: var(--surface);
   box-shadow: var(--shadow);
   font-size: 12.5px;
+}
+
+.popoverHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.popoverTitle {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.popoverClose {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.popoverClose svg {
+  width: 12px;
+  height: 12px;
+}
+
+.popoverClose:hover {
+  background: var(--accent-soft);
+  color: var(--text);
 }
 
 .field {
