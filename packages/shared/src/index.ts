@@ -149,7 +149,6 @@ export {
   normalizeBuiltinPresets,
   BUILTIN_THINKING_LIMIT_MAX,
   normalizeChatChipOptions,
-  normalizeChatAgentTurnTimeline,
   normalizeChatMetaChips,
   normalizeChatTitleMaxLen,
   normalizeChatTreeRecentLimit,
@@ -1125,7 +1124,6 @@ export type ChatMetaChipId =
   | "board"
   | "gitBranch"
   | "gitChanges"
-  | "thoughts"
   | "mcp"
   | "context"
   | "console"
@@ -2443,8 +2441,6 @@ export interface AppSettings {
   chatActions: ChatActionId[];
   /** Chips shown in the composer bar above the input. */
   chatMetaChips: ChatMetaChipId[];
-  /** Thinking chip style in the composer bar. */
-  thoughtsChipStyle: "full" | "icon";
   /** Console chip style in the composer bar. */
   consoleChipStyle: "full" | "icon";
   /** Default shell for the session terminal (Windows server only). */
@@ -2476,8 +2472,6 @@ export interface AppSettings {
   chatEnterToSend: boolean;
   /** Show the send time next to each message. */
   chatShowMessageTime: boolean;
-  /** Interleave thinking phases and actions (Cursor-style) instead of one steps spoiler. */
-  chatAgentTurnTimeline: boolean;
   /** Desktop: allow two chats side by side. */
   chatSplit: boolean;
   /**
@@ -2758,7 +2752,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   ttsVoiceGender: "",
   chatActions: ["copy", "edit", "like", "dislike", "share", "regenerate", "readAloud"],
   chatMetaChips: ["folder", "board", "gitBranch", "gitChanges", "mcp", "context", "console", "bgJobs"],
-  thoughtsChipStyle: "full",
   consoleChipStyle: "full",
   terminalShell: "cmd",
   chatComposerButtons: ["attach", "mic", "model", "mode"],
@@ -2771,7 +2764,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   chatHeaderIcons: ["lang", "install", "theme"],
   chatEnterToSend: true,
   chatShowMessageTime: false,
-  chatAgentTurnTimeline: true,
   chatSplit: true,
   chatAutoTitle: true,
   chatTitleModel: "auto",

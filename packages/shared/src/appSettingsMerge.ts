@@ -40,7 +40,6 @@ const CHAT_META_CHIP_IDS: ChatMetaChipId[] = [
   "board",
   "gitBranch",
   "gitChanges",
-  "thoughts",
   "mcp",
   "context",
   "console",
@@ -109,30 +108,12 @@ export function normalizeChatMetaChips(
   if (schemaVersion < 7 && !next.includes("bgJobs")) {
     next = [...next, "bgJobs"];
   }
-  // The agent turn timeline draws the reasoning in place (schema 9), so the
-  // "Размышления" chip left the default row: a list saved before it gives the
-  // chip up once instead of keeping a switch the timeline made redundant.
-  if (schemaVersion < 9) {
-    next = next.filter((chip) => chip !== "thoughts");
-  }
-
   const seen = new Set<ChatMetaChipId>();
   return next.filter((chip) => {
     if (!CHAT_META_CHIP_IDS.includes(chip) || seen.has(chip)) return false;
     seen.add(chip);
     return true;
   });
-}
-
-/**
- * The agent turn timeline became the default reading of a turn (schema 9). A
- * stored boolean cannot pick a new default up on its own — every install that
- * ever saved its settings carries the old `false` — so it is flipped once, and
- * a value saved after that (the switch is off in the UI) stays as it is.
- */
-export function normalizeChatAgentTurnTimeline(value: unknown, schemaVersion: number): boolean {
-  if (schemaVersion < 9) return true;
-  return value === true;
 }
 
 const CHAT_TREE_MENU_IDS: ChatTreeMenuId[] = ["rename", "move", "export", "share", "delete"];
@@ -557,10 +538,6 @@ export function mergeClientAppSettings(raw: unknown): AppSettings {
   normalizeBuiltinContextSettings(merged);
   merged.builtinReplyLanguage = normalizeBuiltinReplyLanguage(merged.builtinReplyLanguage);
   merged.chatMetaChips = normalizeChatMetaChips(partial.chatMetaChips, schemaVersion);
-  merged.chatAgentTurnTimeline = normalizeChatAgentTurnTimeline(
-    partial.chatAgentTurnTimeline,
-    schemaVersion,
-  );
   merged.chatToolbarStyle = normalizeChatToolbarStyle(partial.chatToolbarStyle);
   merged.boardAddCardStyle = normalizeBoardAddCardStyle(partial.boardAddCardStyle);
   merged.boardTaskAgentPicker = normalizeBoardTaskAgentPicker(partial.boardTaskAgentPicker);

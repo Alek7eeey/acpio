@@ -122,31 +122,6 @@ function useDesktopMetaLayout() {
   return desktop;
 }
 
-function ThoughtSparkIcon({ size = 16 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M12 3.2 13.2 8.1 18 9.3 13.2 10.5 12 15.4 10.8 10.5 6 9.3 10.8 8.1 12 3.2Z"
-        stroke="currentColor"
-        strokeWidth="1.55"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M18.2 14.2 18.8 16.6 21.2 17.2 18.8 17.8 18.2 20.2 17.6 17.8 15.2 17.2 17.6 16.6 18.2 14.2Z"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M6.2 13.8 6.7 15.8 8.7 16.3 6.7 16.8 6.2 18.8 5.7 16.8 3.7 16.3 5.7 15.8 6.2 13.8Z"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
 /** Last segment of a cwd — the only part that still reads on a phone-width chip. */
 function folderName(cwd: string): string {
   const parts = cwd.replace(/[\\/]+$/, "").split(/[\\/]/);
@@ -164,8 +139,6 @@ export function ComposerMetaChips({
   renderSkeleton,
   settings,
   activeSession,
-  autoExpandSteps,
-  onToggleAutoExpandSteps,
   chatMcp,
   availableMcpCount,
   contextDisplay,
@@ -184,8 +157,6 @@ export function ComposerMetaChips({
   renderSkeleton: boolean;
   settings: AppSettings;
   activeSession: SessionDetailDto | null;
-  autoExpandSteps: boolean;
-  onToggleAutoExpandSteps: () => void;
   chatMcp: Array<{ id: string; name: string }>;
   /** Servers this chat can attach (folder list), even if all are disabled here. */
   availableMcpCount: number;
@@ -424,26 +395,6 @@ export function ComposerMetaChips({
             />
           </div>
         );
-      } else if (id === "thoughts") {
-        node = (
-          <button
-            type="button"
-            className={`${styles.metaChip} ${autoExpandSteps ? styles.metaChipActive : ""}${
-              settings.thoughtsChipStyle === "icon" ? ` ${styles.metaChipIconOnly}` : ""
-            }`}
-            aria-pressed={autoExpandSteps}
-            aria-label={t("common.autoSteps")}
-            title={t("common.autoStepsHint")}
-            onClick={onToggleAutoExpandSteps}
-          >
-            <span className={styles.metaChipIcon} aria-hidden>
-              <ThoughtSparkIcon size={15} />
-            </span>
-            {settings.thoughtsChipStyle !== "icon" ? (
-              <span className={styles.metaChipLabel}>{t("common.autoSteps")}</span>
-            ) : null}
-          </button>
-        );
       } else if (id === "mcp" && activeSession && availableMcpCount > 0) {
         node = (
           <button
@@ -581,7 +532,6 @@ export function ComposerMetaChips({
   }, [
     activeSession,
     boards,
-    autoExpandSteps,
     chatMcp,
     chipOptions.folder.truncate,
     chipOptions.gitChanges.compress,
@@ -599,12 +549,10 @@ export function ComposerMetaChips({
     gitChip,
     isDesktop,
     onOpenMcpDialog,
-    onToggleAutoExpandSteps,
     onToggleConsole,
     planChip,
     settings.chatMetaChips,
     settings.consoleChipStyle,
-    settings.thoughtsChipStyle,
     settings.chatGitBranchPosition,
     t,
   ]);
@@ -614,7 +562,7 @@ export function ComposerMetaChips({
     ? `${gitChip.awaiting ? "a" : ""}${gitChip.loading ? "l" : ""}:${gitChip.status?.branch ?? ""}:${gitChip.status?.files.length ?? 0}:${gitChip.status?.additions ?? 0}:${gitChip.status?.deletions ?? 0}:${gitChip.status?.dirty ? 1 : 0}`
     : "";
   const chipOptionsSig = `${chipOptions.folder.compress ? 1 : 0}${chipOptions.folder.truncate === "end" ? "e" : "m"}|${chipOptions.gitBranch.compress ? 1 : 0}|${chipOptions.gitChanges.compress ? 1 : 0}:${chipOptions.gitChanges.metrics}`;
-  const chipLayoutKey = `${chipKey}|${gitLayoutSig}|${contextDisplay?.label ?? ""}|${settings.thoughtsChipStyle}|${settings.consoleChipStyle}|${chipOptionsSig}`;
+  const chipLayoutKey = `${chipKey}|${gitLayoutSig}|${contextDisplay?.label ?? ""}|${settings.consoleChipStyle}|${chipOptionsSig}`;
   const measuring = isDesktop && visibleCount === null && !renderSkeleton;
   const overflowCount =
     isDesktop && visibleCount !== null ? Math.max(0, chipItems.length - visibleCount) : 0;

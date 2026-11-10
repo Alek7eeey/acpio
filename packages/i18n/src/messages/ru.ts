@@ -191,8 +191,6 @@ export const ru = {
     harnessForAgents: "Harness for agents",
     commands: "Команды",
     skills: "Скиллы",
-    autoSteps: "Размышления",
-    autoStepsHint: "Раскрывать размышления агента",
     working: "Работаю…",
     worked: "Работал",
     durationSec: "{{value}} с",
@@ -754,7 +752,6 @@ export const ru = {
     chatMetaChipGit: "Git",
     chatMetaChipGitBranch: "Ветка Git",
     chatMetaChipGitChanges: "Изменения Git",
-    chatMetaChipThoughts: "Размышления",
     chatMetaChipMcp: "MCP-серверы",
     chatMetaChipContext: "Контекст",
     chatMetaChipConsole: "Консоль",
@@ -763,9 +760,6 @@ export const ru = {
     chatEnterToSendHint: "Выкл: Enter — новая строка, отправка по Ctrl+Enter.",
     chatShowMessageTime: "Время сообщений",
     chatShowMessageTimeHint: "Показывать время отправки у каждого сообщения.",
-    chatAgentTurnTimeline: "Лента хода агента",
-    chatAgentTurnTimelineHint:
-      "Пока агент работает — фазы размышлений и вызовы инструментов в отдельных спойлерах, у каждого своё время выполнения. Когда ответ готов — всё сворачивается в один спойлер с общим временем.",
     chatSplit: "Два чата рядом",
     chatSplitHint:
       "Только на широком экране. Небольшая плавающая кнопка в левом верхнем углу чата делит рабочую область на два чата. Ctrl+клик по чату в дереве открывает его во второй панели.",

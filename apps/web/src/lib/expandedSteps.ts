@@ -9,11 +9,6 @@ export const expandedPartIds = new Map<string, boolean>();
 /** Per-message reasoning spoiler overrides. */
 export const expandedStepsByMessage = new Map<string, boolean>();
 
-export function clearExpandedStepsOverrides() {
-  expandedStepsByMessage.clear();
-  expandedPartIds.clear();
-}
-
 /** When the server replaces a provisional message id, carry the overrides. */
 export function migrateExpandedStepsMessageId(fromId: string, toId: string) {
   if (fromId === toId) return;

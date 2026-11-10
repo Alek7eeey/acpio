@@ -140,7 +140,6 @@ function mount() {
       ...DEFAULT_SETTINGS,
       locale: "ru" as const,
       chatMetaChips: [],
-      chatAgentTurnTimeline: true,
     },
     sessions: [detail],
     activeSessionId: "s1",
@@ -179,9 +178,6 @@ function threadOf(container: HTMLElement) {
 }
 
 describe("the pin that follows a streaming turn", () => {
-  beforeEach(() => {
-    localStorage.setItem("acpio.autoExpandSteps.v3", "1");
-  });
   afterEach(() => {
     cleanup();
     localStorage.clear();

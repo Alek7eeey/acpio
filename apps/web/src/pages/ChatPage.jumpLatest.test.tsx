@@ -103,7 +103,6 @@ function mount() {
       ...DEFAULT_SETTINGS,
       locale: "ru" as const,
       chatMetaChips: [],
-      chatAgentTurnTimeline: true,
     },
     sessions: [detail],
     activeSessionId: "s1",
@@ -144,9 +143,6 @@ function scrolledAwayThread(container: HTMLElement) {
 }
 
 describe("the jump-to-latest pill", () => {
-  beforeEach(() => {
-    localStorage.setItem("acpio.autoExpandSteps.v3", "1");
-  });
   afterEach(() => {
     cleanup();
     localStorage.clear();

@@ -20,7 +20,6 @@ const CHIP_ORDER: ChatMetaChipId[] = [
   "board",
   "gitBranch",
   "gitChanges",
-  "thoughts",
   "mcp",
   "context",
   "console",
@@ -33,7 +32,6 @@ const CHIP_LABEL_KEY: Record<ChatMetaChipId, string> = {
   board: "settings.chatMetaChipBoard",
   gitBranch: "settings.chatMetaChipGitBranch",
   gitChanges: "settings.chatMetaChipGitChanges",
-  thoughts: "settings.chatMetaChipThoughts",
   mcp: "settings.chatMetaChipMcp",
   context: "settings.chatMetaChipContext",
   console: "settings.chatMetaChipConsole",
@@ -901,7 +899,6 @@ export function ChatSettingsPreview({
   chatSplit,
   chatToolbarStyle,
   chatGitBranchPosition = "below",
-  agentTurnTimeline = false,
   onToggleAction,
   onToggleChip,
   onReorderChip,
@@ -927,8 +924,6 @@ export function ChatSettingsPreview({
   chatSplit: boolean;
   chatToolbarStyle: ChatToolbarStyle;
   chatGitBranchPosition?: "below" | "above";
-  /** Mirrors the agent-turn-timeline setting: the mock shows the reading it selects. */
-  agentTurnTimeline?: boolean;
   onToggleAction: (id: ChatActionId) => void;
   onToggleChip: (id: ChatMetaChipId) => void;
   onReorderChip: (nextOrder: ChatMetaChipId[]) => void;
@@ -1379,32 +1374,17 @@ export function ChatSettingsPreview({
 
               <div className={`${styles.msgRow} ${styles.assistantMsg}`}>
                 <div className={styles.assistantCol}>
-                  {agentTurnTimeline ? (
-                    <>
-                      <PreviewWork
-                        label={t("common.working")}
-                        time={formatDuration(4300, locale, t)}
-                      >
-                        <PreviewToolRow time={formatDuration(1100, locale, t)} />
-                        <PreviewReasoning time={formatDuration(2200, locale, t)} open />
-                      </PreviewWork>
-                      <div className={styles.pvText}>{t("settings.chatPreviewNote")}</div>
-                      <PreviewWork
-                        label={t("common.working")}
-                        time={formatDuration(600, locale, t)}
-                      >
-                        <PreviewToolRow time="" />
-                      </PreviewWork>
-                    </>
-                  ) : (
-                    <PreviewWork
-                      label={t("common.worked")}
-                      time={formatDuration(6000, locale, t)}
-                    >
-                      <PreviewToolRow time={formatDuration(1100, locale, t)} />
-                      <PreviewReasoning time={formatDuration(2200, locale, t)} open />
-                    </PreviewWork>
-                  )}
+                  <PreviewWork
+                    label={t("common.working")}
+                    time={formatDuration(4300, locale, t)}
+                  >
+                    <PreviewToolRow time={formatDuration(1100, locale, t)} />
+                    <PreviewReasoning time={formatDuration(2200, locale, t)} open />
+                  </PreviewWork>
+                  <div className={styles.pvText}>{t("settings.chatPreviewNote")}</div>
+                  <PreviewWork label={t("common.working")} time={formatDuration(600, locale, t)}>
+                    <PreviewToolRow time="" />
+                  </PreviewWork>
                   <div className={styles.assistantText}>
                     {t("settings.chatPreviewAssistant")}
                     {showTime ? <span className={styles.time}>{now}</span> : null}

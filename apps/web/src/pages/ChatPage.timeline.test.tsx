@@ -12,6 +12,7 @@ import {
 import { api } from "../lib/api";
 import { useAppStore } from "../lib/store";
 import { I18nProvider } from "../lib/i18n";
+import { expandReasoning, expandSteps } from "../../test/expandSteps";
 import { ChatPage } from "./ChatPage";
 import styles from "./ChatPage.module.css";
 
@@ -106,9 +107,9 @@ const detail: SessionDetailDto = {
 };
 
 beforeEach(() => {
-  localStorage.setItem("acpio.autoExpandSteps.v3", "1");
+  localStorage.clear();
   useAppStore.setState({
-    settings: { ...DEFAULT_SETTINGS, locale: "ru" as const, chatAgentTurnTimeline: true },
+    settings: { ...DEFAULT_SETTINGS, locale: "ru" as const },
     sessions: [detail],
     activeSessionId: "s1",
     activeSession: detail,
@@ -139,6 +140,7 @@ describe("finished turn reasoning headers", () => {
       </MemoryRouter>,
     );
 
+    await expandReasoning(container);
     await screen.findAllByText(/Сначала посмотрю файлы|Теперь читаю файлы/);
 
     const spoilerHeader = container.querySelector<HTMLElement>(`.${styles.steps} > .${styles.stepsToggle}`);
@@ -194,6 +196,7 @@ describe("a lone dot from a thinking-off model", () => {
     );
 
     await screen.findByText(/Готово: два файла/);
+    await expandReasoning(container);
 
     const blocks = Array.from(container.querySelectorAll<HTMLElement>(`.${styles.thought}`));
     expect(blocks).toHaveLength(1);
@@ -379,7 +382,6 @@ describe("parked question", () => {
       settings: {
         ...DEFAULT_SETTINGS,
         locale: "ru" as const,
-        chatAgentTurnTimeline: true,
         chatMetaChips: [],
       },
       sessions: [asked],
@@ -452,7 +454,6 @@ describe("parked plan card", () => {
       settings: {
         ...DEFAULT_SETTINGS,
         locale: "ru" as const,
-        chatAgentTurnTimeline: true,
         chatMetaChips: [],
       },
       sessions: [planWaiting],
@@ -551,7 +552,7 @@ describe("compaction row", () => {
 
   beforeEach(() => {
     useAppStore.setState({
-      settings: { ...DEFAULT_SETTINGS, locale: "ru" as const, chatAgentTurnTimeline: true },
+      settings: { ...DEFAULT_SETTINGS, locale: "ru" as const },
       sessions: [compacted],
       activeSessionId: "s1",
       activeSession: compacted,
@@ -575,6 +576,7 @@ describe("compaction row", () => {
 
   it("stands inside the turn it squeezed, in place: sizes, turns, digest behind the toggle", async () => {
     const { container } = renderThread();
+    await expandSteps(container);
     await screen.findByText("Контекст сжат");
 
     // The turn is folded, as always — and the squeeze is a line of it: the work
@@ -648,7 +650,7 @@ describe("a call too long for its row", () => {
     // blanket mock's `{}` is a status without files.
     (api as unknown as Record<string, unknown>).gitStatus = vi.fn(async () => null);
     useAppStore.setState({
-      settings: { ...DEFAULT_SETTINGS, locale: "ru" as const, chatAgentTurnTimeline: true },
+      settings: { ...DEFAULT_SETTINGS, locale: "ru" as const },
       sessions: [running],
       activeSessionId: "s1",
       activeSession: running,
@@ -670,6 +672,7 @@ describe("a call too long for its row", () => {
       </MemoryRouter>,
     );
 
+    await expandSteps(container);
     await screen.findByText(/bash cd \/c\/MyFolder/);
     const row = container.querySelector<HTMLElement>(`.${styles.partToggle}`);
     expect(row).toBeTruthy();

@@ -383,7 +383,6 @@ const settingsSchema = z.object({
   ttsVoiceGender: z.enum(["", "female", "male"]).optional(),
   chatActions: z.array(z.string()).optional(),
   chatMetaChips: z.array(z.string()).optional(),
-  thoughtsChipStyle: z.enum(["full", "icon"]).optional(),
   consoleChipStyle: z.enum(["full", "icon"]).optional(),
   terminalShell: z.enum(["cmd", "powershell"]).optional(),
   chatComposerButtons: z.array(z.string()).optional(),
@@ -396,7 +395,6 @@ const settingsSchema = z.object({
   chatHeaderIcons: z.array(z.string()).optional(),
   chatEnterToSend: z.boolean().optional(),
   chatShowMessageTime: z.boolean().optional(),
-  chatAgentTurnTimeline: z.boolean().optional(),
   chatGitBranchPosition: z.enum(["below", "above"]).optional(),
   chatChipOptions: z
     .object({

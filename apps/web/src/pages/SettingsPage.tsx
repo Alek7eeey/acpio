@@ -203,7 +203,6 @@ const CHAT_CHIP_ORDER: ChatMetaChipId[] = [
   "board",
   "gitBranch",
   "gitChanges",
-  "thoughts",
   "mcp",
   "context",
   "console",
@@ -339,7 +338,6 @@ function ChatInteractiveConfigRows({
               ["board", t("settings.chatMetaChipBoard")],
               ["gitBranch", t("settings.chatMetaChipGitBranch")],
               ["gitChanges", t("settings.chatMetaChipGitChanges")],
-              ["thoughts", t("settings.chatMetaChipThoughts")],
               ["mcp", t("settings.chatMetaChipMcp")],
               ["context", t("settings.chatMetaChipContext")],
               ["console", t("settings.chatMetaChipConsole")],
@@ -356,30 +354,6 @@ function ChatInteractiveConfigRows({
                 onClick={() =>
                   patch("chatMetaChips", toggleInOrder(form.chatMetaChips ?? [], id, CHAT_CHIP_ORDER))
                 }
-              >
-                {label}
-              </button>
-            );
-          })}
-        </div>
-      </SettingRow>
-
-      <SettingRow label={t("settings.thoughtsChipStyle")} hint={t("settings.thoughtsChipStyleHint")}>
-        <div className={styles.actionChips}>
-          {(
-            [
-              ["full", t("settings.thoughtsChipStyleFull")],
-              ["icon", t("settings.thoughtsChipStyleIcon")],
-            ] as const
-          ).map(([id, label]) => {
-            const on = (form.thoughtsChipStyle ?? "full") === id;
-            return (
-              <button
-                key={id}
-                type="button"
-                className={`${styles.actionChip}${on ? ` ${styles.actionChipOn}` : ""}`}
-                aria-pressed={on}
-                onClick={() => patch("thoughtsChipStyle", id)}
               >
                 {label}
               </button>
@@ -753,14 +727,6 @@ function ChatBehaviorConfigRows({
           checked={Boolean(form.chatEnterToSend)}
           onChange={(v) => patch("chatEnterToSend", v)}
           label={t("settings.chatEnterToSend")}
-        />
-      </SettingRow>
-
-      <SettingRow label={t("settings.chatAgentTurnTimeline")} hint={t("settings.chatAgentTurnTimelineHint")}>
-        <Toggle
-          checked={Boolean(form.chatAgentTurnTimeline)}
-          onChange={(v) => patch("chatAgentTurnTimeline", v)}
-          label={t("settings.chatAgentTurnTimeline")}
         />
       </SettingRow>
     </SettingTable>
@@ -3391,7 +3357,6 @@ export function SettingsPage() {
               chatSplit={form.chatSplit !== false}
               chatToolbarStyle={form.chatToolbarStyle ?? "classic"}
               chatGitBranchPosition={form.chatGitBranchPosition ?? "below"}
-              agentTurnTimeline={Boolean(form.chatAgentTurnTimeline)}
               onToggleAction={(id) => {
                 const cur = form.chatActions ?? [];
                 patch(

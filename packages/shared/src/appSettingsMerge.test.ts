@@ -18,7 +18,6 @@ import {
   mergeClientAppSettings,
   normalizeBuiltinBashTimeoutSec,
   normalizeBuiltinExtraInstructions,
-  normalizeChatAgentTurnTimeline,
   normalizeChatMetaChips,
   normalizeChatTreeMenu,
   readSettingsSchema,
@@ -26,25 +25,16 @@ import {
 
 describe("normalizeChatMetaChips", () => {
   it("keeps chips when schema is current", () => {
-    const chips = [
-      "folder",
-      "gitBranch",
-      "gitChanges",
-      "thoughts",
-      "mcp",
-      "context",
-      "console",
-    ] as const;
+    const chips = ["folder", "gitBranch", "gitChanges", "mcp", "context", "console"] as const;
     expect(normalizeChatMetaChips(chips, SETTINGS_SCHEMA_VERSION)).toEqual([...chips]);
   });
 
   it("splits legacy git chip into branch and changes", () => {
-    const chips = ["folder", "git", "thoughts", "mcp", "context", "console"];
+    const chips = ["folder", "git", "mcp", "context", "console"];
     expect(normalizeChatMetaChips(chips, SETTINGS_SCHEMA_VERSION)).toEqual([
       "folder",
       "gitBranch",
       "gitChanges",
-      "thoughts",
       "mcp",
       "context",
       "console",
@@ -105,24 +95,22 @@ describe("normalizeChatMetaChips", () => {
     ]);
   });
 
-  // The "Размышления" chip left the default row with schema 9 (the turn
-  // timeline draws the reasoning in place): a list saved before it gives the
-  // chip up once, and a list saved after it keeps whatever it has.
-  it("drops the thoughts chip from settings saved before the timeline", () => {
+  // The "Размышления" chip is gone from the composer: the id is no longer
+  // known, so any list saved with it gives it up, whatever its schema.
+  it("drops the retired thoughts chip", () => {
     expect(normalizeChatMetaChips(["folder", "thoughts", "console"], 8)).toEqual([
       "folder",
       "console",
     ]);
-    expect(normalizeChatMetaChips(["folder", "thoughts", "console"], 9)).toEqual([
-      "folder",
-      "thoughts",
-      "console",
-    ]);
+    expect(
+      normalizeChatMetaChips(["folder", "thoughts", "console"], SETTINGS_SCHEMA_VERSION),
+    ).toEqual(["folder", "console"]);
   });
 
-  it("falls back to the shipped row without the thoughts chip", () => {
-    expect(normalizeChatMetaChips(undefined, 9)).toEqual(DEFAULT_SETTINGS.chatMetaChips);
-    expect(DEFAULT_SETTINGS.chatMetaChips).not.toContain("thoughts");
+  it("falls back to the shipped row", () => {
+    expect(normalizeChatMetaChips(undefined, SETTINGS_SCHEMA_VERSION)).toEqual(
+      DEFAULT_SETTINGS.chatMetaChips,
+    );
   });
 
   // The background-task chip is the newest default: settings saved before it
@@ -135,30 +123,6 @@ describe("normalizeChatMetaChips", () => {
       "bgJobs",
     ]);
     expect(normalizeChatMetaChips(["bgJobs", "folder"], 6)).toEqual(["bgJobs", "folder"]);
-  });
-});
-
-describe("normalizeChatAgentTurnTimeline", () => {
-  // The timeline is the default reading of a turn from schema 9 on. A stored
-  // `false` is the old default, not a choice, so an older save is flipped once;
-  // after that the switch owns the value.
-  it("turns the timeline on for settings saved before it was the default", () => {
-    expect(normalizeChatAgentTurnTimeline(false, 8)).toBe(true);
-    expect(normalizeChatAgentTurnTimeline(undefined, 8)).toBe(true);
-  });
-
-  it("keeps the stored value once the schema is current", () => {
-    expect(normalizeChatAgentTurnTimeline(false, 9)).toBe(false);
-    expect(normalizeChatAgentTurnTimeline(true, 9)).toBe(true);
-    expect(normalizeChatAgentTurnTimeline("yes", 9)).toBe(false);
-  });
-
-  it("carries the new default through the client merge", () => {
-    expect(mergeClientAppSettings({}).chatAgentTurnTimeline).toBe(true);
-    expect(
-      mergeClientAppSettings({ settingsSchema: 9, chatAgentTurnTimeline: false })
-        .chatAgentTurnTimeline,
-    ).toBe(false);
   });
 });
 
@@ -198,7 +162,7 @@ describe("normalizeChatTreeMenu", () => {
 describe("mergeClientAppSettings", () => {
   it("migrates legacy chat meta chips from API payload", () => {
     const merged = mergeClientAppSettings({
-      chatMetaChips: ["folder", "thoughts", "mcp", "context"],
+      chatMetaChips: ["folder", "mcp", "context"],
     });
     expect(merged.chatMetaChips).toContain("console");
     expect(merged.settingsSchema).toBe(SETTINGS_SCHEMA_VERSION);
@@ -207,7 +171,7 @@ describe("mergeClientAppSettings", () => {
   it("respects console disabled after schema upgrade", () => {
     const merged = mergeClientAppSettings({
       settingsSchema: SETTINGS_SCHEMA_VERSION,
-      chatMetaChips: ["folder", "thoughts", "mcp", "context"],
+      chatMetaChips: ["folder", "mcp", "context"],
     });
     expect(merged.chatMetaChips).not.toContain("console");
   });

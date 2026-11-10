@@ -173,8 +173,6 @@ export const en = {
     harnessForAgents: "Harness for agents",
     commands: "Commands",
     skills: "Skills",
-    autoSteps: "Thinking",
-    autoStepsHint: "Expand agent thinking",
     durationSec: "{{value}}s",
     durationMin: "{{value}}m",
     durationMinSec: "{{value}}m {{seconds}}s",
@@ -736,7 +734,6 @@ export const en = {
     chatMetaChipGit: "Git",
     chatMetaChipGitBranch: "Git branch",
     chatMetaChipGitChanges: "Git changes",
-    chatMetaChipThoughts: "Thinking",
     chatMetaChipMcp: "MCP servers",
     chatMetaChipContext: "Context",
     chatMetaChipConsole: "Console",
@@ -745,9 +742,6 @@ export const en = {
     chatEnterToSendHint: "Off: Enter inserts a newline, Ctrl+Enter sends.",
     chatShowMessageTime: "Message timestamps",
     chatShowMessageTimeHint: "Show the send time next to each message.",
-    chatAgentTurnTimeline: "Agent turn timeline",
-    chatAgentTurnTimelineHint:
-      "While the agent is working, reasoning phases and tool calls sit in their own spoilers, each with its own time. When the reply is done, everything collapses into one spoiler with the total.",
     chatSplit: "Two chats side by side",
     chatSplitHint:
       "Desktop only. A small floating button at the top left of the chat splits the workspace into two chats. Ctrl+click a chat in the tree to open it in the other pane.",

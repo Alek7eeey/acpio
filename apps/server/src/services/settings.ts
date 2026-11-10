@@ -29,7 +29,6 @@ import {
   normalizeEditorTheme,
   normalizeEditorToolSource,
   normalizeChatChipOptions,
-  normalizeChatAgentTurnTimeline,
   normalizeChatMetaChips,
   normalizeChatTitleMaxLen,
   normalizeChatTreeRecentLimit,
@@ -277,14 +276,7 @@ function mergeSettings(raw: unknown): AppSettings {
       readSettingsSchema(raw),
     );
   }
-  merged.chatAgentTurnTimeline = normalizeChatAgentTurnTimeline(
-    merged.chatAgentTurnTimeline,
-    readSettingsSchema(raw),
-  );
   merged.settingsSchema = SETTINGS_SCHEMA_VERSION;
-  if (merged.thoughtsChipStyle !== "icon") {
-    merged.thoughtsChipStyle = "full";
-  }
   if (merged.consoleChipStyle !== "icon") {
     merged.consoleChipStyle = "full";
   }
@@ -339,9 +331,6 @@ function mergeSettings(raw: unknown): AppSettings {
   }
   if (typeof merged.chatShowMessageTime !== "boolean") {
     merged.chatShowMessageTime = DEFAULT_SETTINGS.chatShowMessageTime;
-  }
-  if (typeof merged.chatAgentTurnTimeline !== "boolean") {
-    merged.chatAgentTurnTimeline = DEFAULT_SETTINGS.chatAgentTurnTimeline;
   }
   if (merged.chatGitBranchPosition !== "above") {
     merged.chatGitBranchPosition = "below";

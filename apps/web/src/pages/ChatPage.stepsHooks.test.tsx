@@ -14,6 +14,7 @@ import { MemoryRouter } from "react-router-dom";
 import { DEFAULT_SETTINGS, type MessagePartDto, type SessionDetailDto } from "@acpio/shared";
 import { useAppStore } from "../lib/store";
 import { I18nProvider } from "../lib/i18n";
+import { expandSteps } from "../../test/expandSteps";
 import { ChatPage } from "./ChatPage";
 
 vi.mock("../lib/api", () => {
@@ -116,7 +117,6 @@ function mount(d: SessionDetailDto) {
       ...DEFAULT_SETTINGS,
       locale: "ru" as const,
       chatMetaChips: [],
-      chatAgentTurnTimeline: true,
     },
     sessions: [d],
     activeSessionId: "s1",
@@ -138,7 +138,7 @@ function mount(d: SessionDetailDto) {
 }
 
 beforeEach(() => {
-  localStorage.setItem("acpio.autoExpandSteps.v3", "1");
+  localStorage.clear();
 });
 
 afterEach(() => {
@@ -169,6 +169,7 @@ describe("a settled background job", () => {
       </MemoryRouter>,
     );
     await new Promise((r) => setTimeout(r, 100));
+    await expandSteps(container);
 
     // The note is the turn's own last step: drawn inside the assistant message,
     // and its own user message is gone from the thread.
@@ -199,6 +200,7 @@ describe("a turn that stops being one item", () => {
       part: part("x1", "a1", "note", 1, { text: "Фоновая задача завершилась" }),
     });
     await new Promise((r) => setTimeout(r, 150));
+    await expandSteps(container);
 
     expect(container.textContent).toContain("Фоновая задача завершилась");
     expect(container.querySelector("textarea")).toBeTruthy();

@@ -617,7 +617,6 @@ function MessageArticle({
   activeSession,
   autoExpandSteps,
   stepsGlobalTick,
-  agentTurnTimeline,
   keepComposerFocus,
   textareaRef,
   onSlashCommandClick,
@@ -634,7 +633,6 @@ function MessageArticle({
   activeSession: SessionDetailDto | null;
   autoExpandSteps: boolean;
   stepsGlobalTick: number;
-  agentTurnTimeline: boolean;
   keepComposerFocus: RefObject<boolean>;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   onSlashCommandClick?: (command: string) => void;
@@ -681,7 +679,6 @@ function MessageArticle({
           stepsStreaming={stepsStreaming}
           autoExpandSteps={autoExpandSteps}
           stepsGlobalTick={stepsGlobalTick}
-          agentTurnTimeline={agentTurnTimeline}
         />
       )}
     </article>
@@ -2371,7 +2368,7 @@ const TOOL_TITLE_INLINE_CAP = 48;
 // Expand/collapse state survives virtualization remounts: message rows unmount
 // when scrolled out of the virtual window, so local useState would lose which
 // tool outputs / thought spoilers / steps blocks the user opened.
-import { expandedPartIds, expandedStepsByMessage, clearExpandedStepsOverrides } from "../lib/expandedSteps";
+import { expandedPartIds, expandedStepsByMessage } from "../lib/expandedSteps";
 
 /** Initial height guess for a virtualized message row; refined by measurement. */
 function estimateMessageRowHeight(msg: MessageDto | undefined): number {
@@ -4194,7 +4191,6 @@ function AssistantParts({
   stepsStreaming,
   autoExpandSteps,
   stepsGlobalTick,
-  agentTurnTimeline,
 }: {
   message: MessageDto;
   /** Background-job notes folded into this turn: they arrived after it, as
@@ -4206,7 +4202,6 @@ function AssistantParts({
   stepsStreaming: boolean;
   autoExpandSteps: boolean;
   stepsGlobalTick: number;
-  agentTurnTimeline: boolean;
 }) {
   // Keep typewriter "live" after the turn so late/peeled text still types out
   // instead of dumping in one frame when status flips to idle.
@@ -4322,14 +4317,12 @@ function AssistantParts({
     () => partDurations(parts, { now: live ? now : undefined }),
     [parts, now, live],
   );
-  // Agent-turn timeline. While the agent is still generating (state 1) the turn
-  // reads as spoiler → text → spoiler → text …, and it stays that way until the
-  // last token. Once generation stops (state 2) everything but the final text
-  // folds into one spoiler whose body is that same transcript.
-  const timelineItems = useMemo(
-    () => (agentTurnTimeline ? buildAgentTimeline(stepsParts) : []),
-    [agentTurnTimeline, stepsParts],
-  );
+  // Agent-turn timeline — the only reading of a turn. While the agent is still
+  // generating (state 1) the turn reads as spoiler → text → spoiler → text …,
+  // and it stays that way until the last token. Once generation stops (state 2)
+  // everything but the final text folds into one spoiler whose body is that
+  // same transcript.
+  const timelineItems = useMemo(() => buildAgentTimeline(stepsParts), [stepsParts]);
   // A parked question renders in its own slot below (never inside a spoiler), so
   // its lead-in text has to travel with it: the bucket is the only place that
   // transcript appears on screen.
@@ -4358,7 +4351,7 @@ function AssistantParts({
       {compactionParts.map((part) => (
         <CompactionRow key={part.id} part={part} sessionId={message.sessionId} />
       ))}
-      {agentTurnTimeline && turnActive ? (
+      {turnActive ? (
         <AgentTurnTimeline
           parts={stepsParts}
           streaming={!parked && (stepsStreaming || turnActive)}
@@ -4369,7 +4362,7 @@ function AssistantParts({
           durations={durations}
           stepsGlobalTick={stepsGlobalTick}
         />
-      ) : agentTurnTimeline && timelineItems.length > 0 ? (
+      ) : timelineItems.length > 0 ? (
         <StepsSpoiler
           parts={stepsParts}
           streaming={false}
@@ -4727,29 +4720,11 @@ function ChatThread() {
   );
   const [model, setModel] = useState(modelForProvider(settings, settings.defaultProvider));
   const [folderPicker, setFolderPicker] = useState<{ x: number; y: number } | null>(null);
-  const [autoExpandSteps, setAutoExpandSteps] = useState(() => {
-    try {
-      // v3: blocks start collapsed. v2 opened thinking/steps by default, which
-      // buried the answer under the whole transcript; the "Размышления" chip
-      // above the composer still expands everything on demand.
-      const raw = localStorage.getItem("acpio.autoExpandSteps.v3");
-      if (raw === null) return false;
-      return raw === "1";
-    } catch {
-      return false;
-    }
-  });
-  const [stepsGlobalTick, setStepsGlobalTick] = useState(0);
-  const syncAutoExpandSteps = useCallback((open: boolean) => {
-    clearExpandedStepsOverrides();
-    setAutoExpandSteps(open);
-    setStepsGlobalTick((tick) => tick + 1);
-    try {
-      localStorage.setItem("acpio.autoExpandSteps.v3", open ? "1" : "0");
-    } catch {
-      /* ignore */
-    }
-  }, []);
+  /** Steps blocks start collapsed and stay that way: the composer's
+   *  "Размышления" chip is gone, so nothing force-opens a turn's reasoning and
+   *  the reader opens a block themselves. */
+  const autoExpandSteps = false;
+  const stepsGlobalTick = 0;
   /** Model value whose params are currently being fetched (⋯ flyout / prefetch). */
   const [paramsLoadingFor, setParamsLoadingFor] = useState<string | null>(null);
   /** Per-model config-option schemas, keyed by model value. */
@@ -4933,13 +4908,6 @@ function ChatThread() {
     };
   }, []);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem("acpio.autoExpandSteps.v3", autoExpandSteps ? "1" : "0");
-    } catch {
-      // ignore
-    }
-  }, [autoExpandSteps]);
   const sessionBusy =
     activeSession?.status === "running" || activeSession?.status === "waiting";
   const turnBusy = sessionBusy || inflight > 0;
@@ -6963,7 +6931,6 @@ function ChatThread() {
         activeSession={activeSession}
         autoExpandSteps={autoExpandSteps}
         stepsGlobalTick={stepsGlobalTick}
-        agentTurnTimeline={settings.chatAgentTurnTimeline === true}
         keepComposerFocus={keepComposerFocus}
         textareaRef={textareaRef}
         onSlashCommandClick={insertComposerSlashCommand}
@@ -8043,8 +8010,6 @@ function ChatThread() {
             renderSkeleton={renderSkeleton}
             settings={settings}
             activeSession={activeSession}
-            autoExpandSteps={autoExpandSteps}
-            onToggleAutoExpandSteps={() => syncAutoExpandSteps(!autoExpandSteps)}
             chatMcp={chatMcp}
             availableMcpCount={
               activeSession
