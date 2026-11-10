@@ -60,6 +60,8 @@ const EDITOR_MIN = 320;
 const EDITOR_DEFAULT = 560;
 /** The chat needs this much of the window to stay usable. */
 const EDITOR_CHAT_MIN = 420;
+/** The divider between the chat and the code pane. */
+const EDITOR_SPLITTER = 5;
 const SIDEBAR_MIN = 300;
 const SIDEBAR_MAX = 1200;
 const SIDEBAR_DEFAULT = 360;
@@ -337,11 +339,43 @@ export function AppShell() {
   useEffect(() => {
     localStorage.setItem(CHAT_HIDDEN_KEY, chatHidden ? "1" : "0");
   }, [chatHidden]);
-  // The chat can be put away while the code pane stays, on any width.
-  const chatCollapsed = editorShown && !editorOnlyRoute && chatHidden;
   const [editorWidth, setEditorWidth] = useState(readEditorWidth);
   const [editorDragging, setEditorDragging] = useState(false);
   const editorDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+
+  // The chat and the code pane share the column the tree leaves them, so that
+  // column — not the window — is what the pane's limit is measured against: the
+  // tree's width and the window's edges are already out of it.
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const [splitRoom, setSplitRoom] = useState(0);
+  useLayoutEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+    const sync = () => setSplitRoom(el.clientWidth);
+    sync();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(sync);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  /**
+   * Too narrow for both: the pane takes the whole window instead of leaving the
+   * chat under its minimum, where it is no longer a chat.
+   */
+  const editorRoomTooNarrow =
+    splitRoom > 0 && splitRoom < EDITOR_MIN + EDITOR_CHAT_MIN + EDITOR_SPLITTER;
+  /** The widest the pane may get while the chat still keeps `EDITOR_CHAT_MIN`. */
+  const editorMax = Math.max(
+    EDITOR_MIN,
+    (splitRoom || (typeof window === "undefined" ? 0 : window.innerWidth)) -
+      EDITOR_CHAT_MIN -
+      EDITOR_SPLITTER,
+  );
+  /** The width the pane actually gets: a shrunken window never squeezes the chat. */
+  const editorPaneWidth = Math.min(editorMax, Math.max(EDITOR_MIN, editorWidth));
+  // The chat can be put away while the code pane stays, on any width.
+  const chatCollapsed =
+    editorShown && !editorOnlyRoute && (chatHidden || editorRoomTooNarrow);
 
   useEffect(() => {
     localStorage.setItem(EDITOR_WIDTH_KEY, String(editorWidth));
@@ -351,10 +385,10 @@ export function AppShell() {
     (e: ReactPointerEvent) => {
       e.preventDefault();
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-      editorDragRef.current = { startX: e.clientX, startWidth: editorWidth };
+      editorDragRef.current = { startX: e.clientX, startWidth: editorPaneWidth };
       setEditorDragging(true);
     },
-    [editorWidth],
+    [editorPaneWidth],
   );
 
   useEffect(() => {
@@ -364,8 +398,7 @@ export function AppShell() {
       if (!drag) return;
       // A pane on the left grows the other way as the pointer moves right.
       const delta = (e.clientX - drag.startX) * (editorPlacement === "left" ? 1 : -1);
-      const max = Math.max(EDITOR_MIN, window.innerWidth - EDITOR_CHAT_MIN);
-      setEditorWidth(Math.min(max, Math.max(EDITOR_MIN, drag.startWidth + delta)));
+      setEditorWidth(Math.max(EDITOR_MIN, Math.min(editorMax, drag.startWidth + delta)));
     };
     const onUp = () => {
       editorDragRef.current = null;
@@ -379,7 +412,7 @@ export function AppShell() {
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
     };
-  }, [editorDragging, editorPlacement]);
+  }, [editorDragging, editorPlacement, editorMax]);
   const isSettings = pathname.startsWith("/settings");
   const isBoard = pathname.startsWith("/board/");
   const isTasks = pathname.startsWith("/tasks");
@@ -2287,9 +2320,12 @@ export function AppShell() {
         </header>
         {/* The code pane outlives every page: leaving the chat to read a task or a
             setting must not throw away its tabs and its warm language server. */}
-        <div className={styles.content}
+        <div
+          ref={contentRef}
+          className={styles.content}
           data-editor={editorPlacement}
-          data-editor-dragging={editorDragging ? "true" : undefined}>
+          data-editor-dragging={editorDragging ? "true" : undefined}
+        >
           <div
             className={styles.splitPane}
             hidden={editorOnlyRoute || chatCollapsed}
@@ -2299,15 +2335,16 @@ export function AppShell() {
           </div>
           {editorPanesMounted ? (
             <>
-              {editorShown && !editorOnlyRoute && !chatHidden ? (
+              {editorShown && !editorOnlyRoute && !chatCollapsed ? (
                 <div
                   className={styles.editorSplitter}
                   data-dragging={editorDragging ? "true" : undefined}
                   role="separator"
                   aria-orientation="vertical"
                   aria-label={t("common.resizeEditorHint")}
-                  aria-valuenow={editorWidth}
+                  aria-valuenow={editorPaneWidth}
                   aria-valuemin={EDITOR_MIN}
+                  aria-valuemax={editorMax}
                   title={t("common.resizeEditorHint")}
                   onPointerDown={onEditorSplitterDown}
                   onDoubleClick={() => setEditorWidth(EDITOR_DEFAULT)}
@@ -2319,13 +2356,19 @@ export function AppShell() {
                 hidden={!editorShown && !editorOnlyRoute}
                 style={{
                   order: editorPlacement === "left" ? 0 : 2,
-                  flex: editorOnlyRoute || chatCollapsed ? undefined : `0 0 ${editorWidth}px`,
+                  flex:
+                    editorOnlyRoute || chatCollapsed ? undefined : `0 0 ${editorPaneWidth}px`,
                 }}
               >
                 <EditorSlot
                   enabled={editorShown || editorOnlyRoute}
                   chatHidden={chatCollapsed}
-                  onToggleChat={editorOnlyRoute ? undefined : () => setChatHidden((prev) => !prev)}
+                  /* No room for the chat beside the pane: the button would do nothing. */
+                  onToggleChat={
+                    editorOnlyRoute || editorRoomTooNarrow
+                      ? undefined
+                      : () => setChatHidden((prev) => !prev)
+                  }
                 />
               </div>
             </>

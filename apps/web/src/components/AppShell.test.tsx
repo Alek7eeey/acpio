@@ -202,3 +202,56 @@ describe("the brand chip's way home", () => {
     expect(screen.getByTestId("chat-page")).toBeTruthy();
   });
 });
+
+/** jsdom measures every element as 0px: the column the panes share is faked. */
+function stubRoom(px: number) {
+  Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+    configurable: true,
+    get: () => px,
+  });
+}
+
+describe("the code pane's stretch", () => {
+  afterEach(() => {
+    delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth;
+  });
+
+  function renderSplit() {
+    useAppStore.setState({
+      settings: { ...DEFAULT_SETTINGS, locale: "ru" as const, editorSplit: "right" as const },
+    });
+    // The pane was stretched wide on a big screen and kept its width.
+    localStorage.setItem("acpio.editorWidth.v1", "900");
+    window.history.replaceState({}, "", "/chat");
+    const { container } = render(
+      <BrowserRouter>
+        <I18nProvider>
+          <AppShell />
+        </I18nProvider>
+      </BrowserRouter>,
+    );
+    const panes = container.querySelectorAll<HTMLElement>(`.${styles.splitPane}`);
+    return { chatPane: panes[0], editorPane: panes[1], container };
+  }
+
+  // 1000px beside the tree: the chat keeps its 420px and the pane gets the rest
+  // of the column — the stored 900px never squeezes it to a sliver.
+  it("stops at the width the chat still reads at", () => {
+    stubRoom(1000);
+    const { chatPane, editorPane } = renderSplit();
+
+    expect(chatPane.hidden).toBe(false);
+    expect(editorPane.style.flex).toBe("0 0 575px");
+  });
+
+  // Under the two minimums there is no room for a chat beside the pane: the
+  // pane takes the whole window instead of leaving the chat unusable.
+  it("takes the whole window when the chat no longer fits", () => {
+    stubRoom(700);
+    const { chatPane, editorPane, container } = renderSplit();
+
+    expect(chatPane.hidden).toBe(true);
+    expect(editorPane.style.flex).toBe("");
+    expect(container.querySelector(`.${styles.editorSplitter}`)).toBeNull();
+  });
+});
