@@ -405,9 +405,12 @@
 
 /* Laid out to fit the column it is given — a plan is read in a panel, and a
    table that scrolls sideways there is a table nobody finishes reading. The
-   cells break; the wrapper never asks for more room than it has. */
+   cells break at their words and the table fills the column it gets; the floor
+   is the longest word of each column, since a cell split three characters a
+   line is a cell nobody can read either. Under that floor the wrapper takes
+   its sideways scroll back instead of squeezing the columns into slivers. */
 .fitWidth .tableWrap {
-  overflow-x: hidden;
+  overflow-x: auto;
 }
 
 .fitWidth .th {
@@ -416,7 +419,7 @@
 
 .fitWidth .th,
 .fitWidth .td {
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   word-break: normal;
 }
 

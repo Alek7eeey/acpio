@@ -313,9 +313,10 @@ type MarkdownContentProps = {
   sessionId?: string | null;
   /**
    * Fit the width the text is given rather than its natural one: code wraps
-   * (whatever the reader's wrapping setting says) and a wide table breaks its
-   * cells instead of asking for a sideways scroll. A plan is read in a narrow
-   * column, so that is where its text lives.
+   * (whatever the reader's wrapping setting says) and a table breaks its cells
+   * at their words instead of asking for a sideways scroll — until a table's
+   * columns reach their floor, where the table scrolls rather than crushes.
+   * A plan is read in a narrow column, so that is where its text lives.
    */
   fitWidth?: boolean;
 };
