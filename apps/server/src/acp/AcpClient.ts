@@ -456,6 +456,54 @@ export function resolveAttHandles(text: string, files: Iterable<string>): string
   );
 }
 
+/**
+ * A `read` decodes bytes as text and nothing downstream can tell garbage from
+ * content: a `.zip` reached `read` in chat 6a9e7e2e, came back as ~12 KB of `�`,
+ * and rode in every later request of that chat (1.2M tokens of nothing). NUL
+ * bytes in the head are the cheap tell. UTF-16 text is NUL-heavy by nature, so
+ * its BOM is checked first and decoded instead of refused.
+ */
+const BINARY_HEAD_BYTES = 8 * 1024;
+
+export type Utf16Bom = "le" | "be";
+
+export function utf16Bom(bytes: Buffer): Utf16Bom | undefined {
+  if (bytes.byteLength < 2) return undefined;
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) return "le";
+  if (bytes[0] === 0xfe && bytes[1] === 0xff) return "be";
+  return undefined;
+}
+
+/** Bytes no text decoder should be handed — UTF-16 having been ruled out first. */
+export function looksBinary(bytes: Buffer): boolean {
+  if (utf16Bom(bytes)) return false;
+  return bytes.subarray(0, BINARY_HEAD_BYTES).includes(0);
+}
+
+/**
+ * What the model is told instead of mojibake. Two facts and no recipe for one
+ * format: `read` is not the tool for bytes, and the handle it was given is not a
+ * `read`-only name — bash resolves the same `att://` to the file, so the format's
+ * own tool can open it.
+ */
+export function binaryReadError(name: string, size: number): Error {
+  const amount =
+    size < 1024
+      ? `${size} B`
+      : size < 1024 * 1024
+        ? `${(size / 1024).toFixed(1)} KB`
+        : `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  const reach = name.startsWith("att://")
+    ? "`att://` is a handle for every tool, not just `read` — bash resolves it to the file too."
+    : "`bash` reaches the same file.";
+  return new Error(
+    `${name} — binary, ${amount} (not UTF-8 text).\n\n` +
+      "1. `read` shows text and pictures only — bytes would come back as mojibake.\n" +
+      `2. ${reach} Pass it to whatever tool the format needs:\n` +
+      `   bash("some-tool ${name} <args>")`,
+  );
+}
+
 export function shellPath(target: string): string {
   if (process.platform !== "win32") return target;
   if (/^\/tmp(\/|$)/.test(target)) return path.join(os.tmpdir(), target.slice("/tmp".length));
@@ -1669,7 +1717,14 @@ export class AcpClient extends EventEmitter {
   private async handleFsRead(params: Record<string, unknown>) {
     const filePath = this.assertReadablePath(await this.uriPath(String(params.path ?? "")));
     const bytes = await fsp.readFile(filePath);
-    const raw = bytes.toString("utf8");
+    const bom = utf16Bom(bytes);
+    // Bytes are refused by name, not shown as mojibake: a message that says what
+    // the file is, is worth more than 12 KB of `�` the model cannot use and
+    // every later request keeps paying for.
+    if (looksBinary(bytes)) throw binaryReadError(String(params.path ?? ""), bytes.byteLength);
+    const raw = bom
+      ? new TextDecoder(bom === "be" ? "utf-16be" : "utf-16le").decode(bytes)
+      : bytes.toString("utf8");
     // The stamp covers the whole file even when a window goes back: `write`
     // compares it before overwriting, so a slice is still a read of this version.
     const hash = fileHash(bytes);

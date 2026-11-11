@@ -910,6 +910,54 @@ describe("built-in agent outside the session cwd", () => {
     ).rejects.toThrow(outsideError);
   });
 
+  // A `.zip` reached `read` in chat 6a9e7e2e and came back as ~12 KB of `�`, which
+  // then rode in every later request of that chat. The refusal names the file and
+  // says the two things the model actually needs: `read` is for text, and the
+  // handle it was given opens in bash too — the format picks the tool, not us.
+  it("refuses a binary through read, naming bash as the way to it", async () => {
+    const { cwd } = await room();
+    const zip = path.join(cwd, "error-reports.zip");
+    // PK\x03\x04: a NUL in the head is what an archive has and text never does.
+    await fsp.writeFile(zip, Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00, 0x00, 0x00]));
+    const acp = client(getAdapter("builtin"), cwd, settingsWith({ builtinAllowOutsideCwd: false }));
+    const read = () => acp.handleClientMethod("fs/read_text_file", { path: zip });
+    await expect(read()).rejects.toThrow(/binary/);
+    // No recipe for one format: the tool is the model's to pick by extension.
+    await expect(read()).rejects.toThrow(/bash\("some-tool .*error-reports\.zip <args>"\)/);
+  });
+
+  // The handle is the one thing the prompt gave the model, so the refusal has to
+  // name it back — not the staging path, which is what sent chat 12c738c9 hunting
+  // through the harness's own sources.
+  it("names an att:// handle in that refusal, not the path it resolves to", async () => {
+    const { cwd } = await room();
+    const archive = path.join(cwd, "bundle.tar.gz");
+    await fsp.writeFile(archive, Buffer.from([0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00]));
+    const acp = client(getAdapter("builtin"), cwd, settingsWith({ builtinAllowOutsideCwd: false }));
+    (acp as unknown as { allowReadFile: (p: string) => void }).allowReadFile(archive);
+    const failed = acp.handleClientMethod("fs/read_text_file", { path: "att://bundle.tar.gz" });
+    await expect(failed).rejects.toThrow(/att:\/\/bundle\.tar\.gz — binary/);
+    await expect(
+      acp.handleClientMethod("fs/read_text_file", { path: "att://bundle.tar.gz" }),
+    ).rejects.toThrow(/is a handle for every tool/);
+  });
+
+  // UTF-16 text is NUL-heavy by nature; a NUL check that ignored its BOM would
+  // refuse a file a Windows editor wrote and call it an archive.
+  it("reads UTF-16 text instead of calling it binary", async () => {
+    const { cwd } = await room();
+    const wide = path.join(cwd, "notes-utf16.txt");
+    const text = "привет\nbody\n";
+    const body = Buffer.from(text, "utf16le");
+    await fsp.writeFile(wide, Buffer.concat([Buffer.from([0xff, 0xfe]), body]));
+    const acp = client(getAdapter("builtin"), cwd, settingsWith({ builtinAllowOutsideCwd: false }));
+    const res = (await acp.handleClientMethod("fs/read_text_file", { path: wide })) as {
+      content: string;
+    };
+    expect(res.content).toContain("body");
+    expect(res.content).toContain("привет");
+  });
+
   // The path a model copies from `pwd`: Git Bash prints the cwd as /c/... and a
   // `read` of that spelling used to resolve to C:\c\... and fail.
   it.runIf(process.platform === "win32")("reads a file named the way the shell prints it", async () => {
