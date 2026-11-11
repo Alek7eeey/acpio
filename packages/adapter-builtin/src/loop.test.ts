@@ -1123,3 +1123,113 @@ describe("runTurnWithRetry", () => {
   });
 });
 
+
+/**
+ * A turn is one `promptHistory` call: the settings behind it are read before the
+ * first step, and for the next 200 nothing looks again. Chat 6a9e7e2e spent 225
+ * steps that way — it ended at 348K on the wire with no compaction ever asked
+ * for, while the same settings compacted another chat eight times because that
+ * one happened to be split into 74 turns.
+ */
+describe("the line between steps", () => {
+  /** The turn's own `prepareStep`, as the SDK would have called it. */
+  async function stepOf(
+    opts: Partial<Parameters<typeof runTurn>[0]> = {},
+  ): Promise<(step: unknown) => Promise<{ messages?: ModelMessage[] }>> {
+    let prepare: ((step: unknown) => Promise<{ messages?: ModelMessage[] }>) | undefined;
+    vi.mocked(streamText).mockImplementation(((args: { prepareStep?: typeof prepare }) => {
+      prepare = args.prepareStep;
+      return {
+        fullStream: (async function* () {})(),
+        responseMessages: Promise.resolve([]),
+        finishReason: Promise.resolve("stop"),
+        usage: Promise.resolve({ inputTokens: 0, outputTokens: 0, totalTokens: 0 }),
+        steps: Promise.resolve([]),
+      };
+    }) as never);
+    await runTurn({
+      model: {} as Parameters<typeof runTurn>[0]["model"],
+      system: "test",
+      messages: [],
+      tools: {},
+      abortSignal: new AbortController().signal,
+      contextWindow: 1000,
+      emit: () => {},
+      ...opts,
+    });
+    if (!prepare) throw new Error("the turn handed the SDK no prepareStep");
+    return prepare;
+  }
+
+  it("cuts the view when the provider's own bill crossed the line", async () => {
+    const prepare = await stepOf({ fitLine: 1000 });
+    const history = [...turn("t0", 600), ...turn("t1", 600), ...turn("t2", 600)];
+    const out = await prepare({
+      messages: history,
+      responseMessages: [],
+      // Our estimate of this view is ~1000 tokens; the provider charged 4000 for
+      // the same bytes (Cyrillic runs ~2 chars per token, not 4).
+      steps: [{ usage: { inputTokens: 4000 } }],
+    });
+    expect(out.messages).toBeDefined();
+    expect(out.messages!.length).toBeLessThan(history.length);
+    // A note stands where the dropped steps were, so the view still opens with
+    // a user message the provider will take.
+    expect(out.messages![0]!.role).toBe("user");
+    expect(text(out.messages![0]!)).toMatch(/earlier steps of this turn were dropped/);
+    expect(text(out.messages![1]!)).toMatch(/^t2-/);
+  });
+
+  // A turn opened by ONE user message: there is no user boundary to cut at, and
+  // a history that starts with a tool result is one the SDK rejects.
+  it("never starts the cut turn on a tool result", async () => {
+    const prepare = await stepOf({ fitLine: 500 });
+    const call = (id: string): ModelMessage => ({
+      role: "assistant",
+      content: [{ type: "tool-call", toolCallId: id, toolName: "read", input: { path: id } }],
+    });
+    const result = (id: string): ModelMessage => ({
+      role: "tool",
+      content: [
+        { type: "tool-result", toolCallId: id, toolName: "read", output: { type: "text", value: "x".repeat(2000) } },
+      ],
+    });
+    const history: ModelMessage[] = [
+      { role: "user", content: [{ type: "text", text: "go" }] },
+      call("c1"),
+      result("c1"),
+      call("c2"),
+      result("c2"),
+    ];
+    const out = await prepare({
+      messages: history,
+      responseMessages: [],
+      steps: [{ usage: { inputTokens: 5000 } }],
+    });
+    expect(out.messages![0]!.role).toBe("user");
+    expect(out.messages![1]!.role).not.toBe("tool");
+    expect(out.messages!.length).toBeLessThan(history.length);
+  });
+
+  it("leaves the view alone while the bill is under the line", async () => {
+    const prepare = await stepOf({ fitLine: 1000 });
+    const history = [...turn("t0", 600), ...turn("t1", 600)];
+    const out = await prepare({
+      messages: history,
+      responseMessages: [],
+      steps: [{ usage: { inputTokens: 400 } }],
+    });
+    expect(out).toEqual({});
+  });
+
+  it("does not touch anything when the setting is off", async () => {
+    const prepare = await stepOf({});
+    const history = [...turn("t0", 600), ...turn("t1", 600)];
+    const out = await prepare({
+      messages: history,
+      responseMessages: [],
+      steps: [{ usage: { inputTokens: 99_000 } }],
+    });
+    expect(out).toEqual({});
+  });
+});

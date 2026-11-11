@@ -1997,6 +1997,14 @@ export class BuiltinAgent implements InProcessAgentTransport {
           abortSignal: abort.signal,
           contextWindow,
           maxOutputTokens: live.builtinMaxOutputTokens,
+          // The line the settings draw is a per-step thing, not a per-turn one:
+          // a turn is one `promptHistory` call, and chat 6a9e7e2e rode 225 steps
+          // past it because nothing looked again. Unset means the same thing it
+          // means there — "off" touches nothing, pruned only at the turn.
+          fitLine:
+            live.builtinContextMode === "off"
+              ? undefined
+              : contextWindow * (live.builtinCompactionThresholdPercent / 100),
           // The `/thinking-limit` fuse: past this many chars of one step's
           // private reasoning the call is cut and the turn carries on below.
           reasoningLimitChars: this.thinkingLimit,

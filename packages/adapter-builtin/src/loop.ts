@@ -38,6 +38,15 @@ export interface TurnOptions {
    */
   takeSteer?: () => Array<{ message: ModelMessage; ack: () => void }>;
   /**
+   * The line the *measured* context must not cross between steps — a percent of
+   * the window, unset/0 = no check. A turn is one `promptHistory` call: the
+   * settings behind it are read before its first step, and nothing looks again
+   * for the next 200. Chat 6a9e7e2e spent 225 steps that way and ended at 348K
+   * with no compaction ever asked for. This is the check that runs between steps,
+   * on the provider's own count of what the last one cost.
+   */
+  fitLine?: number;
+  /**
    * How often to tick `session/update: heartbeat` while a tool runs — the
    * host's idle ceiling counts silence, so a tool quiet for minutes must
    * still prove the agent is alive. Unset = {@link HEARTBEAT_MS}; tests
@@ -97,7 +106,17 @@ export function pruneMessages(
   thresholdPercent = 80,
 ): ModelMessage[] {
   if (!(contextWindow > 0)) return messages;
-  const budget = contextWindow * (thresholdPercent / 100);
+  return keepNewestWithin(messages, contextWindow * (thresholdPercent / 100));
+}
+
+/**
+ * The newest slice that fits `budget` estimated tokens, cut only at user-message
+ * boundaries. Separate from {@link pruneMessages} because the between-step check
+ * (see `TurnOptions.fitLine`) has a budget in hand rather than a window: it is
+ * what the provider's own bill leaves room for, not what our estimate says.
+ */
+export function keepNewestWithin(messages: ModelMessage[], budget: number): ModelMessage[] {
+  if (!(budget > 0)) return messages;
   if (estimateTokens(messages) <= budget) return messages;
 
   const cuts: number[] = [];
@@ -111,6 +130,57 @@ export function pruneMessages(
     if (estimateTokens(slice) <= budget) return slice;
   }
   return cuts.length ? messages.slice(cuts[cuts.length - 1]) : messages;
+}
+
+/**
+ * The step's view, cut down to the line — measured, not estimated. Our own
+ * estimate is chars/4, which under-counts Cyrillic by ~2x: chat 6a9e7e2e looked
+ * like 150K by estimate while the provider charged 348K, so a threshold on the
+ * estimate never fires on a Russian transcript. The provider tells us what the
+ * previous step really cost, and that is the number the line is about.
+ *
+ * The cut is proportional: how much of the estimated view the line buys at the
+ * provider's own rate.
+ *
+ * Inside a turn there are no user turns to cut at — one user message opened the
+ * whole thing — so the cut lands on the oldest message that is not a tool
+ * result (a history may not start with one: the SDK rejects a result whose call
+ * is gone), and a one-line note stands in for what was dropped. The transcript
+ * itself is untouched: the next turn rebuilds the view from it and compacts
+ * there, with a digest instead of a note.
+ */
+function fitToMeasured(
+  messages: ModelMessage[],
+  steps: ReadonlyArray<{ usage?: { inputTokens?: number | undefined } } | undefined>,
+  line: number | undefined,
+): ModelMessage[] {
+  if (!line || line <= 0 || !steps.length) return messages;
+  const measured = steps[steps.length - 1]?.usage?.inputTokens ?? 0;
+  if (!(measured > line)) return messages;
+  const estimated = estimateTokens(messages);
+  if (estimated <= 0) return messages;
+  return keepNewestStep(messages, Math.floor((estimated * line) / measured));
+}
+
+/** What stands where the dropped steps of this turn were. */
+const STEPS_DROPPED_NOTE =
+  "[earlier steps of this turn were dropped to stay under the context line — " +
+  "call a tool again if you need its output]";
+
+function keepNewestStep(messages: ModelMessage[], budget: number): ModelMessage[] {
+  if (!(budget > 0)) return messages;
+  if (estimateTokens(messages) <= budget) return messages;
+  const starts: number[] = [];
+  for (let i = 1; i < messages.length; i++) {
+    if (messages[i]!.role !== "tool") starts.push(i);
+  }
+  if (!starts.length) return messages;
+  const note = (): ModelMessage => ({ role: "user", content: [{ type: "text", text: STEPS_DROPPED_NOTE }] });
+  for (const at of starts) {
+    const slice = messages.slice(at);
+    if (estimateTokens(slice) <= budget) return [note(), ...slice];
+  }
+  return [note(), ...messages.slice(starts[starts.length - 1]!)];
 }
 
 /** chars/4 is a deliberate overestimate of the token count — see {@link pruneMessages}. */
@@ -734,7 +804,7 @@ export async function runTurn(opts: TurnOptions): Promise<TurnOutcome> {
     // (an OpenAI-compatible endpoint takes a string there). `responseMessages`
     // counts what the turn has produced so far, so `at` is exactly where a
     // folded message belongs in history.
-    prepareStep: (step: { messages: ModelMessage[]; responseMessages: readonly unknown[] }) => {
+    prepareStep: (step: { messages: ModelMessage[]; responseMessages: readonly unknown[]; steps: ReadonlyArray<{ usage?: { inputTokens?: number | undefined } }> }) => {
       const taken = opts.takeSteer?.() ?? [];
       const at = step.responseMessages.length;
       taken.forEach((entry, i) => {
@@ -744,7 +814,13 @@ export async function runTurn(opts: TurnOptions): Promise<TurnOutcome> {
       const withSteers = taken.length
         ? [...step.messages, ...taken.map((entry) => entry.message)]
         : step.messages;
-      const messages = attachToolImages(withSteers, opts.toolImages);
+      // The line is checked here, between steps, because here is where a long
+      // turn grows: `pruneMessages` at the turn's start only ever saw step one.
+      const messages = fitToMeasured(
+        attachToolImages(withSteers, opts.toolImages),
+        step.steps,
+        opts.fitLine,
+      );
       return messages === step.messages ? {} : { messages };
     },
   });
