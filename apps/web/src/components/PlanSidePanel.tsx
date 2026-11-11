@@ -6,6 +6,7 @@ import {
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { createPortal } from "react-dom";
 import { PlanApprovalBody, type PlanPayload } from "./PlanApprovalBody";
 import { useT } from "../lib/i18n";
 import { isSidePanelResizeAllowed } from "../lib/panelLayout";
@@ -210,7 +211,7 @@ export function PlanSidePanel({
     }
   };
 
-  return (
+  const panel = (
     <aside
       className={`${styles.panel}${fillPane ? ` ${styles.panelFill}` : ""}${expanded ? ` ${styles.panelExpanded}` : ""} ${dragging ? styles.resizing : ""}`}
       aria-label={t("planPanel.title")}
@@ -409,6 +410,11 @@ export function PlanSidePanel({
       ) : null}
     </aside>
   );
+  // Full screen is drawn on the body: the panel lives inside the chat pane, and
+  // the pane's own stacking context (`.splitPaneFocused`) keeps a fixed child
+  // beneath the sidebar and the app header — the tree covered the plan's left
+  // edge and the header its own header row, X and all.
+  return expanded ? createPortal(panel, document.body) : panel;
 }
 
 /**

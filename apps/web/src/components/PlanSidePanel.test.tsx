@@ -166,4 +166,17 @@ describe("PlanSidePanel", () => {
     expect(screen.queryByText("Approve")).toBeNull();
     expect(screen.queryByText("Pace")).toBeNull();
   });
+
+  it("leaves the chat column for the body when it goes full screen", () => {
+    // The chat pane is its own stacking context, so a fixed panel inside it is
+    // painted under the sidebar and the app header — full screen means the body.
+    const { container } = renderPanel(PLAN);
+    const inColumn = () => container.contains(screen.getByLabelText("Outline"));
+    expect(inColumn()).toBe(true);
+    fireEvent.click(screen.getByLabelText("Expand to full screen"));
+    expect(inColumn()).toBe(false);
+    expect(screen.getByLabelText("Outline").parentElement).toBe(document.body);
+    fireEvent.click(screen.getByLabelText("Exit full screen"));
+    expect(inColumn()).toBe(true);
+  });
 });

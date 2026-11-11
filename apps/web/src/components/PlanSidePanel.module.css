@@ -36,11 +36,12 @@
 
 /* Full screen: the plan takes the window, chat and all. Fixed rather than wide —
    the panel is drawn inside the chat's column, and a column cannot be talked
-   into the rest of the screen. */
+   into the rest of the screen. The z-index has to clear the app header (200) and
+   the sidebar tree (20) to be on top of everything; dialogs sit above it. */
 .panelExpanded {
   position: fixed;
   inset: 0;
-  z-index: 60;
+  z-index: 210;
   flex: 1 1 auto;
   width: 100%;
   max-width: none;
@@ -595,7 +596,7 @@
   .panelExpanded {
     position: fixed;
     inset: 0;
-    z-index: 70;
+    z-index: 210;
     width: 100%;
     max-width: none;
   }
