@@ -10,12 +10,16 @@ import { builtinKeySpentPercent, fetchBuiltinProviderLimits } from "./limits.js"
  * Several keys on one provider (Settings → Built-in agent → Providers): how they
  * are spent, and what "spent" means.
  *
- * The choice is made per HTTP request, so it covers every call this agent makes
- * — the turn loop, the digest pass, a subagent — without any of them knowing
- * keys exist. `rotate` takes the next key every time, which pools the quota and
- * spreads the request rate; `exhausted` stays on one key until the endpoint says
- * it is out, which keeps a conversation on one bill and one prompt cache;
- * `smart` sends each request to the key whose quota is least spent.
+ * The choice belongs to the conversation, not to the request: `rotate` and
+ * `smart` pick a key once per chat and keep it, because the provider caches a
+ * prompt per key — a key that changes between two steps of one turn pays for the
+ * whole prefix again. `rotate` spreads chats over the list (the key comes from a
+ * hash of the session id, so a restart does not move it), `smart` starts a chat
+ * on the least spent key and stays there, `exhausted` keeps one key until the
+ * endpoint says it is out. All three re-pick when the key they hold cannot pay.
+ *
+ * A call made outside a chat (a title, the catalog probe) has no key to keep:
+ * it takes the next one, so those calls spread over the pool as they always did.
  *
  * "Spent" is read two ways, and both feed one rule — a key at 100 % gets no
  * requests and answers no error:
@@ -37,6 +41,9 @@ import { builtinKeySpentPercent, fetchBuiltinProviderLimits } from "./limits.js"
 
 /** Where each provider's key cursor stands, by provider id. */
 const cursors = new Map<string, number>();
+
+/** The key each chat holds: `providerId\0sessionId` → index into the list. */
+const chatKeys = new Map<string, number>();
 
 /** Statuses an OpenAI-compatible endpoint uses for "this key cannot pay". */
 const SPENT_STATUS = new Set([401, 402, 403, 429]);
@@ -88,8 +95,20 @@ const pendingReadings = new Map<string, Promise<number | null>>();
 /** Forget every cursor and every reading — a test's clean slate, and nothing else calls it. */
 export function resetProviderKeyCursors(): void {
   cursors.clear();
+  chatKeys.clear();
   spendReadings.clear();
   pendingReadings.clear();
+}
+
+/**
+ * The key a chat starts on, before anything is known about its spend: a hash of
+ * its own id, so two chats land on different keys and either of them lands on
+ * the same one after a restart.
+ */
+function hashTo(count: number, affinity: string): number {
+  let hash = 0;
+  for (let i = 0; i < affinity.length; i += 1) hash = (hash * 31 + affinity.charCodeAt(i)) | 0;
+  return count > 0 ? Math.abs(hash) % count : 0;
 }
 
 /** The cursor of one provider, wrapped into its key count. */
@@ -168,9 +187,9 @@ function attemptOrder(
   provider: BuiltinProviderConfig,
   spends: readonly (number | null)[],
   mode: BuiltinKeyMode,
+  start: number,
 ): number[] {
   const count = spends.length;
-  const start = cursorAt(provider.id, count);
   const rotated = Array.from({ length: count }, (_, step) => (start + step) % count);
   const usable = rotated.filter((at) => !atLimit(spends[at] ?? null));
   const pool = usable.length ? usable : rotated;
@@ -197,6 +216,7 @@ export function nextProviderKey(provider: BuiltinProviderConfig): string {
     provider,
     keys.map((key) => knownSpend(provider.id, key)),
     mode,
+    cursorAt(provider.id, keys.length),
   );
   const at = order[0] ?? 0;
   // Rotate consumes the key it handed out, and smart consumes it as a tie-break:
@@ -257,11 +277,16 @@ function withKey(init: RequestInit | undefined, key: string): RequestInit {
  *
  * `probe` reads what a vendor says is left on a key; the default asks the
  * provider's own usage API, and a test passes its own.
+ *
+ * `affinity` is the conversation this fetch serves (its session id). With one
+ * given, `rotate` and `smart` hold a key for that conversation and change it
+ * only when it cannot pay — the prefix it warmed is cached under that key.
  */
 export function providerFetch(
   provider: BuiltinProviderConfig,
   base: typeof fetch = fetch,
   probe: KeySpendProbe = spendFromVendor,
+  affinity?: string,
 ): typeof fetch {
   const keys = builtinProviderKeys(provider);
   if (!keys.length) return base;
@@ -270,13 +295,28 @@ export function providerFetch(
   );
   if (ownsAuth) return base;
   const mode = normalizeBuiltinKeyMode(provider.apiKeyMode);
+  // A chat that keeps its key is the whole point of the two spreading modes:
+  // without an id (a title call, a probe) there is no prefix to keep warm, so
+  // the call takes the next key and the pool spreads as before.
+  const boundId = affinity && mode !== "exhausted" ? `${provider.id}\u0000${affinity}` : null;
 
   return async (input, init) => {
     // What is left on each key, one round trip per key per minute at most; a
     // vendor that reports nothing (an endpoint of an unknown kind, a wallet)
     // answers "unknown" and the pool is ordered by its mode alone.
     const spends = await Promise.all(keys.map((key) => readSpend(provider, key, probe)));
-    const order = attemptOrder(provider, spends, mode);
+    const held = boundId ? chatKeys.get(boundId) : undefined;
+    const start = boundId
+      ? (held ?? (mode === "rotate" ? hashTo(keys.length, String(affinity)) : cursorAt(provider.id, keys.length)))
+      : cursorAt(provider.id, keys.length);
+    const order = attemptOrder(provider, spends, mode, start);
+    // The key this chat already warms wins over the mode's preference: moving
+    // it would throw the cached prefix away for a reading that moves every turn.
+    if (boundId && held !== undefined) {
+      const at = order.indexOf(held);
+      if (at > 0) order.unshift(...order.splice(at, 1));
+    }
+    if (boundId) chatKeys.set(boundId, order[0] ?? 0);
     for (let attempt = 0; ; attempt++) {
       const at = order[attempt] ?? order[0] ?? 0;
       const response = await base(input, withKey(init, keys[at]));
@@ -292,9 +332,11 @@ export function providerFetch(
       // the key's: hand it back instead of spending every key on it.
       if (!SPENT_STATUS.has(response.status) && !SPENT_BODY.test(text)) return response;
       // This key cannot pay: keep it out of the pool and start the next request
-      // after it, so the caller sees the answer instead of the quota error.
+      // after it, so the caller sees the answer instead of the quota error. A
+      // chat that held it picks a new one — the only time it may move.
       refuseKey(provider.id, keys[at]);
       cursors.set(provider.id, (at + 1) % keys.length);
+      if (boundId) chatKeys.set(boundId, order[attempt + 1] ?? ((at + 1) % keys.length));
     }
   };
 }

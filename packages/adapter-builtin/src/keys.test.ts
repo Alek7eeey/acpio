@@ -232,3 +232,50 @@ describe("nextProviderKey", () => {
     expect(nextProviderKey(provider({ apiKeys: [] }))).toBe("");
   });
 });
+
+describe("a chat keeps its key", () => {
+  it("holds one key for the whole conversation in rotate mode", async () => {
+    const { seen, fetchMock } = recorder([ok]);
+    const call = providerFetch(provider({ apiKeyMode: "rotate" }), fetchMock, undefined, "s-1");
+    for (let i = 0; i < 4; i++) await call("http://x/v1/chat/completions", { method: "POST" });
+    expect(new Set(seen).size).toBe(1);
+  });
+
+  it("spreads different chats over different keys", async () => {
+    const { seen, fetchMock } = recorder([ok]);
+    for (let i = 0; i < 8; i++) {
+      const call = providerFetch(provider({ apiKeyMode: "rotate" }), fetchMock, undefined, `chat-${i}`);
+      await call("http://x/v1/chat/completions", { method: "POST" });
+    }
+    expect(new Set(seen)).toEqual(new Set(["Bearer sk-one", "Bearer sk-two"]));
+  });
+
+  it("starts a smart chat on the least spent key and stays there", async () => {
+    let now = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    let table: Record<string, number | null> = { "sk-one": 90, "sk-two": 10 };
+    const probe: KeySpendProbe = async (_provider, apiKey) => table[apiKey] ?? null;
+    const { seen, fetchMock } = recorder([ok]);
+    const call = providerFetch(provider({ apiKeyMode: "smart" }), fetchMock, probe, "s-1");
+
+    await call("http://x/v1/chat/completions", { method: "POST" });
+    expect(seen).toEqual(["Bearer sk-two"]);
+
+    // The quota moves every turn; the cached prefix does not. The chat stays.
+    table = { "sk-one": 5, "sk-two": 40 };
+    now += 61_000;
+    await call("http://x/v1/chat/completions", { method: "POST" });
+    expect(seen).toEqual(["Bearer sk-two", "Bearer sk-two"]);
+  });
+
+  it("re-picks a key for the chat when the held one runs out", async () => {
+    const { seen, fetchMock } = recorder([quota(), ok, ok]);
+    const call = providerFetch(provider({ apiKeyMode: "rotate" }), fetchMock, undefined, "s-1");
+    await call("http://x/v1/chat/completions", { method: "POST" });
+    await call("http://x/v1/chat/completions", { method: "POST" });
+    // The refused key is gone from the pool, so the retry and the next turn both
+    // land on the other one — one miss, then the chat warms the new key.
+    expect(seen[0]).not.toBe(seen[1]);
+    expect(seen[2]).toBe(seen[1]);
+  });
+});

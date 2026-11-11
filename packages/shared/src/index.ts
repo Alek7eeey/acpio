@@ -1592,9 +1592,11 @@ export interface BuiltinProviderConfig {
    */
   apiKeys: string[];
   /**
-   * How the list above is spent: `"rotate"` (the default) takes the next key on
-   * every request, `"exhausted"` keeps one until the endpoint says it is spent,
-   * `"smart"` takes the key with the least spent quota.
+   * How the list above is spent: every mode picks one key per chat and keeps it,
+   * because the provider caches a prompt per key. `"rotate"` (the default)
+   * spreads chats over the list, `"smart"` starts each chat on the key with the
+   * least spent quota, `"exhausted"` keeps one until the endpoint says it is
+   * spent. A key that cannot pay hands that chat to the next one.
    */
   apiKeyMode?: BuiltinKeyMode;
   /**
@@ -1641,12 +1643,15 @@ export interface BuiltinProviderConfig {
 
 /**
  * What a provider does with several keys (Settings → Built-in agent →
- * Providers). `"rotate"` spreads every request over the list, so a set of keys
- * behaves as one bigger quota; `"exhausted"` stays on one key — the cached
- * prefix, the bill, the raise all stay in one place — and moves on only when
- * the endpoint answers that the key is out; `"smart"` balances every request
- * onto the key whose quota is least spent, as the vendor reports it. In every
- * mode a key whose quota is at 100 % gets no requests at all.
+ * Providers). All three choose per **chat**, not per request: a provider caches
+ * a prompt under the key it was sent with, so a key that moves between two
+ * steps of a turn pays for the whole prefix again. `"rotate"` spreads chats
+ * over the list, so a set of keys behaves as one bigger quota; `"smart"`
+ * starts each chat on the key whose quota is least spent, as the vendor reports
+ * it; `"exhausted"` keeps one key — the cached prefix, the bill, the raise all
+ * stay in one place — and moves on only when the endpoint answers that the key
+ * is out. In every mode a key whose quota is at 100 % gets no requests at all,
+ * and a chat holding such a key picks another one.
  */
 export type BuiltinKeyMode = "rotate" | "exhausted" | "smart";
 

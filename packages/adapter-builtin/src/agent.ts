@@ -453,8 +453,11 @@ function builtinEndpoint(
     baseURL: provider.url,
     // No `apiKey` here: the provider may carry several (Settings → Built-in
     // agent → Providers), so `providerFetch` puts one on every request and, on a
-    // key that cannot pay, sends the same request again on the next one.
-    fetch: providerFetch(provider),
+    // key that cannot pay, sends the same request again on the next one. The
+    // session id is handed over so the pool keeps one key per chat: the provider
+    // caches a prompt per key, and a key that moves mid-conversation pays for the
+    // whole prefix again.
+    fetch: providerFetch(provider, fetch, undefined, sessionId),
     // Most OpenAI-compatible servers only report usage when asked to.
     includeUsage: true,
     headers: builtinProviderHeaders(provider.headers, sessionId),
