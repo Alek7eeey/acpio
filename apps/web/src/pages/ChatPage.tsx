@@ -1269,6 +1269,87 @@ function IconReadAloud() {
   );
 }
 
+function IconPaste() {
+  return (
+    <MsgIcon>
+      <path d="M9 3h6v4H9V3Z" stroke="currentColor" strokeWidth="1.85" strokeLinejoin="round" />
+      <path
+        d="M9 5H6.5A1.5 1.5 0 0 0 5 6.5v13A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5v-13A1.5 1.5 0 0 0 17.5 5H15"
+        stroke="currentColor"
+        strokeWidth="1.85"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </MsgIcon>
+  );
+}
+
+function IconSelectAll() {
+  return (
+    <MsgIcon>
+      <path
+        d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16"
+        stroke="currentColor"
+        strokeWidth="1.85"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </MsgIcon>
+  );
+}
+
+function IconUndo() {
+  return (
+    <MsgIcon>
+      <path
+        d="M4 9h10.5a5.5 5.5 0 0 1 0 11H8"
+        stroke="currentColor"
+        strokeWidth="1.85"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="m8 5-4 4 4 4"
+        stroke="currentColor"
+        strokeWidth="1.85"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </MsgIcon>
+  );
+}
+
+function IconRedo() {
+  return (
+    <MsgIcon>
+      <path
+        d="M20 9H9.5a5.5 5.5 0 0 0 0 11H16"
+        stroke="currentColor"
+        strokeWidth="1.85"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="m16 5 4 4-4 4"
+        stroke="currentColor"
+        strokeWidth="1.85"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </MsgIcon>
+  );
+}
+
+/** Shortcut labels shown in the input's editing rows (platform-aware). */
+function composerEditShortcuts(apple = isAppleUi()) {
+  return {
+    paste: apple ? "\u2318V" : "Ctrl+V",
+    selectAll: apple ? "\u2318A" : "Ctrl+A",
+    undo: apple ? "\u2318Z" : "Ctrl+Z",
+    redo: apple ? "\u2318\u21e7Z" : "Ctrl+Shift+Z",
+  } as const;
+}
+
 function UserMessageActions({
   messageId,
   text,
@@ -4804,10 +4885,16 @@ function ChatThread() {
     };
   }, [chipMenu]);
 
-  /** Right click in the input: the quick commands it can send by itself. */
+  /** Right click on the empty field (no selection): the quick commands it can
+   *  send by itself, then the basic editing ones. A picked word keeps the
+   *  browser's own menu. */
   const [composerMenu, setComposerMenu] = useState<{ x: number; y: number } | null>(null);
   const composerMenuRef = useRef<HTMLDivElement | null>(null);
   const composerMenuStyle = useFixedMenuPlacement(composerMenu, composerMenuRef);
+  // The editing rows carry their shortcuts only while the reader wants hints.
+  const showHints = useShowHotkeyHints();
+  const hint = (value: string) => (showHints ? value : undefined);
+  const composerShortcuts = composerEditShortcuts();
 
   useEffect(() => {
     if (!composerMenu) return;
@@ -6145,6 +6232,65 @@ function ChatThread() {
       el.setSelectionRange(next.length, next.length);
       syncComposerSize(el);
     });
+  };
+
+  /**
+   * Paste from the menu as Ctrl+V would: text lands over the selection, and a
+   * wall of it is offered as a file first. A clipboard with no text on it is
+   * asked for files — a screenshot is the other half of a paste.
+   */
+  const pasteIntoComposer = async () => {
+    setComposerMenu(null);
+    const el = textareaRef.current;
+    const start = el?.selectionStart ?? text.length;
+    const end = el?.selectionEnd ?? start;
+    let pasted = "";
+    try {
+      pasted = await navigator.clipboard.readText();
+    } catch {
+      pasted = "";
+    }
+    if (pasted) {
+      if (isLargePastedText(pasted)) offerPasteAsFile(pasted, { start, end });
+      else insertComposerText(pasted, { start, end });
+      return;
+    }
+    try {
+      const items = await navigator.clipboard.read();
+      const files: File[] = [];
+      for (const item of items) {
+        for (const type of item.types) {
+          if (type.startsWith("text/")) continue;
+          const blob = await item.getType(type);
+          files.push(new File([blob], "", { type: blob.type || type }));
+        }
+      }
+      if (files.length > 0) attachPastedFiles(files, { start, end });
+    } catch {
+      /* No clipboard permission, or no such API: there is nothing to paste. */
+    }
+  };
+
+  /** Highlight the whole draft, so the next key replaces it. */
+  const selectAllComposer = () => {
+    setComposerMenu(null);
+    const el = textareaRef.current;
+    if (!el) return;
+    el.focus({ preventScroll: true });
+    el.setSelectionRange(0, el.value.length);
+    setCursorPos(el.value.length);
+  };
+
+  /**
+   * The field's own history, reached through the browser: the undo stack of a
+   * textarea belongs to it, and a menu row cannot type for the reader.
+   */
+  const stepComposerHistory = (direction: "undo" | "redo") => {
+    setComposerMenu(null);
+    const el = textareaRef.current;
+    if (!el) return;
+    el.focus({ preventScroll: true });
+    document.execCommand(direction);
   };
 
   /** Regenerate an assistant reply: resend its user prompt as an edit. */
@@ -8002,6 +8148,37 @@ function ChatThread() {
                         />
                       ))
                     : null}
+                  {/* The basic rows come after the quick ones: an empty press
+                      on the field is where a reader looks for paste. */}
+                  <div className={styles.msgActionMenuSep} />
+                  <MsgMenuItem
+                    label={t("chat.paste")}
+                    shortcut={hint(composerShortcuts.paste)}
+                    onClick={() => void pasteIntoComposer()}
+                  >
+                    <IconPaste />
+                  </MsgMenuItem>
+                  <MsgMenuItem
+                    label={t("chat.selectAll")}
+                    shortcut={hint(composerShortcuts.selectAll)}
+                    onClick={selectAllComposer}
+                  >
+                    <IconSelectAll />
+                  </MsgMenuItem>
+                  <MsgMenuItem
+                    label={t("chat.undo")}
+                    shortcut={hint(composerShortcuts.undo)}
+                    onClick={() => stepComposerHistory("undo")}
+                  >
+                    <IconUndo />
+                  </MsgMenuItem>
+                  <MsgMenuItem
+                    label={t("chat.redo")}
+                    shortcut={hint(composerShortcuts.redo)}
+                    onClick={() => stepComposerHistory("redo")}
+                  >
+                    <IconRedo />
+                  </MsgMenuItem>
                 </div>,
                 document.body,
               )
@@ -8101,6 +8278,11 @@ function ChatThread() {
                 setSlashMenuDismissed(true);
               }}
               onContextMenu={(e) => {
+                // Words the reader picked belong to the browser: its own menu
+                // carries them (copy, search, translate). The quick commands
+                // are for the empty field, where the click drops a caret.
+                const el = e.currentTarget;
+                if (el.selectionStart !== el.selectionEnd) return;
                 e.preventDefault();
                 setComposerMenu({ x: e.clientX, y: e.clientY });
               }}

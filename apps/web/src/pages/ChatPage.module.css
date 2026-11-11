@@ -2101,6 +2101,12 @@ button.userSlashCmd:focus-visible {
   flex-shrink: 0;
 }
 
+.msgActionMenuSep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
+}
+
 .msgActionMenuLabel {
   flex: 1;
   min-width: 0;
