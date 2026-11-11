@@ -3,6 +3,7 @@
 // Right click in the composer offers the quick commands, and only writes them
 // into the field: the draft becomes the skill's own argument — a draft turned
 // into a plan without being retyped — and the reader's Enter is what sends it.
+// The basic editing rows (paste, select all, undo, redo) come after them.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -180,12 +181,18 @@ describe("right click in the composer", () => {
     expect(input.value).toBe("/ask ");
   }, 20_000);
 
-  it("offers the skill commands alone", async () => {
+  it("offers the quick commands, then the basic editing rows", async () => {
     const { container } = renderChat();
     menuOf(container.querySelector("textarea")!);
+    // No repo in this case: the git rows are absent, and the field's own
+    // editing rows follow the quick commands.
     expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
       "/plan",
       "/ask",
+      "Вставить",
+      "Выделить всё",
+      "Отменить",
+      "Повторить",
     ]);
   }, 20_000);
 
