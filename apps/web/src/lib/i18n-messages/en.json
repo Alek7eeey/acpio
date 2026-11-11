@@ -579,7 +579,7 @@
     "builtinPruneReasoningBeforeLast": "Only in the last",
     "builtinPruneReasoningDrop": "Drop",
     "builtinRespectReasoningHistory": "Do not forget old reads for thinking models",
-    "builtinRespectReasoningHistoryHint": "When a model thinks out loud, it does better seeing what it read and ran: without that it makes more mistakes. With this switch on, the agent refuses to “forget” in such conversations. Turn it off when room matters more than quality.",
+    "builtinRespectReasoningHistoryHint": "When a model thinks out loud, it does better seeing what it read and ran. With this switch on, in conversations that carry reasoning the agent does not replace old read/grep/glob outputs with a “call it again” note: both the thoughts and the bodies of the files it read stay in the context. History compaction by the window threshold still runs. Turn it off when room matters more than quality.",
     "builtinOffloadToolResultTokens": "Archive tool answers larger than, tokens",
     "builtinOffloadToolResultTokensHint": "A bulky answer (a large file, a long test log) is not sent to the model whole: it is saved into the chat's archive, and the conversation keeps a short line with the beginning of the text and a record id. The agent brings the full text back by that id when it really needs it. Room is saved, nothing is lost. 0 = off, 4 000 is a sensible threshold.",
     "builtinProvidersTitle": "Providers",
