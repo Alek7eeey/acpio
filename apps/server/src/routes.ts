@@ -174,7 +174,7 @@ import {
 import { buildChatsExport, buildExport, defaultExportDir, referenceExportDir, saveChatsExportToDisk, saveExportToDisk } from "./services/chatExport.js";
 import { isErrorCode, localeFromRequest, resolveLocale, localizeError, serverT } from "./lib/locale.js";
 import { adapters, isBuiltinFamily, RESERVED_AGENT_IDS } from "./adapters/registry.js";
-import type { AgentProvider, AppSettings } from "@acpio/shared";
+import type { AgentProvider, AppSettings, SessionDto } from "@acpio/shared";
 import {
   isLoopbackClient,
   isRemoteAccessPublicPath,
@@ -182,6 +182,22 @@ import {
   remoteAccessProtected,
   remoteKeysMatch,
 } from "./lib/remoteAccess.js";
+
+/**
+ * A board's cards with the runtime's own answer in `status`. The row is written
+ * a beat behind the agent, and a card still saying "running" after its harness
+ * died is exactly what the client used to settle with one request per task —
+ * on a full board, a fan-out that cost more than the list it corrected. Only an
+ * upgrade is applied: settling a turn back to idle is the agent's own report.
+ */
+function withLiveStatus(tasks: SessionDto[]): SessionDto[] {
+  return tasks.map((task) => {
+    const live = getLiveTurnState(task.id);
+    if (!live || (!live.running && !live.waiting)) return task;
+    const status: SessionDto["status"] = live.waiting ? "waiting" : "running";
+    return status === task.status ? task : { ...task, status };
+  });
+}
 
 /** Content types for inline image previews of attached files (?inline=1). */
 const IMAGE_MIME: Record<string, string> = {
@@ -1241,7 +1257,7 @@ export async function registerRoutes(app: FastifyInstance) {
 
   app.get("/api/sessions", async (req) => {
     const query = z.object({ boardId: z.string().max(64).optional() }).parse(req.query ?? {});
-    if (query.boardId) return listBoardSessions(query.boardId);
+    if (query.boardId) return withLiveStatus(await listBoardSessions(query.boardId));
     return listSessions();
   });
 

@@ -87,6 +87,17 @@ type BoardScrollState = {
 const boardScrollByBoard: Record<string, BoardScrollState> = {};
 
 /**
+ * The card a trip into a task's chat started at, taken where it is a fact: the
+ * click. The focused session cannot stand in for it — the reader may have moved
+ * to another chat (or into a subsession) before coming back, and then the board
+ * would put some other card, or no card at all, on screen.
+ */
+const boardOriginByBoard: Record<string, string> = {};
+
+/** Frames a lane that is still too short for the saved offset is given. */
+const RESTORE_FRAMES = 10;
+
+/**
  * The folder whose new-task form a board was left with. The form itself dies
  * with the page, so without this a trip to a task's chat and back shows an
  * empty lane with the half-written task nowhere in sight. In-memory like the
@@ -1395,6 +1406,8 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
    *  the reader's, and must not overwrite the position we are restoring to. */
   const restoringRef = useRef(false);
   const restoredBoardRef = useRef<string | null>(null);
+  /** The trip's card has been brought on screen — asked for once per visit. */
+  const originScrolledRef = useRef(false);
 
   /**
    * Close the new-task form. The form owns what it held and releases the
@@ -1454,41 +1467,87 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   };
 
   /**
-   * Coming back from a task: put the reader where they left the board — same
-   * rail, same lanes — then make sure the card the trip started at is on
-   * screen (`nearest` scrolls only if it drifted out of view). Retry on the
-   * next list change while the lanes are still too short to hold the position.
+   * The card the trip started at, on screen — `nearest` scrolls only if it
+   * drifted out of view. Asked for once: a list change that carries no card
+   * (or the same one) must not move the reader again.
    */
-  useLayoutEffect(() => {
-    if (!tasksReady || restoredBoardRef.current === boardId) return;
-    const saved = boardId ? boardScrollByBoard[boardId] : undefined;
+  const scrollToOrigin = useCallback(() => {
+    if (originScrolledRef.current) return;
+    const origin = boardId ? boardOriginByBoard[boardId] : undefined;
+    if (!origin) return;
+    const card = document.querySelector<HTMLElement>(`[data-task-id="${origin}"]`);
+    if (!card) return;
+    originScrolledRef.current = true;
+    card.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  }, [boardId]);
+
+  /**
+   * Put the reader where they left the board — same rail, same lanes — then
+   * make sure the card the trip started at is on screen.
+   *
+   * Answers whether the position is settled. A lane still too short to hold its
+   * saved offset (the cards are in the DOM, their pictures and fonts settle a
+   * beat later) says no, and the caller gives it a few frames: the position is
+   * the reader's, not the network's, so nothing here waits on a fetch — the
+   * board's task list is already in the store when this page mounts, and its
+   * refresh only replaces the cards underneath.
+   */
+  const restorePosition = useCallback(() => {
+    if (!boardId || restoredBoardRef.current === boardId) return true;
+    const saved = boardScrollByBoard[boardId];
     if (!saved) {
       restoredBoardRef.current = boardId;
-      return;
+      return true;
     }
     restoringRef.current = true;
     if (railRef.current) railRef.current.scrollTop = saved.rail;
     if (railListRef.current) railListRef.current.scrollTop = saved.railList;
     if (columnsRef.current) columnsRef.current.scrollLeft = saved.columnsX;
+    let tooShort = false;
     for (const [id, top] of Object.entries(saved.columns)) {
-      const el = columnRefs.current.get(id);
-      if (el) el.scrollTop = top;
-    }
-    for (const [id, top] of Object.entries(saved.columns)) {
-      if (top <= 0) continue;
       const el = columnRefs.current.get(id);
       if (!el) continue;
+      el.scrollTop = top;
+      if (top <= 0) continue;
       const maxTop = el.scrollHeight - el.clientHeight;
-      if (el.scrollTop < top - 1 && el.scrollTop < maxTop - 1) return;
+      if (el.scrollTop < top - 1 && el.scrollTop < maxTop - 1) tooShort = true;
     }
+    if (tooShort) return false;
     restoredBoardRef.current = boardId;
     restoringRef.current = false;
-    const origin = useAppStore.getState().activeSessionId;
-    if (!origin) return;
-    document
-      .querySelector<HTMLElement>(`[data-task-id="${origin}"]`)
-      ?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
-  }, [boardId, tasks, tasksReady]);
+    scrollToOrigin();
+    return true;
+  }, [boardId, scrollToOrigin]);
+
+  useLayoutEffect(() => {
+    if (!boardId) return;
+    let frame: number | null = null;
+    let tries = 0;
+    const tick = () => {
+      frame = null;
+      if (restorePosition()) return;
+      if (++tries >= RESTORE_FRAMES) {
+        // A lane that will not grow does not get to keep the reader's own
+        // scrolling muted: land where the clamp left us and let it go.
+        restoredBoardRef.current = boardId;
+        restoringRef.current = false;
+        scrollToOrigin();
+        return;
+      }
+      frame = requestAnimationFrame(tick);
+    };
+    tick();
+    return () => {
+      if (frame !== null) cancelAnimationFrame(frame);
+    };
+  }, [boardId, tasks, restorePosition, scrollToOrigin]);
+
+  // A card that was not in the tree when the position was restored — its list
+  // arriving a beat later — is scrolled to on that change, once.
+  useLayoutEffect(() => {
+    if (restoredBoardRef.current !== boardId) return;
+    scrollToOrigin();
+  }, [boardId, tasks, scrollToOrigin]);
 
   // A board that vanished (deleted elsewhere) must not strand the user here.
   useEffect(() => {
@@ -1705,6 +1764,9 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
     // detail GET streams in behind the chat instead of gating it. The
     // agent-menu PATCH keeps its place ahead of that GET: a detail fetched
     // first would adopt the provider the user just replaced.
+    // The card this trip starts at is noted where it is still a fact: the
+    // focused session may be another chat by the time the reader comes back.
+    if (boardId) boardOriginByBoard[boardId] = task.id;
     navigate("/chat");
     if (provider && provider !== task.provider) await setTaskProvider(task.id, provider);
     await selectSession(task.id);

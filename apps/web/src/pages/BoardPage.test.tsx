@@ -942,6 +942,26 @@ function ChatStub() {
 }
 
 describe("Board reading position", () => {
+  /** The board, its task's chat and a way back — two visits in one test. */
+  function renderTrip() {
+    return render(
+      <MemoryRouter initialEntries={["/board/b1"]}>
+        <I18nProvider>
+          <Routes>
+            <Route path="/board/:boardId" element={<BoardPage />} />
+            <Route path="/chat" element={<ChatStub />} />
+          </Routes>
+        </I18nProvider>
+      </MemoryRouter>,
+    );
+  }
+
+  /** The lane's own scroller: the group head is the lane's first child. */
+  function todoLaneOf(container: HTMLElement) {
+    return (container.querySelector('[data-column="todo"]') as HTMLElement)
+      .children[1] as HTMLElement;
+  }
+
   // The board unmounts when a task opens, so without a memory of its lanes the
   // reader comes back to the top and has to hunt for the card they clicked.
   it("returns to the lane and rail they left, with the opened task in view", async () => {
@@ -984,6 +1004,75 @@ describe("Board reading position", () => {
     expect(rail().scrollTop).toBe(40);
     // The trip's origin card: nearest means "already on screen — stay put".
     expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest", inline: "nearest" });
+  });
+
+  // The task list is a refresh, not the position: the cards the reader left sit
+  // in the store already, so a slow board GET must not hold the scroll hostage.
+  it("restores the position without waiting for the task list", async () => {
+    // The first visit reads the list; the second one's GET never settles.
+    apiMock.listBoardSessions.mockResolvedValueOnce([task]);
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+
+    const { container } = renderTrip();
+    await screen.findByText("Fix the login bug");
+
+    todoLaneOf(container).scrollTop = 240;
+    todoLaneOf(container).dispatchEvent(new Event("scroll"));
+
+    await userEvent.click(screen.getByText("Fix the login bug"));
+    expect(await screen.findByText("chat opened")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "back to board" }));
+    await screen.findByText("Fix the login bug");
+
+    await waitFor(() => expect(todoLaneOf(container).scrollTop).toBe(240));
+    expect(scrollIntoView).toHaveBeenCalled();
+  });
+
+  // The trip's origin is the card that was clicked, not whatever chat happens
+  // to be focused by the time the reader comes back — they may have moved on.
+  it("scrolls to the card the trip started at, not the focused chat", async () => {
+    apiMock.listBoardSessions.mockResolvedValueOnce([task]);
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+
+    const { container } = renderTrip();
+    await screen.findByText("Fix the login bug");
+    await userEvent.click(screen.getByText("Fix the login bug"));
+    expect(await screen.findByText("chat opened")).toBeTruthy();
+
+    // Another chat took the screen while the board waited on the shelf.
+    act(() => useAppStore.setState({ activeSessionId: "t9" }));
+
+    await userEvent.click(screen.getByRole("button", { name: "back to board" }));
+    await screen.findByText("Fix the login bug");
+
+    const card = container.querySelector('[data-task-id="t1"]');
+    await waitFor(() => expect(scrollIntoView.mock.contexts).toContain(card));
+  });
+
+  // A card whose lane arrives with the list, a frame after the position, is
+  // still scrolled to — once, on the list change that brings it.
+  it("scrolls to the origin card once it arrives with the list", async () => {
+    apiMock.listBoardSessions.mockResolvedValueOnce([task]);
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+
+    const { container } = renderTrip();
+    await screen.findByText("Fix the login bug");
+    await userEvent.click(screen.getByText("Fix the login bug"));
+    expect(await screen.findByText("chat opened")).toBeTruthy();
+
+    // The return starts on an empty board: nothing has come back from the
+    // server yet, so the origin card is not in the tree when the position is.
+    act(() => useAppStore.setState({ boardSessions: [] }));
+    apiMock.listBoardSessions.mockResolvedValueOnce([task]);
+
+    await userEvent.click(screen.getByRole("button", { name: "back to board" }));
+    await screen.findByText("Fix the login bug");
+
+    const card = container.querySelector('[data-task-id="t1"]');
+    await waitFor(() => expect(scrollIntoView.mock.contexts).toContain(card));
   });
 });
 

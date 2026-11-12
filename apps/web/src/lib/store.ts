@@ -2260,8 +2260,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   refreshBoardSessions: async (boardId) => {
     try {
       const tasks = await api.listBoardSessions(boardId);
+      // The cards come back carrying the runtime's own answer (the server puts
+      // the live turn in `status`), so there is nothing left to reconcile here:
+      // the sweep this used to await cost one round-trip per task, and the
+      // board waited on all of them before it could show its own list.
       set({ boardSessions: tasks });
-      await reconcileLiveTurnStatuses(tasks);
     } catch {
       // server offline — keep the current list
     }
