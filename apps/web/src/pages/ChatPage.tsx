@@ -8830,9 +8830,13 @@ const SPLIT_FAB_RAIL_INSET_PX = 44;
 /** Whether the thread carries the floating split button: a desktop chat in a
  *  single pane. The button draws itself by this, and the rail keeps clear by it. */
 function useSplitFabShown() {
-  const enabled = useChatSplitAllowed() && useAppStore((s) => s.settings.chatSplit !== false);
+  // Both hooks run on every render: `&&` here short-circuits the settings hook
+  // once the viewport narrows past the split breakpoint, and React unmounts the
+  // whole app on the changed hook count.
+  const splitAllowed = useChatSplitAllowed();
+  const splitEnabled = useAppStore((s) => s.settings.chatSplit !== false);
   const count = useAppStore((s) => Math.max(1, s.chatPaneIds?.length ?? 1));
-  return enabled && count === 1;
+  return splitAllowed && splitEnabled && count === 1;
 }
 
 function SplitToggleFab() {
