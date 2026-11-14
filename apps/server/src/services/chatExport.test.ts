@@ -189,6 +189,27 @@ describe("renderMarkdown", () => {
     expect(md).toContain(`> Экспорт чата: cursor · ${label}`);
   });
 
+  it("prints the token and prompt-cache figures the harness reported", () => {
+    const md = renderMarkdown(
+      makeDetail({
+        messages: [],
+        usage: { inputTokens: 43_840_876, cachedInputTokens: 20_280_064, outputTokens: 80_708, usedTokens: 189_505, contextWindow: 1_000_000 },
+      }),
+      "ru",
+    );
+    const line = md.split("\n").find((l) => l.startsWith("> Токены:")) ?? "";
+    expect(line).toContain("вход 43\u00a0840\u00a0876");
+    expect(line).toContain("из кэша 20\u00a0280\u00a0064 (46%)");
+    expect(line).toContain("выход 80\u00a0708");
+    expect(line).toContain("контекст 189\u00a0505 / 1\u00a0000\u00a0000");
+  });
+
+  it("drops the token line when the harness reported no tokens", () => {
+    const md = renderMarkdown(makeDetail({ messages: [], usage: { usedTokens: 10, contextWindow: 100 } }), "ru");
+    expect(md).not.toContain("Токены:");
+    expect(renderMarkdown(makeDetail({ messages: [] }), "ru")).not.toContain("Токены:");
+  });
+
   it("omits the folder line when cwd is empty", () => {
     const md = renderMarkdown(makeDetail({ cwd: "   ", messages: [] }), "ru");
     expect(md).not.toContain("Рабочая папка");

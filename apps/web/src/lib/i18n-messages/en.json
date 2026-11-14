@@ -1569,6 +1569,9 @@
     "metaFolder": "Working folder",
     "metaModel": "Model",
     "metaMessages": "Messages",
+    "metaUsage": "Tokens: input {{input}} · cached {{cached}}{{percent}} · output {{output}}{{context}}",
+    "metaUsagePercent": " ({{percent}}%)",
+    "metaUsageContext": " · context {{used}} / {{window}}",
     "metaExported": "Exported",
     "outputTruncated": "… output truncated",
     "emptyMessage": "(empty)"

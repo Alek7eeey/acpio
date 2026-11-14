@@ -65,6 +65,48 @@ function formatDate(iso: string, locale: AppLocale): string {
   }
 }
 
+/** Grouped figure for the header; unknown fields drop out instead of reading 0. */
+function fmtTokens(value: unknown, locale: AppLocale): string | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return Math.round(value).toLocaleString(locale === "en" ? "en-US" : "ru-RU");
+}
+
+/**
+ * The header's token line — the numbers a reader needs to judge a chat's cost:
+ * the input the provider read, the share of it the prompt cache served, the
+ * output, and the live window. The cache share is the whole point: the same
+ * transcript costs an order of magnitude less at 90% than at 10%, and neither
+ * the figures nor the reason for them can be recovered from the messages alone.
+ * "" when the harness never reported usage, so an old session keeps the old
+ * header.
+ */
+function tokenUsageLine(detail: SessionDetailDto, locale: AppLocale): string {
+  const usage = detail.usage;
+  if (!usage) return "";
+  const input = fmtTokens(usage.inputTokens, locale);
+  const cached = fmtTokens(usage.cachedInputTokens, locale);
+  const output = fmtTokens(usage.outputTokens, locale);
+  // A usage record that carries only the window is not a token report.
+  if (input == null && cached == null && output == null) return "";
+  const inputCount = Number(usage.inputTokens ?? 0) || 0;
+  const cachedCount = Number(usage.cachedInputTokens ?? 0) || 0;
+  const percent = inputCount > 0 ? Math.round((cachedCount / inputCount) * 100) : null;
+  const used = fmtTokens(usage.usedTokens, locale);
+  const window = fmtTokens(usage.contextWindow, locale);
+  const context =
+    used != null && window != null && Number(usage.contextWindow) > 0
+      ? t(locale, "export.metaUsageContext", { used, window })
+      : "";
+  const body = t(locale, "export.metaUsage", {
+    input: input ?? "0",
+    cached: cached ?? "0",
+    percent: percent == null ? "" : t(locale, "export.metaUsagePercent", { percent }),
+    output: output ?? "0",
+    context,
+  });
+  return `> ${body}`;
+}
+
 /** `830ms` / `1.24s` for a duration in milliseconds; "" when unknown. */
 function fmtMs(value: unknown): string {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return "";
@@ -351,6 +393,8 @@ export function renderMarkdown(detail: SessionDetailDto, locale: AppLocale): str
   if (detail.cwd?.trim()) {
     out.push(`> ${t(locale, "export.metaFolder")}: \`${detail.cwd}\``, "");
   }
+  const usageLine = tokenUsageLine(detail, locale);
+  if (usageLine) out.push(usageLine, "");
   out.push(
     `> ${t(locale, "export.metaMessages")}: ${detail.messages.length} · ${t(locale, "export.metaExported")}: ${formatDate(new Date().toISOString(), locale)}`,
     "",

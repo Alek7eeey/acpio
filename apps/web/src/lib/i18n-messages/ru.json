@@ -1597,6 +1597,9 @@
     "metaFolder": "Рабочая папка",
     "metaModel": "Модель",
     "metaMessages": "Сообщений",
+    "metaUsage": "Токены: вход {{input}} · из кэша {{cached}}{{percent}} · выход {{output}}{{context}}",
+    "metaUsagePercent": " ({{percent}}%)",
+    "metaUsageContext": " · контекст {{used}} / {{window}}",
     "metaExported": "Экспортировано",
     "outputTruncated": "… вывод обрезан",
     "emptyMessage": "(пусто)"
