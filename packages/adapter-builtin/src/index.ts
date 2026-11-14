@@ -150,6 +150,9 @@ export const builtinAdapter: HarnessAdapter = {
     // `apply_plan`'s gate: the approval card the panel draws around the plan
     // the reader is being asked about (see `PlanBridge`).
     "builtin/plan_approval": "create_plan",
+    // The drift card (Settings → Diagnostics → context drift): the reader says
+    // whether a request whose head moved is sent at all.
+    "builtin/context_drift": "ask_question",
   },
 };
 

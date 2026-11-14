@@ -25,7 +25,13 @@ import {
 } from "./config.js";
 import { createHostRpc } from "./host.js";
 import { providerFetch } from "./keys.js";
-import { withWireLog, wireLogState, type ContextDrift, type WireLogOptions } from "./wireLog.js";
+import {
+  isContextDriftStop,
+  withWireLog,
+  wireLogState,
+  type ContextDrift,
+  type WireLogOptions,
+} from "./wireLog.js";
 import {
   OffloadStore,
   offloadToolResults,
@@ -410,16 +416,17 @@ function planApprovalNudge(locale: string, path: string): string {
  * prefix) is sendable only if the echo is decided by the history, not by the
  * bytes of one request. `false` leaves a body that never thought exactly as it
  * was built, so no endpoint is handed a field it did not ask for.
+ *
+ * That history is the caller's answer, not this body's: a body carrying one
+ * reasoned step and one bare one would otherwise grow the field on the bare
+ * step a request *after* that step had already crossed the wire. The provider
+ * matches its cache from the first message, so a message edited behind the
+ * reader's back ends the cached prefix there and the whole tail is billed
+ * again — for a field the endpoint never missed.
  */
 export function fillReasoningEcho(messages: unknown, thinking = false): unknown {
   if (!Array.isArray(messages)) return messages;
-  const thinks =
-    thinking ||
-    messages.some((message) => {
-      const row = message as { role?: unknown; reasoning_content?: unknown } | undefined;
-      return row?.role === "assistant" && typeof row.reasoning_content === "string";
-    });
-  if (!thinks) return messages;
+  if (!thinking) return messages;
   let changed = false;
   const filled = messages.map((message) => {
     const row = message as { role?: unknown; reasoning_content?: unknown } | undefined;
@@ -443,8 +450,12 @@ function builtinEndpoint(
   provider: BuiltinProviderConfig,
   sessionId: string,
   extraBody?: Record<string, unknown>,
-  /** The conversation has reasoned before — see `fillReasoningEcho`. */
-  thinking = false,
+  /**
+   * Whether the conversation reasons, asked at every request — the caller pins
+   * the answer for as long as a message of it may still be on the wire (see
+   * `fillReasoningEcho`).
+   */
+  thinking: () => boolean = () => false,
   /** Whether the head is compared, and who hears about it — see `withWireLog`. */
   hooks?: WireLogOptions,
 ) {
@@ -479,7 +490,7 @@ function builtinEndpoint(
     // endpoint enforces on the history the agent hands back.
     transformRequestBody: (args: Record<string, any>) => {
       const body = Object.keys(extra).length > 0 ? { ...args, ...extra } : args;
-      const messages = fillReasoningEcho(body.messages, thinking);
+      const messages = fillReasoningEcho(body.messages, thinking());
       return messages === body.messages ? body : { ...body, messages };
     },
   });
@@ -722,6 +733,11 @@ export class BuiltinAgent implements InProcessAgentTransport {
    * the same one at every step.
    */
   private driftWarned = false;
+  /**
+   * The reader answered the drift card with “stop”: the turn ends there, and the
+   * request it was asked about is never sent. Reset at the start of a turn.
+   */
+  private driftStopped = false;
   /**
    * The skills half of the system prompt, fixed on the session's first turn: an
    * inlined skill body and the rules it replaces must sit still while the
@@ -1417,7 +1433,7 @@ export class BuiltinAgent implements InProcessAgentTransport {
       this.reasoningBody(selection),
       // The stored transcript, not the view: a pruned view is still a thinking
       // conversation, and the echo must survive the pruning.
-      hasReasoning(this.messages),
+      () => this.echoReasoning(),
       {
         onDrift: (drift) => this.warnDrift(drift),
         // Settings → Diagnostics: off means the head is not even hashed. Read
@@ -1436,16 +1452,48 @@ export class BuiltinAgent implements InProcessAgentTransport {
   private watching: boolean | undefined;
 
   /**
+   * Whether this turn's requests carry the reasoning echo, once decided.
+   * `undefined` asks the transcript again — see `echoReasoning`.
+   */
+  private echoThinking: boolean | undefined;
+
+  /**
+   * Does the conversation think, as far as this turn's requests are concerned?
+   *
+   * Asked once, at the turn's first request, and held for the rest of it: the
+   * transcript grows its own reasoning while the turn runs, and a decision
+   * retaken per request would add `reasoning_content` to an assistant message
+   * that already went out without it. The provider's cache stops at the first
+   * message that changed, so that field cost the whole tail of every later
+   * request in the turn (chat 7a6c147b: cached 9 600 of 11 430 where the step
+   * before it read 9 088 of 9 698).
+   *
+   * A refused attempt is the other half of the rule: a 400 turned no prefix into
+   * a cached one, so the question may be asked again and the rerun can satisfy
+   * an endpoint that demands the echo (`400 … The reasoning_content in the
+   * thinking mode must be passed back to the API`) at the cost of one break
+   * the reader would have paid anyway.
+   */
+  private echoReasoning(): boolean {
+    if (this.echoThinking === undefined) this.echoThinking = hasReasoning(this.messages);
+    return this.echoThinking;
+  }
+
+  /**
    * The chat says out loud that its context moved in the middle. The provider
    * matches a cached prompt from the first message, so a head that shifted
    * below it is billed in full from that point — the reader has to learn it
    * from the transcript, not from the invoice.
    *
+   * With Settings → Diagnostics → context drift on, the warning is also the card
+   * that decides this request: nothing is sent until the reader answers, and
+   * “stop” ends the turn here. `false` is that answer.
+   *
    * One warning per turn: a break found at the first step is the same break at
    * every step after it, and a chat that kept repeating it would bury itself.
    */
-  private warnDrift(drift: ContextDrift): void {
-    if (this.driftWarned) return;
+  private async warnDrift(drift: ContextDrift): Promise<boolean> {
+    if (this.driftWarned) return true;
     this.driftWarned = true;
     this.emitUpdate({
       sessionUpdate: "context_drift",
@@ -1454,6 +1502,61 @@ export class BuiltinAgent implements InProcessAgentTransport {
       // are only on disk in `full` mode, and the button follows that.
       logMode: wireLogState(),
     });
+    return this.confirmDrift(drift);
+  }
+
+  /**
+   * Park the request on the reader: continue as planned, or stop the turn. The
+   * question is the host's ordinary question card, so it survives a reconnect
+   * and is answerable from the panel like any other — see `responseFromUi`.
+   */
+  private async confirmDrift(drift: ContextDrift): Promise<boolean> {
+    const ru = this.opts.settings.locale === "ru";
+    const prompt = ru
+      ? `Начало запроса изменилось: совпало ${drift.prefixSame} из ${drift.prevMessages} ` +
+        `сообщений, сейчас ${drift.messages}. Запрос ещё не отправлен. Кэш провайдера отвечает ` +
+        "только на неизменное начало — всё после сдвига оплачивается полностью."
+      : `The request's head moved: ${drift.prefixSame} of ${drift.prevMessages} messages still ` +
+        `match, ${drift.messages} now. The request has not been sent yet. The provider's cache ` +
+        "only answers an unchanged head — everything past the shift is billed in full.";
+    let picked = "";
+    try {
+      const res = await this.rpc.request<{
+        outcome?: { answers?: Array<{ selectedOptionIds?: string[] }> };
+      }>("builtin/context_drift", {
+        title: ru ? "Контекст изменился в середине хода" : "The context changed mid-turn",
+        questions: [
+          {
+            id: "drift",
+            prompt,
+            options: [
+              { id: "continue", label: ru ? "Продолжить" : "Continue" },
+              { id: "stop", label: ru ? "Остановить ход" : "Stop the turn" },
+            ],
+          },
+        ],
+      });
+      picked = res?.outcome?.answers?.[0]?.selectedOptionIds?.[0] ?? "";
+    } catch {
+      // No card to show (host restarted, turn cut): the warning stands on its
+      // own and the request goes out — silence is not a stop.
+      return true;
+    }
+    // A turn cancelled while the card waited: there is nothing left to send.
+    if (this.abort?.signal.aborted) return false;
+    if (picked !== "stop") return true;
+    this.driftStopped = true;
+    this.emitUpdate({
+      sessionUpdate: "agent_message_chunk",
+      content: {
+        type: "text",
+        text: ru
+          ? "Ход остановлен: контекст запроса изменился."
+          : "The turn was stopped: the request's context had changed.",
+      },
+    });
+    this.abort?.abort();
+    return false;
   }
 
   /**
@@ -1464,6 +1567,9 @@ export class BuiltinAgent implements InProcessAgentTransport {
     selection: BuiltinModelSelection,
     focus: string,
   ): Promise<{ stopReason: string }> {
+    // The pass is its own turn: it takes the echo decision for itself instead
+    // of riding the last turn's.
+    this.echoThinking = undefined;
     const endpoint = this.endpointFor(selection);
     const abort = new AbortController();
     this.abort = abort;
@@ -2144,6 +2250,11 @@ export class BuiltinAgent implements InProcessAgentTransport {
       this.lastTools = tools;
       // A fresh turn: the warning about a moving head is its to earn again.
       this.driftWarned = false;
+      // …and the reasoning echo is this turn's decision to take, not the last
+      // turn's to keep: a chat that has reasoned since then owes the field, and
+      // this is the one place where paying for a changed head is expected.
+      this.echoThinking = undefined;
+      this.driftStopped = false;
       // A turn is one `promptHistory` call, so a turn's own growth is the one
       // place the threshold never looked: chat c24d5224 rode its line for twenty
       // minutes. This hands the loop the same pass a turn boundary runs — digest
@@ -2166,7 +2277,7 @@ export class BuiltinAgent implements InProcessAgentTransport {
         liveCompaction = passed.state;
         return passed.messages;
       };
-      const turn = async () =>
+      const turnOnce = async () =>
         runTurn({
           model: endpoint.chatModel(selection.modelId),
           system,
@@ -2191,6 +2302,17 @@ export class BuiltinAgent implements InProcessAgentTransport {
           compactBetweenSteps,
           toolImages,
         });
+      // One attempt. A failed one may decide the echo again on the rerun: the
+      // request it lost never became a cached prefix, while a message that
+      // crossed the wire and was accepted keeps its bytes.
+      const turn = async () => {
+        try {
+          return await turnOnce();
+        } catch (err) {
+          this.echoThinking = undefined;
+          throw err;
+        }
+      };
       // The folded messages sit where the model read them — mid-step, not at
       // the tail — so the stored history stays a truthful transcript. A failed
       // attempt is folded the same way: the retry then continues from what the
@@ -2334,7 +2456,15 @@ export class BuiltinAgent implements InProcessAgentTransport {
       }
       if (folded !== outcome) keepResponse(outcome);
       if (outcome.failure) throw outcome.failure;
+      // The reader stopped the turn at the drift card: the request never left,
+      // so the turn is over where they stopped it.
+      if (this.driftStopped) return { stopReason: "cancelled" };
       return { stopReason: outcome.stopReason };
+    } catch (err) {
+      // The reader stopped the turn at the drift card: the request never left,
+      // and the turn ends as a cancellation — not as a harness failure.
+      if (isContextDriftStop(err)) return { stopReason: "cancelled" };
+      throw err;
     } finally {
       this.abort = null;
       this.activeSubagents = null;

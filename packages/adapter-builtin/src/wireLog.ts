@@ -49,8 +49,41 @@ export interface ContextDrift {
   toolsChanged: boolean;
 }
 
-/** How the turn reacts to a moving head: the host decides, the log only reports. */
-export type ContextDriftListener = (drift: ContextDrift) => void;
+/**
+ * How the turn reacts to a moving head: the host decides, the log only reports.
+ *
+ * With Settings → Diagnostics → context drift on, the host parks the turn on the
+ * reader instead of answering right away — the request that pays for a moved
+ * head waits for their word. `false` is that word: it was “stop”, so the call is
+ * not sent at all (see {@link ContextDriftStop}).
+ */
+export type ContextDriftListener = (
+  drift: ContextDrift,
+) => void | boolean | Promise<void | boolean>;
+
+/**
+ * Thrown by {@link withWireLog} when the drift listener answered `false`: the
+ * reader stopped the turn rather than pay for a request whose head moved. Not a
+ * provider failure, so nothing may retry it — the turn ends the way they said.
+ */
+export class ContextDriftStop extends Error {
+  constructor() {
+    super("context drift: the request was not sent");
+    this.name = "ContextDriftStop";
+  }
+}
+
+/**
+ * The drift stop as it reaches a caller, through whatever the SDK wrapped it in:
+ * a failed `fetch` comes back as an `APICallError` with the original on `cause`.
+ */
+export function isContextDriftStop(err: unknown): boolean {
+  for (let cur: unknown = err, depth = 0; cur && depth < 5; depth += 1) {
+    if (cur instanceof ContextDriftStop) return true;
+    cur = (cur as { cause?: unknown }).cause;
+  }
+  return false;
+}
 
 /** The wrapper's own knobs: whether to look at the head, and who to tell. */
 export interface WireLogOptions {
@@ -272,19 +305,26 @@ export function withWireLog(
       prevMessagesOf(before) > 0 &&
       (prefixSame! < prevMessagesOf(before) || systemChanged || toolsChanged);
     if (options.onDrift && drifted && (options.watch?.() ?? true)) {
+      let proceed = true;
       try {
-        options.onDrift({
-          sessionId: target.sessionId,
-          seq,
-          messages: messages.length,
-          prevMessages: prevMessagesOf(before!),
-          prefixSame: prefixSame!,
-          systemChanged,
-          toolsChanged,
-        });
+        // Awaited: the listener may be asking the reader whether this request is
+        // worth sending at all, and nothing may cross the wire until they say.
+        proceed =
+          (await options.onDrift({
+            sessionId: target.sessionId,
+            seq,
+            messages: messages.length,
+            prevMessages: prevMessagesOf(before!),
+            prefixSame: prefixSame!,
+            systemChanged,
+            toolsChanged,
+          })) !== false;
       } catch {
         /* a warning must never fail the request it describes */
       }
+      // The listener spoke for the reader: the call is dropped, and the turn
+      // ends where they stopped it instead of paying for a moved head.
+      if (!proceed) throw new ContextDriftStop();
     }
     if (!logging) return base(input, init);
 

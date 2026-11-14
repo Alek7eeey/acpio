@@ -1325,9 +1325,9 @@ export const en = {
     deepLogging: "Deep logging",
     deepLoggingHint:
       "Append JSONL traces to the dump folder: prompts, skills, model, MCP, and all ACP traffic (acpio-deep-YYYY-MM-DD.jsonl).",
-    contextDrift: "Warn when the context changes",
+    contextDrift: "Pause when the context changes",
     contextDriftHint:
-      "Compares every request with the previous one. When the head stops matching somewhere in the middle rather than at the tail, the chat says so: the provider's cache only answers an unchanged head, and everything past that point is billed in full. With the wire log in “Full”, the same warning offers this chat's log archive.",
+      "Compares every request with the previous one. When the head stops matching somewhere in the middle rather than at the tail, the chat says so and the turn pauses: nothing reaches the provider until you pick “Continue” or “Stop the turn”. The provider's cache only answers an unchanged head, and everything past that point is billed in full. With the wire log in “Full”, the same warning offers this chat's log archive.",
     wireLog: "Provider request log (wire log)",
     wireLogHint:
       "Records every request of the built-in agent: a line with the hashes, the key fingerprint and the token usage in “Summary”, plus the request body itself in “Full”. Turns on and off without a restart.",

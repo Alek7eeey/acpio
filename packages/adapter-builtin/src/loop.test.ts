@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { NoOutputGeneratedError, streamText, type ModelMessage } from "ai";
+import { ContextDriftStop } from "./wireLog.js";
 import {
   attachToolImages,
   compactHistory,
@@ -1023,6 +1024,14 @@ describe("runTurnWithRetry", () => {
     const run = vi.fn().mockRejectedValue(new Error("endpoint down"));
     await expect(runTurnWithRetry(run, opts())).rejects.toThrow("endpoint down");
     expect(run).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not retry a turn the reader stopped at the drift card", async () => {
+    // A request the reader refused is a decision, not a dead endpoint: a rerun
+    // would send exactly the call they said no to.
+    const run = vi.fn().mockRejectedValue(new ContextDriftStop());
+    await expect(runTurnWithRetry(run, opts())).rejects.toBeInstanceOf(ContextDriftStop);
+    expect(run).toHaveBeenCalledTimes(1);
   });
 
   it("does not retry a turn the user cancelled", async () => {

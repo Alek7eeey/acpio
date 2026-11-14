@@ -3,7 +3,15 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resetProviderKeyCursors, providerFetch } from "./keys.js";
-import { resetWireLogState, sharedPrefix, withWireLog, wireLogDir, type ContextDrift } from "./wireLog.js";
+import {
+  ContextDriftStop,
+  isContextDriftStop,
+  resetWireLogState,
+  sharedPrefix,
+  withWireLog,
+  wireLogDir,
+  type ContextDrift,
+} from "./wireLog.js";
 
 /** A response shape the SDK/most relays answer with: JSON plus usage. */
 function jsonResponse(body: unknown): Response {
@@ -221,6 +229,84 @@ describe("wire log", () => {
 
     expect(questions).toBe(2);
     expect(drifts).toEqual([]);
+  });
+
+  it("holds the request while the reader decides, and drops it on “stop”", async () => {
+    process.env.ACPIO_WIRE_LOG = "0";
+    resetWireLogState();
+    let sent = 0;
+    let decide: (answer: boolean) => void = () => {};
+    const call = withWireLog(
+      { sessionId: "sess-1", providerId: "legacy" },
+      (async () => {
+        sent += 1;
+        return jsonResponse({});
+      }) as typeof globalThis.fetch,
+      {
+        // Settings → Diagnostics → context drift: the host asks the reader here
+        // and answers with their word — `false` means “stop the turn”.
+        onDrift: () =>
+          new Promise<boolean>((resolve) => {
+            decide = resolve;
+          }),
+      },
+    );
+    const send = (messages: unknown[]) =>
+      call("https://relay.test/v1/chat/completions", {
+        method: "POST",
+        body: JSON.stringify({ model: "m", messages }),
+      });
+    const one = { role: "user", content: "one" };
+    const two = { role: "assistant", content: "two" };
+
+    await send([one, two]);
+    const drifted = send([one, { role: "assistant", content: "TWO" }, { role: "user", content: "three" }]);
+    // Nothing crosses the wire while the card is up.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(sent).toBe(1);
+
+    decide(false);
+    await expect(drifted).rejects.toBeInstanceOf(ContextDriftStop);
+    expect(sent).toBe(1);
+  });
+
+  it("sends the request once the reader says continue", async () => {
+    process.env.ACPIO_WIRE_LOG = "0";
+    resetWireLogState();
+    let sent = 0;
+    const shown: ContextDrift[] = [];
+    const call = withWireLog(
+      { sessionId: "sess-1", providerId: "legacy" },
+      (async () => {
+        sent += 1;
+        return jsonResponse({});
+      }) as typeof globalThis.fetch,
+      {
+        onDrift: async (drift) => {
+          shown.push(drift);
+          return true;
+        },
+      },
+    );
+    const send = (messages: unknown[]) =>
+      call("https://relay.test/v1/chat/completions", {
+        method: "POST",
+        body: JSON.stringify({ model: "m", messages }),
+      });
+    const one = { role: "user", content: "one" };
+
+    await send([one, { role: "assistant", content: "two" }]);
+    await send([{ role: "user", content: "ONE" }, { role: "assistant", content: "two" }]);
+
+    expect(shown).toHaveLength(1);
+    expect(shown[0]?.prefixSame).toBe(0);
+    expect(sent).toBe(2);
+  });
+
+  it("recognises its own stop through whatever the SDK wrapped it in", () => {
+    expect(isContextDriftStop(new ContextDriftStop())).toBe(true);
+    expect(isContextDriftStop(new Error("outer", { cause: new ContextDriftStop() }))).toBe(true);
+    expect(isContextDriftStop(new Error("boom"))).toBe(false);
   });
 
   it("stays silent when the switch is off", async () => {

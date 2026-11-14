@@ -1,4 +1,5 @@
 import { isStepCount, streamText, type ModelMessage, type ToolSet } from "ai";
+import { isContextDriftStop } from "./wireLog.js";
 
 /** Model instance accepted by `streamText` — derived, never re-declared. */
 export type TurnModel = Parameters<typeof streamText>[0]["model"];
@@ -1094,6 +1095,9 @@ export async function runTurnWithRetry(
     try {
       outcome = await run();
     } catch (err) {
+      // The reader stopped the turn at the drift card: a decision, not a dead
+      // endpoint — a rerun would send the very request they refused.
+      if (isContextDriftStop(err)) throw err;
       if (attempt >= opts.attempts || opts.signal.aborted) throw err;
       opts.note(
         `Ход прерван ошибкой провайдера (${firstLineError(err)}); повторяю ход ` +

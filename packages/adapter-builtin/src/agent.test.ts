@@ -2522,6 +2522,128 @@ describe("builtin provider routing", () => {
       await new Promise<void>((resolve) => model.close(() => resolve()));
     }
   });
+
+  it("parks the turn on the drift card and stops it on the reader's word", async () => {
+    // The head moved between two requests of one chat: with the diagnostics
+    // switch on, the request that pays for it waits for the reader instead of
+    // leaving on its own.
+    const stub = await startStub();
+    const dir = tempDir();
+    const cards: Array<Record<string, unknown>> = [];
+    const answerCard = (method: string, params: Record<string, unknown>) => {
+      if (method !== "builtin/context_drift") return {};
+      cards.push(params);
+      return {
+        outcome: {
+          outcome: "answered",
+          answers: [{ questionId: "drift", selectedOptionIds: ["stop"] }],
+        },
+      };
+    };
+    const settings = {
+      builtinProviders: [
+        {
+          id: "p1",
+          name: "P",
+          url: stub.url,
+          apiKey: "sk",
+          models: [{ id: "m1", label: "M1", contextWindow: 8_000 }],
+        },
+      ],
+      diagnosticsContextDrift: true,
+    };
+    try {
+      const first = boot(settings, dir, answerCard);
+      const session = await first.call<{ sessionId: string }>("session/new", { cwd: dir });
+      await first.call("session/set_config_option", { configId: "model", value: "p1::m1" });
+      await first.call("session/prompt", { prompt: [{ type: "text", text: "hi" }] });
+      expect(stub.hits).toHaveLength(1);
+      first.close();
+
+      // The same chat resumed on a transcript whose middle was rewritten: the
+      // next request's head no longer matches the one before it.
+      saveBuiltinSession(dir, session.sessionId, {
+        version: 1,
+        cwd: dir,
+        modelId: "p1::m1",
+        messages: [
+          { role: "user", content: [{ type: "text", text: "one" }] },
+          { role: "assistant", content: [{ type: "text", text: "two" }] },
+          { role: "user", content: [{ type: "text", text: "three" }] },
+        ],
+      });
+      const second = boot(settings, dir, answerCard);
+      await second.call("session/load", { sessionId: session.sessionId, cwd: dir });
+      const result = await second.call<{ stopReason: string }>("session/prompt", {
+        prompt: [{ type: "text", text: "hi" }],
+      });
+      second.close();
+
+      expect(cards).toHaveLength(1);
+      // Nothing was sent: the turn ended where the reader stopped it.
+      expect(stub.hits).toHaveLength(1);
+      expect(result.stopReason).toBe("cancelled");
+    } finally {
+      await stub.close();
+    }
+  });
+
+  it("sends the drifted request when the reader says continue", async () => {
+    const stub = await startStub();
+    const dir = tempDir();
+    let cards = 0;
+    const answerCard = (method: string) => {
+      if (method !== "builtin/context_drift") return {};
+      cards += 1;
+      return {
+        outcome: {
+          outcome: "answered",
+          answers: [{ questionId: "drift", selectedOptionIds: ["continue"] }],
+        },
+      };
+    };
+    const settings = {
+      builtinProviders: [
+        {
+          id: "p1",
+          name: "P",
+          url: stub.url,
+          apiKey: "sk",
+          models: [{ id: "m1", label: "M1", contextWindow: 8_000 }],
+        },
+      ],
+      diagnosticsContextDrift: true,
+    };
+    try {
+      const first = boot(settings, dir, answerCard);
+      const session = await first.call<{ sessionId: string }>("session/new", { cwd: dir });
+      await first.call("session/set_config_option", { configId: "model", value: "p1::m1" });
+      await first.call("session/prompt", { prompt: [{ type: "text", text: "hi" }] });
+      first.close();
+      saveBuiltinSession(dir, session.sessionId, {
+        version: 1,
+        cwd: dir,
+        modelId: "p1::m1",
+        messages: [
+          { role: "user", content: [{ type: "text", text: "one" }] },
+          { role: "assistant", content: [{ type: "text", text: "two" }] },
+          { role: "user", content: [{ type: "text", text: "three" }] },
+        ],
+      });
+      const second = boot(settings, dir, answerCard);
+      await second.call("session/load", { sessionId: session.sessionId, cwd: dir });
+      const result = await second.call<{ stopReason: string }>("session/prompt", {
+        prompt: [{ type: "text", text: "hi" }],
+      });
+      second.close();
+
+      expect(cards).toBe(1);
+      expect(stub.hits).toHaveLength(2);
+      expect(result.stopReason).toBe("end_turn");
+    } finally {
+      await stub.close();
+    }
+  });
 });
 
 describe("compaction reporting", () => {
@@ -3538,7 +3660,7 @@ describe("reasoning echo", () => {
 
   it("fills the gaps of a request that is already in thinking mode", () => {
     const messages = [{ role: "user", content: "hi" }, acting("думаю"), tool, acting(), tool];
-    const filled = fillReasoningEcho(messages) as Array<Record<string, unknown>>;
+    const filled = fillReasoningEcho(messages, true) as Array<Record<string, unknown>>;
     // The step that thought travels back verbatim…
     expect(filled[1]?.reasoning_content).toBe("думаю");
     // …and the bare one gains the empty echo instead of staying without it.
@@ -3554,11 +3676,19 @@ describe("reasoning echo", () => {
     expect(fillReasoningEcho(messages)).toBe(messages);
   });
 
+  it("does not edit a step that went out bare just because a later one thought", () => {
+    // The field is the caller's decision, taken from the stored transcript: a
+    // body that grew its own reasoning would otherwise rewrite the steps that
+    // already crossed the wire, and the provider's cache stops right there.
+    const messages = [{ role: "user", content: "hi" }, acting(), tool, acting("думаю"), tool];
+    expect(fillReasoningEcho(messages)).toBe(messages);
+  });
+
   it("echoes a plain answer too, and leaves a body that is not a message list", () => {
     // The relay checks every assistant message it produced, not only the ones
     // that acted: an answer that thought nothing still owes the field.
     const messages = [{ role: "user", content: "hi" }, acting("думаю"), { role: "assistant", content: "ок" }];
-    const filled = fillReasoningEcho(messages) as Array<Record<string, unknown>>;
+    const filled = fillReasoningEcho(messages, true) as Array<Record<string, unknown>>;
     expect(filled[2]).toHaveProperty("reasoning_content");
     expect(filled[2]?.reasoning_content).toBe("");
     expect(fillReasoningEcho(undefined)).toBeUndefined();
