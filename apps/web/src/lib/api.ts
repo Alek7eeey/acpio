@@ -11,6 +11,8 @@ import type {
   ChatThemeDto,
   DiagnosticsDumpDto,
   DiagnosticsDumpMeta,
+  WireLogMode,
+  WireLogStatusDto,
   DiscoveredBuiltinModel,
   GitStatusDto,
   GitCommitDto,
@@ -825,4 +827,40 @@ export const api = {
     request<{ ok: boolean }>(`/api/diagnostics/${encodeURIComponent(id)}`, {
       method: "DELETE",
     }),
+  /**
+   * The built-in agent's wire log: off / one line per request / full bodies.
+   * The agent re-reads the switch every few seconds, so this needs no restart.
+   */
+  wireLog: () => request<WireLogStatusDto>("/api/wire-log"),
+  setWireLogMode: (mode: WireLogMode) =>
+    request<WireLogStatusDto>("/api/wire-log", {
+      method: "POST",
+      body: JSON.stringify({ mode }),
+    }),
+  /** Collect the log folder as a zip — the file Support asks a user for. */
+  downloadWireLog: async () => {
+    const res = await fetch("/api/wire-log/archive", { credentials: "include" });
+    if (!res.ok) {
+      const text = await res.text();
+      let message = text || res.statusText;
+      try {
+        const json = JSON.parse(text) as { error?: string };
+        if (json.error) message = json.error;
+      } catch {
+        // keep raw text
+      }
+      throw new Error(message);
+    }
+    const disposition = res.headers.get("Content-Disposition") ?? "";
+    const match = disposition.match(/filename\*=UTF-8''([^;]+)/);
+    const fileName = match ? decodeURIComponent(match[1]) : "acpio-wire-log.zip";
+    const url = URL.createObjectURL(await res.blob());
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  },
 };

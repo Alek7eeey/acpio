@@ -3671,6 +3671,26 @@ export interface DiagnosticsDumpDto extends DiagnosticsDumpMeta {
   payload: Record<string, unknown>;
 }
 
+/**
+ * What the built-in agent's wire log is doing right now. `summary` records one
+ * line per request (hashes, key fingerprint, usage); `full` also writes every
+ * request body to its own file. See `packages/adapter-builtin/src/wireLog.ts`.
+ */
+export type WireLogMode = "off" | "summary" | "full";
+
+export interface WireLogStatusDto {
+  mode: WireLogMode;
+  /** `ACPIO_WIRE_LOG` pins the mode; the switch in Settings cannot move it. */
+  forcedByEnv: boolean;
+  /** Folder the dumps land in — the one Support asks for. */
+  dir: string;
+  /** Chats with a log file. */
+  sessions: number;
+  /** Every file in the folder, bodies included. */
+  files: number;
+  bytes: number;
+}
+
 /** Parse `base[k=v,k2=v2]` into base + params. */
 export function parseModelWire(wire: string): { base: string; params: Record<string, string> } {
   const raw = (wire || "").trim();

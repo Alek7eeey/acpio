@@ -13,6 +13,7 @@ Release dates use `DD.MM.YY` (author date of the tagged commit).
 
 | Version | Released |
 |---------|----------|
+| 0.1.46 | 11.11.26 |
 | 0.1.45 | 10.11.26 |
 | 0.1.44 | 03.11.26 |
 | 0.1.43 | 31.10.26 |

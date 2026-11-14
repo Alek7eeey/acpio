@@ -17,6 +17,14 @@ export { offloadDir } from "./offload.js";
 export { shellCommand } from "./tools.js";
 
 /**
+ * Where the wire log writes and whether it is on. The server owns the switch a
+ * human flips (Settings → Diagnostics) and the archive Support asks for, so it
+ * resolves the folder through the same function the agent does — one answer,
+ * not two.
+ */
+export { wireLogDir, wireLogState } from "./wireLog.js";
+
+/**
  * Skill discovery outside a chat. The board's new-task form needs the menu a
  * folder's chat would open while no session exists yet — its own commands and
  * the skills on disk — so the scan and the builder that turns it into that menu

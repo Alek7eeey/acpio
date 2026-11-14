@@ -25,6 +25,7 @@ import {
 } from "./config.js";
 import { createHostRpc } from "./host.js";
 import { providerFetch } from "./keys.js";
+import { withWireLog } from "./wireLog.js";
 import {
   OffloadStore,
   offloadToolResults,
@@ -457,7 +458,18 @@ function builtinEndpoint(
     // session id is handed over so the pool keeps one key per chat: the provider
     // caches a prompt per key, and a key that moves mid-conversation pays for the
     // whole prefix again.
-    fetch: providerFetch(provider, fetch, undefined, sessionId),
+    // The keys of a pool rotate and the provider caches a prefix per key, so a
+    // bill nobody can explain needs the request itself on disk: `ACPIO_WIRE_LOG=1`
+    // records every one of them, with the hashes that name a moving head. The
+    // log sits *under* the pool — `providerFetch` is what puts the key on the
+    // request, and a fingerprint taken above it would be empty for every chat
+    // that draws from a pool, which is exactly the chats a rotation costs.
+    fetch: providerFetch(
+      provider,
+      withWireLog({ sessionId, providerId: provider.id }, fetch),
+      undefined,
+      sessionId,
+    ),
     // Most OpenAI-compatible servers only report usage when asked to.
     includeUsage: true,
     headers: builtinProviderHeaders(provider.headers, sessionId),

@@ -39,6 +39,8 @@ import {
   type FileOpenTarget,
   type BuiltinSkillDto,
   type DiagnosticsDumpMeta,
+  type WireLogMode,
+  type WireLogStatusDto,
   type SkillMode,
   type McpServerConfig,
   type ModelOption,
@@ -1805,6 +1807,7 @@ export function SettingsPage() {
   const [diagDirResolved, setDiagDirResolved] = useState("");
   const [exportDirDefault, setExportDirDefault] = useState("");
   const [diagItems, setDiagItems] = useState<DiagnosticsDumpMeta[]>([]);
+  const [wireLog, setWireLog] = useState<WireLogStatusDto | null>(null);
   /** How many of `diagItems` are built; the rest wait for the scroll. */
   const [diagVisible, setDiagVisible] = useState(DIAG_DUMPS_PAGE);
   const diagScrollRef = useRef<HTMLUListElement | null>(null);
@@ -1872,17 +1875,42 @@ export function SettingsPage() {
     setDiagLoading(true);
     setDiagMessage(null);
     try {
-      const [list, def] = await Promise.all([
+      const [list, def, log] = await Promise.all([
         api.listDiagnostics(),
         api.getDiagnosticsDefaultDir(),
+        api.wireLog(),
       ]);
       setDiagItems(list.items);
       setDiagDirResolved(list.dir);
       setDiagDirDefault(def.path || list.defaultDir);
+      setWireLog(log);
     } catch (err) {
       setDiagMessage(err instanceof Error ? err.message : String(err));
     } finally {
       setDiagLoading(false);
+    }
+  };
+
+  /**
+   * The wire log's switch is a file the agent re-reads every few seconds, so
+   * this flips recording for a running chat: the point of the whole thing is
+   * that a user can be told "turn it on and send me the zip".
+   */
+  const applyWireLogMode = async (mode: WireLogMode) => {
+    setDiagMessage(null);
+    try {
+      setWireLog(await api.setWireLogMode(mode));
+    } catch (err) {
+      setDiagMessage(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const downloadWireLog = async () => {
+    setDiagMessage(null);
+    try {
+      await api.downloadWireLog();
+    } catch (err) {
+      setDiagMessage(err instanceof Error ? err.message : String(err));
     }
   };
 
@@ -5212,6 +5240,44 @@ export function SettingsPage() {
                   }}
                   label={t("diagnostics.deepLogging")}
                 />
+              </SettingRow>
+
+              <SettingRow
+                label={t("diagnostics.wireLog")}
+                hint={
+                  wireLog?.forcedByEnv
+                    ? t("diagnostics.wireLogForced")
+                    : t("diagnostics.wireLogHint")
+                }
+              >
+                <div className={styles.cwdPickRow}>
+                  <OptionPicker
+                    value={wireLog?.mode ?? "off"}
+                    menuTitle={t("diagnostics.wireLog")}
+                    disabled={wireLog?.forcedByEnv === true}
+                    options={[
+                      { value: "off", label: t("diagnostics.wireLogOff") },
+                      { value: "summary", label: t("diagnostics.wireLogSummary") },
+                      { value: "full", label: t("diagnostics.wireLogFull") },
+                    ]}
+                    onChange={(value) => void applyWireLogMode(value as WireLogMode)}
+                  />
+                  <button
+                    type="button"
+                    className={styles.secondaryBtn}
+                    onClick={() => void downloadWireLog()}
+                  >
+                    {t("diagnostics.wireLogDownload")}
+                  </button>
+                  <span className={styles.hint}>
+                    {t("diagnostics.wireLogStats", {
+                      files: wireLog?.files ?? 0,
+                      size: t("diagnostics.wireLogSizeMb", {
+                        mb: Math.round((wireLog?.bytes ?? 0) / 1024 / 1024),
+                      }),
+                    })}
+                  </span>
+                </div>
               </SettingRow>
 
               <SettingRow label={t("diagnostics.folder")} controlClassName={styles.folderControl}>

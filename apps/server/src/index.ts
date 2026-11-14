@@ -18,11 +18,19 @@ import { registerEditorRoutes } from "./editorRoutes.js";
 import { resolveServerPort } from "@acpio/shared";
 import { loadPlugins } from "./services/plugins.js";
 import { ensureSchema } from "./db/ensureSchema.js";
-import { DB_PATH } from "./db/client.js";
+import { DATA_DIR, DB_PATH } from "./db/client.js";
 import { acquireInstanceLock } from "./db/instanceLock.js";
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 dotenv.config({ path: path.join(rootDir, ".env") });
 dotenv.config();
+
+// Install state lives next to the database, never next to the folder npm
+// happened to start in: a workspace script runs with `apps/server` as cwd, so
+// the built-in agent's own `process.cwd()` guess would look for the wire log's
+// switch file in a folder nobody puts it in — and record nothing, silently.
+if (!process.env.ACPIO_WIRE_LOG_DIR) {
+  process.env.ACPIO_WIRE_LOG_DIR = path.join(DATA_DIR, "wire-log");
+}
 
 const port = resolveServerPort();
 const corsOrigin = process.env.CORS_ORIGIN;

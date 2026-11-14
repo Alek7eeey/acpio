@@ -1844,6 +1844,71 @@ describe("diagnostics", () => {
   });
 });
 
+describe("wire log", () => {
+  // The folder is read through the same function the agent uses, so the test
+  // pins it: without the env the routes would touch the repo's real data folder.
+  const saved = { dir: process.env.ACPIO_WIRE_LOG_DIR, env: process.env.ACPIO_WIRE_LOG };
+  let dir = "";
+
+  beforeEach(async () => {
+    delete process.env.ACPIO_WIRE_LOG;
+    dir = await newTempDir("acp-wire-");
+    process.env.ACPIO_WIRE_LOG_DIR = dir;
+  });
+
+  afterEach(() => {
+    if (saved.dir === undefined) delete process.env.ACPIO_WIRE_LOG_DIR;
+    else process.env.ACPIO_WIRE_LOG_DIR = saved.dir;
+    if (saved.env === undefined) delete process.env.ACPIO_WIRE_LOG;
+    else process.env.ACPIO_WIRE_LOG = saved.env;
+  });
+
+  it("GET /api/wire-log reports the folder and starts off", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/wire-log" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ mode: "off", forcedByEnv: false, files: 0 });
+  });
+
+  it("POST /api/wire-log flips the switch the agent reads, without a restart", async () => {
+    const full = await app.inject({
+      method: "POST",
+      url: "/api/wire-log",
+      payload: { mode: "full" },
+    });
+    expect(full.statusCode).toBe(200);
+    expect(full.json().mode).toBe("full");
+    // The file, not a setting: this is what the agent re-reads mid-chat.
+    expect((await fsp.readFile(path.join(dir, "on"), "utf8")).trim()).toBe("full");
+
+    const off = await app.inject({
+      method: "POST",
+      url: "/api/wire-log",
+      payload: { mode: "off" },
+    });
+    expect(off.json().mode).toBe("off");
+    await expect(fsp.access(path.join(dir, "on"))).rejects.toThrow();
+  });
+
+  it("POST /api/wire-log rejects a mode nobody defined", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/wire-log",
+      payload: { mode: "everything" },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("GET /api/wire-log/archive returns the folder as one zip", async () => {
+    await fsp.writeFile(path.join(dir, "chat1234.jsonl"), '{"kind":"request"}\n', "utf8");
+    const res = await app.inject({ method: "GET", url: "/api/wire-log/archive" });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toContain("application/zip");
+    expect(String(res.headers["content-disposition"])).toContain("acpio-wire-log-");
+    // A local file header is what makes the download an archive, not a blob.
+    expect(res.rawPayload.subarray(0, 4)).toEqual(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+  });
+});
+
 describe("agent status", () => {
   it("GET /api/agent/status without a connected provider → provider null, available false", async () => {
     const res = await app.inject({ method: "GET", url: "/api/agent/status" });

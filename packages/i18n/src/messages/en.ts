@@ -1325,6 +1325,16 @@ export const en = {
     deepLogging: "Deep logging",
     deepLoggingHint:
       "Append JSONL traces to the dump folder: prompts, skills, model, MCP, and all ACP traffic (acpio-deep-YYYY-MM-DD.jsonl).",
+    wireLog: "Provider request log (wire log)",
+    wireLogHint:
+      "Records every request of the built-in agent: a line with the hashes, the key fingerprint and the token usage in “Summary”, plus the request body itself in “Full”. Turns on and off without a restart.",
+    wireLogOff: "Off",
+    wireLogSummary: "Summary",
+    wireLogFull: "Full",
+    wireLogForced: "The mode is pinned by the ACPIO_WIRE_LOG environment variable — the switch does not change it.",
+    wireLogDownload: "Download zip",
+    wireLogStats: "{{files}} files · {{size}}",
+    wireLogSizeMb: "{{mb}} MB",
   },
   export: {
     user: "User",

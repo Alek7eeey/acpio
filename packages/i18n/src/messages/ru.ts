@@ -1347,6 +1347,16 @@ export const ru = {
     deepLogging: "Глубокое логирование",
     deepLoggingHint:
       "Пишет JSONL в папку дампов: промпты, скиллы, модель, MCP и весь ACP-трафик (acpio-deep-ГГГГ-ММ-ДД.jsonl).",
+    wireLog: "Журнал запросов к провайдеру (wire log)",
+    wireLogHint:
+      "Пишет каждый запрос встроенного агента: в режиме «Кратко» — строку с отпечатками, ключом и расходом токенов, в режиме «Полностью» — ещё и тело запроса. Включается и выключается без перезапуска.",
+    wireLogOff: "Выключен",
+    wireLogSummary: "Кратко",
+    wireLogFull: "Полностью",
+    wireLogForced: "Режим задан переменной окружения ACPIO_WIRE_LOG — переключатель его не меняет.",
+    wireLogDownload: "Скачать zip",
+    wireLogStats: "{{files}} файлов · {{size}}",
+    wireLogSizeMb: "{{mb}} МБ",
   },
   export: {
     user: "Пользователь",

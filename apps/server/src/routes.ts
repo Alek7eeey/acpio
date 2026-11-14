@@ -135,6 +135,7 @@ import {
   readDiagnosticsDump,
   writeDiagnosticsDump,
 } from "./services/diagnostics.js";
+import { buildWireLogArchive, wireLogStatus, writeWireLogMode } from "./services/wireLogControl.js";
 import { addWsClient, broadcast, subscribeClient, unsubscribeClient } from "./services/wsHub.js";
 import {
   attachUserConsole,
@@ -2603,6 +2604,32 @@ export async function registerRoutes(app: FastifyInstance) {
     const ok = await deleteDiagnosticsDump(id);
     if (!ok) return reply.code(404).send({ error: "Not found" });
     return { ok: true };
+  });
+
+  // The wire log: a switch a human flips and the archive Support asks for. The
+  // agent re-reads its switch file every few seconds, so a toggle here takes
+  // effect mid-chat — no restart, which is what makes "turn it on and send me
+  // the zip" a sentence one can say to someone else.
+  app.get("/api/wire-log", async () => wireLogStatus());
+  app.post("/api/wire-log", async (req) => {
+    const body = z
+      .object({ mode: z.enum(["off", "summary", "full"]) })
+      .parse(req.body ?? {});
+    writeWireLogMode(body.mode);
+    return wireLogStatus();
+  });
+  app.get("/api/wire-log/archive", async (_req, reply) => {
+    try {
+      const archive = buildWireLogArchive();
+      reply.header(
+        "Content-Disposition",
+        `attachment; filename*=UTF-8''${encodeURIComponent(archive.fileName)}`,
+      );
+      return reply.type("application/zip").header("Cache-Control", "no-store").send(archive.buffer);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return reply.code(413).send({ error: message });
+    }
   });
 
   app.get("/ws", { websocket: true }, async (socket) => {
