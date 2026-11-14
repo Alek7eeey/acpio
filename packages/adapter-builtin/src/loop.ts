@@ -226,31 +226,44 @@ export const TOOL_IMAGES_NOTE = "Attached image(s) from the tool result(s) above
  * Matched by `toolCallId`, so a step with several calls keeps each picture next
  * to its own result. Nothing is consumed: every step builds its own request from
  * the same result messages, and each of them needs the picture present.
+ *
+ * Nothing is added twice either, which is what keeps the head of the request
+ * still: the SDK hands the view of a step back as `prepareStep` left it, so the
+ * same result shows up again with its picture already beside it. A second copy
+ * would land in the middle of a history already on the wire and push every
+ * message after it — the provider matches the cache from the first message, so
+ * the whole tail is billed at full price (chat 5f5199a9: cached stuck at 64k of
+ * a 90k prompt, 99 % → 74 % as the tail grew).
  */
 export function attachToolImages(
   response: ModelMessage[],
   images: Map<string, ToolImagePart[]> | undefined,
 ): ModelMessage[] {
   if (!images?.size) return response;
+  /** True when `message` is the picture note a previous step already put here. */
+  const carriesPictures = (message: ModelMessage | undefined, files: ToolImagePart[]): boolean => {
+    if (!message || message.role !== "user" || !Array.isArray(message.content)) return false;
+    const [note, ...parts] = message.content as unknown as Array<Record<string, unknown>>;
+    if (note?.type !== "text" || note.text !== TOOL_IMAGES_NOTE) return false;
+    if (parts.length !== files.length) return false;
+    return parts.every((part, i) => part.type === "file" && part.data === files[i]?.data);
+  };
   const out: ModelMessage[] = [];
-  for (const message of response) {
+  for (const [index, message] of response.entries()) {
     out.push(message);
     if (message.role !== "tool" || !Array.isArray(message.content)) continue;
-    const files = message.content.flatMap((part) => {
-      if (part.type !== "tool-result") return [];
-      const taken = images.get(part.toolCallId);
-      if (!taken?.length) return [];
-      return taken.map((image) => ({
-        type: "file" as const,
-        mediaType: image.mimeType,
-        data: image.data,
-      }));
-    });
-    if (files.length) {
-      out.push(
-        { role: "user", content: [{ type: "text", text: TOOL_IMAGES_NOTE }, ...files] } as ModelMessage,
-      );
-    }
+    const taken = message.content.flatMap((part) =>
+      part.type === "tool-result" ? (images.get(part.toolCallId) ?? []) : [],
+    );
+    if (!taken.length) continue;
+    if (carriesPictures(response[index + 1], taken)) continue;
+    out.push({
+      role: "user",
+      content: [
+        { type: "text", text: TOOL_IMAGES_NOTE },
+        ...taken.map((image) => ({ type: "file" as const, mediaType: image.mimeType, data: image.data })),
+      ],
+    } as ModelMessage);
   }
   return out;
 }

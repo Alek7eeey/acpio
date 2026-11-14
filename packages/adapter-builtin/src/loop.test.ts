@@ -356,6 +356,18 @@ describe("tool pictures beside their tool result", () => {
     expect(attachToolImages([call, result], images)).toEqual(out);
   });
 
+  // Between steps the SDK hands the view back the way `prepareStep` left it, so
+  // the same result is offered its picture again. A second copy lands in the
+  // middle of a history that was already on the wire and pushes every message
+  // after it: the provider answers only an unchanged head, so the whole tail is
+  // billed in full (wire log of chat 5f5199a9: cached stalled at 64k of a 90k
+  // prompt, hit rate 99 % → 74 % while the head itself never moved).
+  it("leaves a view that already carries the picture alone", () => {
+    const images = new Map([["c1", [{ data: PNG, mimeType: "image/png" }]]]);
+    const once = attachToolImages([call, result], images);
+    expect(attachToolImages(once, images)).toEqual(once);
+  });
+
   it("leaves a response without pictures untouched", () => {
     const response = [call, result];
     expect(attachToolImages(response, undefined)).toBe(response);
