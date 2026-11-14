@@ -140,6 +140,23 @@ describe("wire log control", () => {
     expect(archive.fileName).toContain("aaaa1111");
   });
 
+  it("measures a narrowed archive by its own files, not by the whole folder", () => {
+    // The ceiling exists to keep one build inside memory. A chat that hands
+    // over its own id asks for its own files only, so a folder grown large by
+    // other chats must not refuse it — that is the very case the warning is in.
+    fs.writeFileSync(path.join(dir, "aaaa1111.jsonl"), "{\n", "utf8");
+    fs.mkdirSync(path.join(dir, "bbbb2222"));
+    fs.writeFileSync(path.join(dir, "bbbb2222", "0001.req.json"), Buffer.alloc(130 * 1024 * 1024));
+
+    const archive = buildWireLogArchive("aaaa1111-2222-3333-4444");
+    const names = readZip(archive.buffer)
+      .map((entry) => entry.name)
+      .sort();
+    expect(names).toEqual(["wire-log/aaaa1111.jsonl", "wire-log/meta.json"]);
+    // The same folder, asked for whole, still refuses: the ceiling is real.
+    expect(() => buildWireLogArchive()).toThrow(/МБ/);
+  });
+
   it("keeps a large entry intact through deflate", () => {
     const big = Buffer.from("ж".repeat(200_000), "utf8");
     const entries = readZip(zipEntries([{ name: "wire-log/big.txt", data: big }]));

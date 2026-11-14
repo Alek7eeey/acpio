@@ -309,6 +309,78 @@ describe("wire log", () => {
     expect(isContextDriftStop(new Error("boom"))).toBe(false);
   });
 
+  it("names the message that moved in the request the process before this one sent", async () => {
+    process.env.ACPIO_WIRE_LOG = "1";
+    resetWireLogState();
+    const drifts: ContextDrift[] = [];
+    const call = withWireLog(
+      { sessionId: "sess-1", providerId: "legacy" },
+      (async () => jsonResponse({})) as typeof globalThis.fetch,
+      { onDrift: (drift) => drifts.push(drift) },
+    );
+    const send = (messages: unknown[]) =>
+      call("https://relay.test/v1/chat/completions", {
+        method: "POST",
+        body: JSON.stringify({ model: "m", messages }),
+      });
+    const one = { role: "user", content: "one" };
+    const two = { role: "assistant", content: "two" };
+
+    await send([one, two]);
+
+    // The server restarts mid-chat: the map is gone, the head file is not.
+    resetWireLogState();
+
+    // The first request of the new process carries a compacted history — it
+    // shares nothing with the request the chat sent before the reboot. Comparing
+    // against `null` instead of that request kept the most expensive break of all
+    // quiet (chat c88a1a10: 53 messages became 40 in silence).
+    await send([{ role: "user", content: "TWO" }]);
+
+    expect(drifts).toHaveLength(1);
+    expect(drifts[0]).toMatchObject({
+      sessionId: "sess-1",
+      messages: 1,
+      prevMessages: 2,
+      prefixSame: 0,
+    });
+    // The counter carries on across the restart, so both runs stay apart in the
+    // log as well.
+    expect(lines().filter((line) => line.kind === "request").map((line) => line.seq)).toEqual([1, 2]);
+  });
+
+  it("keeps the body an earlier run recorded when the counter starts over", async () => {
+    process.env.ACPIO_WIRE_LOG = "full";
+    resetWireLogState();
+    const fetch = withWireLog(
+      { sessionId: "sess-1", providerId: "legacy" },
+      (async () => jsonResponse({})) as typeof globalThis.fetch,
+    );
+    const send = (content: string) =>
+      fetch("https://relay.test/v1/chat/completions", {
+        method: "POST",
+        body: JSON.stringify({ model: "m", messages: [{ role: "user", content }] }),
+      });
+
+    await send("one");
+    const folder = path.join(wireLogDir(), "sess-1");
+    expect(fs.readdirSync(folder)).toHaveLength(1);
+
+    // A restart on a machine whose head file is gone — the counter starts at 1
+    // again, and the body of the request that already went out must survive it.
+    resetWireLogState();
+    fs.rmSync(path.join(wireLogDir(), "sess-1.head.json"), { force: true });
+    await send("two");
+
+    const bodies = fs.readdirSync(folder);
+    expect(bodies).toHaveLength(2);
+    expect(
+      bodies
+        .map((name) => fs.readFileSync(path.join(folder, name), "utf8"))
+        .some((body) => body.includes('"one"')),
+    ).toBe(true);
+  });
+
   it("stays silent when the switch is off", async () => {
     process.env.ACPIO_WIRE_LOG = "0";
     resetWireLogState();

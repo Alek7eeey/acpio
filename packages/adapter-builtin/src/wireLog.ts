@@ -149,6 +149,73 @@ interface Previous {
 }
 const previous = new Map<string, Previous>();
 const seqOf = new Map<string, number>();
+/**
+ * The first eight characters of the id as it appears in a file name. It comes
+ * from the host, so it is not trusted as a path segment.
+ */
+function shortId(sessionId: string): string {
+  return sessionId.slice(0, 8).replace(/[^A-Za-z0-9_-]/g, "");
+}
+
+/**
+ * The head a chat's last request had, kept beside the log so a restart does not
+ * forget it.
+ *
+ * Without this the first request of every process compares against nothing, and
+ * the break that costs the most — a compaction that dropped half the history on
+ * the turn after a reboot — is exactly the one nobody hears about (chat
+ * c88a1a10: 53 messages became 40 in silence; `prevMessages` was `null`).
+ * Reading is lazy, once per chat per process, and never throws.
+ */
+function headFile(sessionId: string): string {
+  return path.join(wireLogDir(), `${shortId(sessionId)}.head.json`);
+}
+const headsRead = new Set<string>();
+
+function loadHead(chatKey: string, sessionId: string): void {
+  if (headsRead.has(chatKey)) return;
+  headsRead.add(chatKey);
+  try {
+    const all = JSON.parse(fs.readFileSync(headFile(sessionId), "utf8")) as Record<string, Previous>;
+    const head = all?.[chatKey];
+    if (!head || typeof head !== "object") return;
+    if (!Number.isInteger(head.seq) || head.seq < 0) return;
+    if (!Array.isArray(head.chain) || head.chain.some((hash) => typeof hash !== "string")) return;
+    // A head already remembered in this process is newer than the file.
+    if (!previous.has(chatKey)) {
+      previous.set(chatKey, {
+        seq: head.seq,
+        chain: head.chain,
+        system: String(head.system ?? ""),
+        tools: String(head.tools ?? ""),
+        key: String(head.key ?? ""),
+      });
+    }
+    if (!seqOf.has(chatKey)) seqOf.set(chatKey, head.seq);
+  } catch {
+    /* no head on disk: this chat starts a comparison of its own */
+  }
+}
+
+function saveHead(chatKey: string, sessionId: string, head: Previous): void {
+  try {
+    const file = headFile(sessionId);
+    let all: Record<string, Previous> = {};
+    try {
+      const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, Previous>;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) all = parsed;
+    } catch {
+      /* first request of this chat */
+    }
+    all[chatKey] = head;
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(all), "utf8");
+  } catch {
+    /* a diagnostics write must never fail a chat */
+  }
+}
+
+/** One tag per request: a counter that restarts must not overwrite a body. */
 
 function shortHash(value: string): string {
   return crypto.createHash("sha1").update(value).digest("hex").slice(0, 10);
@@ -289,10 +356,15 @@ export function withWireLog(
     const tools = shortHash(JSON.stringify(body.tools ?? ""));
     const key = logging ? keyFingerprint(init) : "";
     const chatKey = `${target.providerId}\u0000${target.sessionId}`;
+    // The head of the request before this one, from memory or from the file the
+    // process before this one left: a reboot must not hide a moved head.
+    loadHead(chatKey, target.sessionId);
     const before = previous.get(chatKey);
     const seq = (seqOf.get(chatKey) ?? 0) + 1;
     seqOf.set(chatKey, seq);
-    previous.set(chatKey, { seq, chain, system, tools, key });
+    const head: Previous = { seq, chain, system, tools, key };
+    previous.set(chatKey, head);
+    saveHead(chatKey, target.sessionId, head);
 
     // The head moved: fewer leading messages match than the previous request
     // carried, or something ahead of every message was rewritten. Either way
@@ -330,12 +402,15 @@ export function withWireLog(
 
     // A body is megabytes: it rides its own file, and the line carries the name
     // so a reader never has to guess it. The line stays small enough to read
-    // whole, which is what makes `prefixSame` usable.
+    // whole, which is what makes `prefixSame` usable. The name carries the
+    // request's own start beside the counter: a lost head file resets the
+    // counter, and a reset counter must cost one line, not the bodies of every
+    // earlier request (chat c88a1a10 kept 5 of the 22 it recorded).
     const bodyFile =
       mode === "full"
-        ? `${target.sessionId.slice(0, 8)}/${String(seq).padStart(4, "0")}.req.json`
+        ? `${shortId(target.sessionId)}/${String(seq).padStart(4, "0")}-${started}.req.json`
         : "";
-    const file = path.join(wireLogDir(), `${target.sessionId.slice(0, 8)}.jsonl`);
+    const file = path.join(wireLogDir(), `${shortId(target.sessionId)}.jsonl`);
     const entry: Record<string, unknown> = {
       ts: new Date(started).toISOString(),
       kind: "request",
@@ -408,6 +483,7 @@ export function withWireLog(
 export function resetWireLogState(): void {
   previous.clear();
   seqOf.clear();
+  headsRead.clear();
   stateReadAt = 0;
   state = "off";
 }

@@ -210,12 +210,6 @@ export function buildWireLogArchive(sessionId?: string): {
 } {
   const dir = wireLogDir();
   const status = wireLogStatus();
-  if (status.bytes > MAX_ARCHIVE_BYTES) {
-    throw new Error(
-      `лог занимает ${(status.bytes / 1024 / 1024).toFixed(0)} МБ (больше ${MAX_ARCHIVE_BYTES / 1024 / 1024} МБ) — ` +
-        "удали старые тела запросов или выключи режим full и собери архив снова",
-    );
-  }
   // One chat's own files: `<sid>.jsonl` and the `full` mode's `<sid>/` folder.
   // The log is one file per chat, so a warning can hand over exactly the turn
   // that moved its head instead of everything the machine ever sent.
@@ -226,12 +220,27 @@ export function buildWireLogArchive(sessionId?: string): {
     const flat = rel.replace(/\\/g, "/");
     return flat === `${only}.jsonl` || flat.startsWith(`${only}/`);
   };
-  const entries = logFiles(dir)
-    .filter(mine)
-    .map((rel) => ({
-      name: `wire-log/${rel.replace(/\\/g, "/")}`,
-      data: fs.readFileSync(path.join(dir, rel)),
-    }));
+  // The ceiling is about what this build holds in memory, so it counts the
+  // files the archive will actually carry: a folder grown large by other chats
+  // must not refuse the one chat that asked for its own turn.
+  const selected = logFiles(dir).filter(mine);
+  const selectedBytes = selected.reduce((sum, rel) => {
+    try {
+      return sum + fs.statSync(path.join(dir, rel)).size;
+    } catch {
+      return sum;
+    }
+  }, 0);
+  if (selectedBytes > MAX_ARCHIVE_BYTES) {
+    throw new Error(
+      `лог занимает ${(selectedBytes / 1024 / 1024).toFixed(0)} МБ (больше ${MAX_ARCHIVE_BYTES / 1024 / 1024} МБ) — ` +
+        "удали старые тела запросов или выключи режим full и собери архив снова",
+    );
+  }
+  const entries = selected.map((rel) => ({
+    name: `wire-log/${rel.replace(/\\/g, "/")}`,
+    data: fs.readFileSync(path.join(dir, rel)),
+  }));
   entries.push({
     name: "wire-log/meta.json",
     data: Buffer.from(
