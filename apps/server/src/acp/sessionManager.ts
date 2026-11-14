@@ -76,6 +76,7 @@ import {
   claimBoardTaskTurn,
 } from "../services/sessions.js";
 import { refineSessionTitle } from "../services/chatTitle.js";
+import { snapshotMessageImages } from "../services/messageSnapshots.js";
 import { broadcastToSession } from "../services/wsHub.js";
 import {
   backgroundJobNoteTail,
@@ -3399,8 +3400,35 @@ async function finalizeTurn(
 ) {
   stopTurnSideEffects(rt);
   await completeDanglingTurnParts(sessionId);
+  await snapshotTurnImages(sessionId);
   await stampThoughtDurations(sessionId, Math.max(0, Date.now() - agentStartedAt));
   await finishTurnSessionStatus(sessionId, rt, status);
+}
+
+/**
+ * Keep the pictures this turn's answer showed (see `snapshotMessageImages`).
+ *
+ * Runs when the text is final, because that is the moment the bytes on disk are
+ * the ones the answer meant: the agent saves `shot.png` and mentions it in the
+ * same turn, and the next turn is free to overwrite or delete it. The rewrite is
+ * idempotent, so a turn finalized twice keeps the copies it already made.
+ */
+async function snapshotTurnImages(sessionId: string) {
+  const detail = await getSessionDetail(sessionId);
+  const last = detail?.messages.filter((m) => m.role === "assistant").at(-1);
+  if (!detail || !last) return;
+  for (const part of last.parts) {
+    if (part.type !== "text") continue;
+    const text = String(part.payload.text ?? "");
+    if (!text.includes("![")) continue;
+    const next = await snapshotMessageImages({
+      sessionId,
+      cwd: detail.cwd,
+      messageId: last.id,
+      text,
+    });
+    if (next !== text) await updatePart(sessionId, part.id, { text: next });
+  }
 }
 
 /** `durationMs` for a call whose first event we timed; undefined when unknown. */
@@ -3945,6 +3973,7 @@ async function runTurn(
     const message = err instanceof Error ? err.message : String(err);
     stopTurnSideEffects(rt);
     await completeDanglingTurnParts(sessionId);
+    await snapshotTurnImages(sessionId);
     await stampThoughtDurations(sessionId, Math.max(0, Date.now() - agentStartedAt));
     if (isModelAccessError(message)) {
       const currentModel =

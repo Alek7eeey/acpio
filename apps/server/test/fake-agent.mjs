@@ -525,6 +525,19 @@ async function handle(method, params, id) {
         });
         return { stopReason: "end_turn" };
       }
+      if (text.includes("PICTURE")) {
+        // An answer that shows a picture it saved itself: the markdown is a
+        // plain path in the chat's folder, the way a real agent writes one.
+        notify("session/update", {
+          sessionId: params.sessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            messageId: "pic1",
+            content: { type: "text", text: "Screenshot: ![shot](shot.png)" },
+          },
+        });
+        return { stopReason: "end_turn" };
+      }
       if (text.includes("PLACEHOLDER")) {
         // OMP-style filler for a model message that came out empty: the harness
         // sends it as a regular message chunk after the turn's activity.

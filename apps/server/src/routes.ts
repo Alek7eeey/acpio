@@ -39,6 +39,7 @@ import {
   backgroundMcpTokenMatches,
 } from "./services/backgroundJobs.js";
 import { handleBackgroundMcpRequest } from "./services/bgMcp.js";
+import { IMAGE_MIME } from "./services/imageTypes.js";
 import {
   findPluginMcpServer,
   handlePluginMcpRequest,
@@ -199,19 +200,6 @@ function withLiveStatus(tasks: SessionDto[]): SessionDto[] {
     return status === task.status ? task : { ...task, status };
   });
 }
-
-/** Content types for inline image previews of attached files (?inline=1). */
-const IMAGE_MIME: Record<string, string> = {
-  png: "image/png",
-  jpg: "image/jpeg",
-  jpeg: "image/jpeg",
-  gif: "image/gif",
-  webp: "image/webp",
-  svg: "image/svg+xml",
-  bmp: "image/bmp",
-  ico: "image/x-icon",
-  avif: "image/avif",
-};
 
 const mcpServerSchema = z.object({
   id: z.string().min(1).max(64),

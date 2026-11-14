@@ -1738,6 +1738,51 @@ describe("agent files in a chat", () => {
     expect(second.rawPayload).toEqual(next);
   });
 
+  // The report: the agent saves `shot.png`, shows it, and the next turn writes
+  // the same name again — the earlier answer then showed the newer picture, and
+  // a reload put that one picture under both messages. An answer has to keep the
+  // picture it showed, whatever happens to the file behind the path.
+  it("keeps the picture an answer showed after the file is rewritten or deleted", async () => {
+    const cwd = await newTempDir("acp-shot-");
+    const shot = path.join(cwd, "shot.png");
+    await fsp.writeFile(shot, PNG);
+    await connectAgent();
+    const created = await app.inject({ method: "POST", url: "/api/sessions", payload: { cwd } });
+    expect(created.statusCode).toBe(200);
+    const session = created.json();
+    runtimeSessionIds.push(session.id);
+    await waitForAcpSessionId(session.id);
+
+    await app.inject({
+      method: "POST",
+      url: `/api/sessions/${session.id}/prompt`,
+      payload: { text: "PICTURE" },
+    });
+    // The finalizer leaves a destination of its own — not the bare path.
+    const detail = await waitForDetail(session.id, (d) =>
+      textParts(d).some((text) => /!\[shot\]\((?!shot\.png\))/.test(text)),
+    );
+    const answer = textParts(detail).find((text) => text.includes("![shot]"))!;
+    const dest = /!\[shot\]\(([^)]+)\)/.exec(answer)![1]!;
+    const url = `/api/sessions/${session.id}/file?path=${encodeURIComponent(dest)}&inline=1`;
+
+    // The agent re-saves the same name with other bytes…
+    await fsp.writeFile(shot, Buffer.concat([PNG, Buffer.from([0])]));
+    const kept = await app.inject({ method: "GET", url });
+    expect(kept.statusCode).toBe(200);
+    expect(kept.rawPayload).toEqual(PNG);
+
+    // …and then the original goes away altogether.
+    await fsp.rm(shot);
+    const afterDelete = await app.inject({ method: "GET", url });
+    expect(afterDelete.statusCode).toBe(200);
+    expect(afterDelete.rawPayload).toEqual(PNG);
+
+    // Availability is module state the whole file shares: the status route
+    // reads it, so this chat's harness must not still look connected there.
+    setAgentAvailable("omp", false);
+  });
+
   it("404s for a missing file, a directory and an unknown chat", async () => {
     const session = await seedAgentFileSession();
     const missing = await app.inject({
