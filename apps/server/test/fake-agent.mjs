@@ -28,6 +28,10 @@
 //                                  and waits for the client's decision
 //   prompt starting with "ELICIT:" → issues elicitation/create (form mode),
 //                                  waits, then echoes the answer back
+//   prompt starting with "ASK:<title>|<prompt>|<opt,opt>" → issues
+//                                  session/ask_question with those choices and
+//                                  waits for the answer (the inline question
+//                                  card: two buttons, no free text)
 //   prompt starting with "MCP-LIST" → replies with the MCP server names the
 //                                  client sent for this session (new/load/resume)
 //   prompt starting with "ELICIT-DIE:" → issues elicitation/create, ends the
@@ -427,6 +431,54 @@ async function handle(method, params, id) {
           },
         });
         return { stopReason: "end_turn" };
+      }
+      if (text.startsWith("ASK:")) {
+        // The inline question card: a title, one prompt, and the options the
+        // caller names — the shape words a one-pick card is drawn from.
+        // The host appends its own note to the first prompt of a chat, so only
+        // the line that carries the request is read.
+        const [title = "Question", prompt = "", options = "yes,no"] = (
+          text.split("\n")[0] ?? text
+        )
+          .slice("ASK:".length)
+          .split("|");
+        // The row that carries the drift warning itself, so a spec sees what the
+        // chat drew before the card: the numbers, and the archive link.
+        notify("session/update", {
+          sessionId: params.sessionId,
+          update: {
+            sessionUpdate: "context_drift",
+            sessionId: params.sessionId,
+            seq: 4,
+            messages: 6,
+            prevMessages: 4,
+            prefixSame: 2,
+            systemChanged: false,
+            toolsChanged: false,
+            logMode: "full",
+          },
+        });
+        const requestId = `ask-${nextSession++}-${Date.now()}`;
+        write({
+          jsonrpc: "2.0",
+          id: requestId,
+          method: "session/ask_question",
+          params: {
+            sessionId: params.sessionId,
+            title,
+            questions: [
+              {
+                id: "ask",
+                prompt,
+                options: options
+                  .split(",")
+                  .map((entry, i) => ({ id: `opt-${i}`, label: entry.trim() })),
+              },
+            ],
+          },
+        });
+        const answer = await waitForResponse(requestId);
+        return { stopReason: "end_turn", questionAnswer: answer };
       }
       if (text.startsWith("ELICIT:")) {
         const requestId = `elicit-${nextSession++}-${Date.now()}`;
