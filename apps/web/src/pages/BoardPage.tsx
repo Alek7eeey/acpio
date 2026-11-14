@@ -3748,7 +3748,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
         createPortal(
           <div className={styles.backdrop} onClick={() => setDeriveTask(null)}>
             <div
-              className={styles.modal}
+              className={`${styles.modal} ${styles.modalFixed}`}
               role="dialog"
               aria-modal="true"
               aria-label={t("chat.deriveChatTitle")}

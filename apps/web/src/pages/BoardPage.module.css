@@ -1323,6 +1323,22 @@
   color: var(--text);
 }
 
+/* Dialog with a long list inside: only the list scrolls, so the fields and the
+   buttons under it stay in view however many folders there are. */
+.modalFixed > * {
+  flex: 0 0 auto;
+}
+
+.modalFixed {
+  overflow: hidden;
+}
+
+.modalFixed > .folderList {
+  flex: 1 1 auto;
+  min-height: 80px;
+  overflow-y: auto;
+}
+
 .modalText {
   margin: 0;
   font-size: 0.84rem;
