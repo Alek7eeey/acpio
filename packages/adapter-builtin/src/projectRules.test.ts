@@ -7,6 +7,7 @@ import {
   discoverProjectRules,
   parseRuleFile,
   renderProjectRules,
+  renderRuleNotes,
   touchedFiles,
 } from "./projectRules.js";
 
@@ -97,30 +98,45 @@ describe("touchedFiles", () => {
   });
 });
 
-describe("renderProjectRules", () => {
-  it("inlines a globs rule once the conversation touched a matching file", async () => {
+describe("renderRuleNotes", () => {
+  it("hands over a globs rule once the conversation touched a matching file", async () => {
     const cwd = tempDir();
     file(cwd, ".cursor/rules/ui.mdc", "---\nglobs: src/ui/**\n---\nUse tokens.");
-    const untouched = await renderProjectRules(cwd);
-    expect(untouched).toContain("- `.cursor/rules/ui.mdc` (globs: src/ui/**)");
-    expect(untouched).not.toContain("Use tokens.");
+    const none = await renderRuleNotes(cwd, undefined, [], new Set());
+    expect(none).toEqual({ text: "", paths: [] });
 
-    const touched = await renderProjectRules(cwd, undefined, ["src/ui/Button.tsx"]);
-    expect(touched).toContain("--- .cursor/rules/ui.mdc ---\nUse tokens.");
-    expect(touched).not.toContain("Conditional project rules");
+    const touched = await renderRuleNotes(cwd, undefined, ["src/ui/Button.tsx"], new Set());
+    expect(touched.text).toContain("--- .cursor/rules/ui.mdc ---\nUse tokens.");
+    expect(touched.paths).toEqual([".cursor/rules/ui.mdc"]);
+    // The rule stays a path in the block the head carries.
+    expect(await renderProjectRules(cwd)).toContain("- `.cursor/rules/ui.mdc` (globs: src/ui/**)");
 
     // A file of another area leaves the rule where it was.
-    const other = await renderProjectRules(cwd, undefined, ["server/main.py"]);
-    expect(other).not.toContain("Use tokens.");
+    expect((await renderRuleNotes(cwd, undefined, ["server/main.py"], new Set())).text).toBe("");
+    // A rule that already arrived is not sent again.
+    expect(
+      (await renderRuleNotes(cwd, undefined, ["src/ui/Button.tsx"], new Set([".cursor/rules/ui.mdc"])))
+        .text,
+    ).toBe("");
   });
 
   it("matches any of a comma-separated globs list", async () => {
     const cwd = tempDir();
     file(cwd, ".cursor/rules/ts.mdc", "---\nglobs: web/**/*.ts, web/**/*.tsx\n---\nNo `as`.");
-    expect(await renderProjectRules(cwd, undefined, ["web/plugins/a.tsx"])).toContain("No `as`.");
-    expect(await renderProjectRules(cwd, undefined, ["web/plugins/a.css"])).not.toContain("No `as`.");
+    expect((await renderRuleNotes(cwd, undefined, ["web/plugins/a.tsx"], new Set())).text).toContain(
+      "No `as`.",
+    );
+    expect((await renderRuleNotes(cwd, undefined, ["web/plugins/a.css"], new Set())).text).toBe("");
   });
 
+  it("leaves an always-on rule out of the note: the head already carries it", async () => {
+    const cwd = tempDir();
+    file(cwd, "AGENTS.md", "Tabs, not spaces.");
+    expect((await renderRuleNotes(cwd, undefined, ["AGENTS.md"], new Set())).text).toBe("");
+  });
+});
+
+describe("renderProjectRules", () => {
   it("is empty when the repository ships no rules", async () => {
     expect(await renderProjectRules(tempDir())).toBe("");
   });
@@ -139,6 +155,16 @@ describe("renderProjectRules", () => {
     expect(prompt).toContain("- `.cursor/rules/nested/ui.mdc` — UI conventions (globs: src/ui/**)");
     expect(prompt).not.toContain("Use tokens.");
     expect(prompt).toContain("more specific than the rules above");
+  });
+
+  it("keeps a globs rule a path even when a matching file is on the wire", async () => {
+    // The head is written once per chat: a rule that starts to match arrives as
+    // a tail note (`renderRuleNotes`), never by rewriting these bytes.
+    const cwd = tempDir();
+    file(cwd, ".cursor/rules/ui.mdc", "---\nglobs: src/ui/**\n---\nUse tokens.");
+    const prompt = await renderProjectRules(cwd);
+    expect(prompt).toContain("- `.cursor/rules/ui.mdc` (globs: src/ui/**)");
+    expect(prompt).not.toContain("Use tokens.");
   });
 
   it("caps one huge rule's text and lists the next that no longer fits", async () => {

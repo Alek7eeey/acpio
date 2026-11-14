@@ -55,7 +55,7 @@ import {
   type TurnOutcome,
 } from "./loop.js";
 import { McpManager, mcpToolSet, parseMcpServers } from "./mcp.js";
-import { renderProjectRules, touchedFiles } from "./projectRules.js";
+import { renderProjectRules, renderRuleNotes, touchedFiles } from "./projectRules.js";
 import {
   builtinSlashCommands,
   discoverSettingsSkills,
@@ -712,6 +712,14 @@ export class BuiltinAgent implements InProcessAgentTransport {
   /** Stored-message boundary the mask covers; advanced only when a pass runs. */
   private maskUpTo = 0;
   /**
+   * Stored-message boundary whose archive decision is taken, pinned for the same
+   * reason as `maskUpTo`: a tool answer below it has already gone out with the
+   * shape it has. Deciding it again was how a lowered threshold rewrote a
+   * message in the middle of a prompt — chat c88a1a10 kept 41 of 78 messages
+   * and the provider charged the rest from the 42nd on.
+   */
+  private offloadUpTo = 0;
+  /**
    * Stored index the prune mode view starts at. Sticky: recomputing the cut on
    * every turn would rewrite the head of every later request while a provider
    * charges the whole view again for it.
@@ -748,6 +756,41 @@ export class BuiltinAgent implements InProcessAgentTransport {
    * message (see `expandSkillInvocation`).
    */
   private frozenSkills: { section: string; supersedes: Set<string> } | null = null;
+  /**
+   * The project-rules block of the system prompt, fixed with the first turn like
+   * `frozenSkills`, and for the same reason: the provider's cache answers the
+   * prefix, so a rule inlined into `messages[0]` between two requests bills the
+   * whole history again. A rule the settings add mid-chat arrives with the next
+   * session; one whose `globs` start to match arrives in the tail (see
+   * `deliveredRules`).
+   */
+  private frozenRules: string | null = null;
+  /**
+   * Rule paths already appended to the tail: a note lands once, so the request
+   * that carries it is the only one that pays for it.
+   */
+  private deliveredRules: string[] = [];
+  /**
+   * The settings every other part of the head is written from, fixed with the
+   * session's first turn like `frozenSkills`. Each of them lands in the system
+   * prompt or in the tool declarations, both of which ride ahead of the
+   * messages: reading them live meant a switch flipped in Settings rewrote the
+   * head of the next request and billed the whole history again — chat
+   * b0c36ffa paid 50 768 tokens for a head that moved. A knob turned there
+   * arrives with the next session, deliberately; live is only what the reader's
+   * own turn decides (`thinking`, see `echoThinking`).
+   */
+  private frozenHead: {
+    locale: string;
+    replyLanguage: BuiltinReplyLanguage;
+    /** `plan` tool offered, so its rule holds and the tool is declared. */
+    planTool: boolean;
+    outsideCwd: boolean;
+    markdownImages: boolean;
+    extraInstructions: string;
+    /** MCP servers the head names — and the only ones whose tools it offers. */
+    servers: string[];
+  } | null = null;
   /**
    * The plan as this session last read it out of `.acpio/plan.md` — title,
    * overview, the Markdown, the steps and the stage. The file is the source of
@@ -1020,6 +1063,10 @@ export class BuiltinAgent implements InProcessAgentTransport {
     // send the noted results back verbatim and recompute the cut for nothing.
     this.maskUpTo = stored?.maskUpTo ?? 0;
     this.prunedFrom = stored?.prunedFrom ?? 0;
+    // A history written before the boundary existed has been on the wire in
+    // full: sealing it is what keeps the archive from re-cutting a prompt the
+    // provider has already cached.
+    this.offloadUpTo = stored ? (stored.offloadUpTo ?? this.messages.length) : 0;
     // A transport rebuilt mid-chat resumes on the prompt bytes the first turn
     // fixed, instead of inlining (or dropping) a skill body it read again.
     this.frozenSkills = stored?.promptSkills
@@ -1028,6 +1075,14 @@ export class BuiltinAgent implements InProcessAgentTransport {
           supersedes: new Set(stored.promptSkills.supersedes),
         }
       : null;
+    // Same reason as the skills block: a transport built again mid-chat resumes
+    // on the prompt bytes the first turn fixed, and on the notes already sent.
+    this.frozenRules = stored?.promptRules ? stored.promptRules.section : null;
+    this.deliveredRules = [...(stored?.promptRules?.delivered ?? [])];
+    // …and the settings the head is written from, for the very same reason: a
+    // transport built again mid-chat (a restart, a settings save) must resume on
+    // the bytes the provider has cached, not on the settings as they are now.
+    this.frozenHead = stored?.promptHead ? { ...stored.promptHead } : null;
     this.offload = OffloadStore.forSession(this.opts.stateDir, sessionId);
     // Announce discovered skills before the boot reply: the harness merges them
     // into the composer's slash menu, exactly like a CLI agent's own list. The
@@ -1112,6 +1167,7 @@ export class BuiltinAgent implements InProcessAgentTransport {
       ...(this.thinkingLimitOverride !== undefined ? { thinkingLimit: this.thinkingLimitOverride } : {}),
       ...(this.compaction ? { compaction: this.compaction } : {}),
       ...(this.maskUpTo > 0 ? { maskUpTo: this.maskUpTo } : {}),
+      ...(this.offloadUpTo > 0 ? { offloadUpTo: this.offloadUpTo } : {}),
       ...(this.prunedFrom > 0 ? { prunedFrom: this.prunedFrom } : {}),
       ...(this.frozenSkills
         ? {
@@ -1121,6 +1177,10 @@ export class BuiltinAgent implements InProcessAgentTransport {
             },
           }
         : {}),
+      ...(this.frozenRules !== null || this.deliveredRules.length
+        ? { promptRules: { section: this.frozenRules ?? "", delivered: [...this.deliveredRules] } }
+        : {}),
+      ...(this.frozenHead ? { promptHead: { ...this.frozenHead, servers: [...this.frozenHead.servers] } } : {}),
       // The spend rows ride along: a restart must resume the session's totals,
       // not restart them from zero and make the panel's first update after the
       // reboot hand back what the session had already spent.
@@ -1772,11 +1832,24 @@ export class BuiltinAgent implements InProcessAgentTransport {
     const keepLastConfigured = settings.builtinPruneToolResultsKeepLast;
     // Tier 0: bulky results move to the session archive under a stable id and
     // reach the model as a citation it can read back — reversible, unlike a
-    // mask, and deterministic per message, so a cached prefix survives it.
-    const offloaded =
-      settings.builtinOffloadToolResultTokens > 0 && this.offload
-        ? offloadToolResults(this.messages, this.offload, settings.builtinOffloadToolResultTokens)
-        : this.messages;
+    // mask. Only the tail is decided: what already went out keeps the shape it
+    // had, whatever the threshold says now.
+    const offloaded = this.offload
+      ? offloadToolResults(
+          this.messages,
+          this.offload,
+          settings.builtinOffloadToolResultTokens,
+          this.offloadUpTo,
+        )
+      : this.messages;
+    // The tail just decided — archived or kept verbatim — is what goes on the
+    // wire next, so the boundary moves with it. Advanced even with the switch
+    // off: “kept verbatim” is a decision too, and a threshold set later may not
+    // revise it.
+    if (this.offload && this.offloadUpTo !== this.messages.length) {
+      this.offloadUpTo = this.messages.length;
+      this.persist();
+    }
     // Tier 1: mask what can simply be called again. The boundary is pinned
     // between passes — advancing it every turn would rewrite the prefix and
     // throw away the provider's prompt cache for every later message.
@@ -2102,10 +2175,9 @@ export class BuiltinAgent implements InProcessAgentTransport {
     // The fuse follows this chat's override, else the global setting — a knob
     // turned in Settings reaches this turn instead of a new session.
     this.applyThinkingLimit(normalizeBuiltinThinkingLimit(live.builtinThinkingLimit));
-    // Settings → Built-in agent: the plan tool on unless the switch says off.
-    // Read live, like the two prompt switches below, so a chat that is already
-    // running gets the answer on its next turn.
-    const planToolEnabled = live.builtinPlanTool !== false;
+    // Settings → Built-in agent: the plan tool is offered unless it was
+    // switched off. Every switch below is read once per session (see
+    // `frozenHead`), so a toggle here arrives with the next chat.
     const { contextWindow } = selection;
     const abort = new AbortController();
     this.abort = abort;
@@ -2118,7 +2190,6 @@ export class BuiltinAgent implements InProcessAgentTransport {
     }) => this.askPermission(toolCall);
     try {
       const endpoint = this.endpointFor(selection);
-      const offered = mcpEntries;
       // One bridge per prompt: slots and the usage accumulator must span the
       // turn and its wrap-up continuation.
       // Children run on their own model when one is configured — a fresh
@@ -2182,38 +2253,69 @@ export class BuiltinAgent implements InProcessAgentTransport {
         this.persist();
       }
       const skillsPrompt = this.frozenSkills;
-      // Built once for the whole turn: the summariser borrows this exact string
-      // so its request starts where this turn's did (see `ask`), and a retried
-      // attempt must not drift the prefix the first attempt already warmed.
-      // Read live, like every other knob: a pattern added in Settings reaches
-      // the very next turn, and the files behind it are re-read each turn.
-      const projectRules = await renderProjectRules(
+      // Built once for the whole session and then frozen (see `frozenRules`): a
+      // rule that inlines itself between two requests moves the head of the
+      // prompt, and the provider's cache only answers an unchanged head.
+      if (this.frozenRules === null) {
+        this.frozenRules = await renderProjectRules(this.cwd, live.builtinProjectRules);
+        this.persist();
+      }
+      const projectRules = this.frozenRules;
+      // The rest of the head is written from the settings the session's first
+      // turn read (see `frozenHead`): the system prompt and the tool
+      // declarations both sit in front of the messages, so a knob turned in
+      // Settings must not reach them mid-chat — it would move the head of the
+      // next request and bill the entire history again.
+      if (!this.frozenHead) {
+        this.frozenHead = {
+          locale: live.locale,
+          replyLanguage: normalizeBuiltinReplyLanguage(live.builtinReplyLanguage),
+          planTool: live.builtinPlanTool !== false,
+          outsideCwd: live.builtinAllowOutsideCwd === true,
+          markdownImages: live.builtinMarkdownImages === true,
+          extraInstructions: live.builtinExtraInstructions ?? "",
+          servers: [...new Set(mcpEntries.map((entry) => entry.server))].sort(),
+        };
+        this.persist();
+      }
+      const head = this.frozenHead;
+      // The tools follow the head: the declarations are part of the same cached
+      // prefix, so a server connected mid-chat (or a switch flipped) must not
+      // add one here — its tools arrive with the next session.
+      const offered = mcpEntries.filter((entry) => head.servers.includes(entry.server));
+      // A rule whose `globs` match a file this conversation has already opened
+      // belongs in front of the model — but behind everything already sent, so
+      // the cached prefix still answers and only the note is charged. It lands
+      // in front of the reader's own turn, never inside it.
+      const ruleNotes = await renderRuleNotes(
         this.cwd,
         live.builtinProjectRules,
-        // The files this conversation already opened: their rules are inlined
-        // instead of waiting in the list (see `renderProjectRules`).
         touchedFiles(this.messages, this.cwd),
+        new Set(this.deliveredRules),
       );
+      if (ruleNotes.text) {
+        this.deliveredRules.push(...ruleNotes.paths);
+        this.messages.splice(
+          Math.max(0, this.messages.length - 1),
+          0,
+          userContent([{ type: "text", text: ruleNotes.text }]),
+        );
+        this.persist();
+      }
       const system = systemPrompt(
-        live.locale,
-        // Read live, like the switches below: the setting reaches the prompt of
-        // the very next turn, without restarting the chat.
-        normalizeBuiltinReplyLanguage(live.builtinReplyLanguage),
+        head.locale,
+        head.replyLanguage,
         this.cwd,
-        {
-          // Sorted: the manager hands the entries back in connect order, which
-          // is not stable between turns — an unsorted list rewrites the prompt.
-          servers: [...new Set(offered.map((entry) => entry.server))].sort(),
-        },
+        { servers: head.servers },
         skillsPrompt.section,
         skillsPrompt.supersedes,
-        live.builtinAllowOutsideCwd === true,
-        live.builtinMarkdownImages === true,
+        head.outsideCwd,
+        head.markdownImages,
         // Settings → Built-in agent: the `plan` tool is offered unless it was
         // switched off; its rule leaves the prompt with it, or the model would
         // be told to call a tool it does not have.
-        planToolEnabled,
-        live.builtinExtraInstructions ?? "",
+        head.planTool,
+        head.extraInstructions,
         THINKING_INSTRUCTIONS[this.thinking],
         projectRules,
       );
@@ -2232,12 +2334,12 @@ export class BuiltinAgent implements InProcessAgentTransport {
           host: this.rpc,
           sessionId: this.sessionId,
           ask,
-          outsideCwd: live.builtinAllowOutsideCwd === true,
+          outsideCwd: head.outsideCwd,
           // Read live, like the switch above: a raised limit reaches the very
           // next call, without restarting the chat.
           bashTimeoutMs: normalizeBuiltinBashTimeoutSec(live.builtinBashTimeoutSec) * 1000,
           subagents: subagents ?? undefined,
-          plan: planToolEnabled ? this.planBridge() : undefined,
+          plan: head.planTool ? this.planBridge() : undefined,
           // Same channel as the MCP tools: `read` on a picture hands the bytes
           // to the turn, which puts them right after that call's result.
           onImages: (toolCallId, images) => toolImages.set(toolCallId, images),

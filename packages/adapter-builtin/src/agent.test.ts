@@ -56,12 +56,15 @@ function boot(
   stateDir = tempDir(),
   /** Answers the agent's own host calls (permissions, terminals, files). */
   answerHost?: (method: string, params: Record<string, unknown>) => unknown,
+  /** Settings as of right now — a knob flipped between two turns. */
+  settingsProvider?: () => Promise<AppSettings>,
 ): Harness {
   const agent = createBuiltinTransport({
     settings: { ...DEFAULT_SETTINGS, ...overrides },
     cwd: stateDir,
     mode: "agent",
     stateDir,
+    ...(settingsProvider ? { settingsProvider } : {}),
   });
 
   const frames: Array<Record<string, unknown>> = [];
@@ -472,7 +475,7 @@ describe("builtin provider routing", () => {
     }
   });
 
-  it("inlines the rule of a file the conversation already touched", async () => {
+  it("appends the rule of a touched file behind the head instead of rewriting it", async () => {
     const stub = await startStub();
     const dir = tempDir();
     mkdirSync(join(dir, ".cursor", "rules"), { recursive: true });
@@ -528,11 +531,31 @@ describe("builtin provider routing", () => {
       );
       await call("session/load", { sessionId: "rules-1", cwd: dir });
       await call("session/prompt", { prompt: [{ type: "text", text: "hi" }] });
-      const prompt = String(
-        ((stub.bodies.at(-1)?.messages ?? []) as Array<Record<string, unknown>>)[0]?.content,
+      const sent = (): Array<Record<string, unknown>> =>
+        (stub.bodies.at(-1)?.messages ?? []) as Array<Record<string, unknown>>;
+      const textOf = (message: Record<string, unknown>) =>
+        Array.isArray(message.content)
+          ? message.content.map((part: { text?: string }) => part.text ?? "").join("\n")
+          : String(message.content ?? "");
+      const head = String(sent()[0]?.content);
+      // The head is what the first turn wrote: the rule stays a path there, even
+      // though the conversation has since read a file its globs name.
+      expect(head).toContain("- `.cursor/rules/ui.mdc` — UI conventions (globs: web/plugins/**)");
+      expect(head).not.toContain("Use tokens.");
+      // The rule arrives as a note behind everything already sent, right in
+      // front of the reader's own turn — nothing above it moved.
+      const noteAt = sent().findIndex((message) => textOf(message).includes("--- .cursor/rules/ui.mdc ---"));
+      expect(noteAt).toBeGreaterThan(1);
+      expect(sent()[noteAt].role).toBe("user");
+      expect(textOf(sent()[noteAt])).toContain("--- .cursor/rules/ui.mdc ---\nUse tokens.");
+      expect(noteAt).toBe(sent().length - 2);
+      // A rule lands once: the next turn keeps the same head and adds no second
+      // copy, so only the note itself was ever paid for.
+      await call("session/prompt", { prompt: [{ type: "text", text: "again" }] });
+      expect(String(sent()[0]?.content)).toBe(head);
+      expect(sent().filter((message) => textOf(message).includes("--- .cursor/rules/ui.mdc ---"))).toHaveLength(
+        1,
       );
-      expect(prompt).toContain("--- .cursor/rules/ui.mdc ---\nUse tokens.");
-      expect(prompt).not.toContain("Conditional project rules");
     } finally {
       await stub.close();
     }
@@ -3357,6 +3380,29 @@ describe("builtin session store", () => {
     expect(loadBuiltinSession(dir, "s-broken")?.promptSkills).toBeUndefined();
   });
 
+  it("keeps the settings the head was written from, and drops a broken one", () => {
+    const dir = tempDir();
+    const frozen = {
+      locale: "ru",
+      replyLanguage: "en" as const,
+      planTool: false,
+      outsideCwd: true,
+      markdownImages: false,
+      extraInstructions: "Think briefly.",
+      servers: ["fs", "git"],
+    };
+    saveBuiltinSession(dir, "s-head", { ...sample, promptHead: frozen });
+    expect(loadBuiltinSession(dir, "s-head")?.promptHead).toEqual(frozen);
+
+    // One broken field and the whole head is none: the next turn writes it
+    // again instead of resuming on half a prompt.
+    saveBuiltinSession(dir, "s-head-broken", {
+      ...sample,
+      promptHead: { ...frozen, servers: "fs" } as never,
+    });
+    expect(loadBuiltinSession(dir, "s-head-broken")?.promptHead).toBeUndefined();
+  });
+
   it("starts fresh on a corrupt file instead of throwing", () => {
     const dir = tempDir();
     saveBuiltinSession(dir, "s-1", sample);
@@ -3551,6 +3597,47 @@ describe("builtin subagents wiring", () => {
       await call("session/new", { cwd: "/w" });
       await call("session/prompt", { prompt: [{ type: "text", text: "hi" }] });
       expect(stub.hits[0]!.system).toContain("![shot](shot.png)");
+    } finally {
+      await stub.close();
+    }
+  });
+
+  // The head is written once per chat: the system prompt and the tool
+  // declarations sit in front of the messages, so a switch flipped in Settings
+  // must not rewrite them mid-session — chat b0c36ffa paid 50 768 tokens for a
+  // head that moved between two requests. The switch arrives with the next chat.
+  it("keeps the head as the first turn wrote it when a setting flips mid-chat", async () => {
+    const stub = await startRecordingStub();
+    let current: AppSettings = {
+      ...DEFAULT_SETTINGS,
+      builtinProviders: provider(stub.url),
+      builtinMarkdownImages: true,
+    };
+    try {
+      const { call } = boot(
+        { builtinProviders: provider(stub.url) },
+        tempDir(),
+        undefined,
+        async () => current,
+      );
+      await call("session/new", { cwd: "/w" });
+      await call("session/prompt", { prompt: [{ type: "text", text: "hi" }] });
+      const head = stub.hits[0]!.system;
+      expect(head).toContain("![shot](shot.png)");
+      expect(stub.hits[0]!.toolNames).toContain("plan");
+      // Four head-side switches flipped while the chat is open.
+      current = {
+        ...current,
+        builtinMarkdownImages: false,
+        builtinPlanTool: false,
+        builtinReplyLanguage: "en",
+        builtinExtraInstructions: "Think briefly.",
+      };
+      await call("session/prompt", { prompt: [{ type: "text", text: "again" }] });
+      expect(stub.hits[1]!.system).toBe(head);
+      // The declarations follow the same head, or the model is told about a
+      // tool it no longer has.
+      expect(stub.hits[1]!.toolNames).toEqual(stub.hits[0]!.toolNames);
     } finally {
       await stub.close();
     }

@@ -1,12 +1,18 @@
-// The repository's own instructions for agents, matched from the chat's cwd on
-// every turn against Settings → Built-in agent `builtinProjectRules` (by
-// default `AGENTS.md`, the legacy `.cursorrules` and the Cursor-compatible
+// The repository's own instructions for agents, matched from the chat's cwd
+// against Settings → Built-in agent `builtinProjectRules` (by default
+// `AGENTS.md`, the legacy `.cursorrules` and the Cursor-compatible
 // `.cursor/rules/**/*.mdc`). A rule that applies whatever the task is goes into
 // the system prompt inline; one gated on `globs` (or merely on a `description`)
-// is listed by path instead, so the model reads it when the files it touches
-// match — the split Cursor itself makes, without a per-file matcher here. Read
-// per turn rather than frozen like the skills block: an edited rule is meant to
-// bite the next turn, and the prompt bytes change only when the file does.
+// is listed by path instead — the split Cursor itself makes, without a per-file
+// matcher here.
+//
+// The head is written once per chat. A provider's cache answers a prefix, so a
+// system prompt that gains a sentence between two requests bills the whole
+// history again (chat b0c36ffa: five `.mdc` rules inlined themselves into
+// `messages[0]` mid-turn and 50 768 tokens went out at full price). A rule whose
+// globs start to match therefore does NOT move into the head: `renderRuleNotes`
+// hands it to the caller to append behind everything already sent, where only the
+// note itself is new.
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { DEFAULT_BUILTIN_PROJECT_RULES, normalizeBuiltinProjectRules } from "@acpio/shared";
@@ -156,29 +162,28 @@ function globMatches(globs: string, touched: readonly string[]): boolean {
   return patterns.some((glob) => touched.some((file) => minimatch(file, glob, { dot: true })));
 }
 
+/** One rule's text as the prompt carries it: capped, and marked when it was. */
+function ruleText(rule: ProjectRule): string {
+  return rule.body.length > PER_RULE_CHAR_LIMIT
+    ? `${rule.body.slice(0, PER_RULE_CHAR_LIMIT)}\n...[truncated]...`
+    : rule.body;
+}
+
 /**
- * The prompt block, or "" when the repository ships no rules. Inline rules keep
- * their text in full (up to a per-rule and an overall cap); anything over the
- * cap joins the conditional ones, where a path and a line still earn the read —
- * and a conditional rule whose `globs` match a file the conversation already
- * touched stops being conditional and is inlined like an always-on one.
+ * The prompt block, or "" when the repository ships no rules. Always-on rules
+ * keep their text in full (up to a per-rule and an overall cap); anything over
+ * the cap, and every rule gated on `globs`, is listed by path instead. Built once
+ * per chat and frozen after that — see the note at the top of this file.
  */
-export async function renderProjectRules(
-  cwd: string,
-  patterns?: unknown,
-  touched: readonly string[] = [],
-): Promise<string> {
+export async function renderProjectRules(cwd: string, patterns?: unknown): Promise<string> {
   const rules = await discoverProjectRules(cwd, patterns);
   if (!rules.length) return "";
-  const inlined = rules.filter((rule) => rule.always || (rule.globs && globMatches(rule.globs, touched)));
-  const listed = rules.filter((rule) => !inlined.includes(rule));
+  const inlined = rules.filter((rule) => rule.always);
+  const listed = rules.filter((rule) => !rule.always);
   const inline: string[] = [];
   let budget = INLINE_CHAR_LIMIT;
   for (const rule of inlined) {
-    const body =
-      rule.body.length > PER_RULE_CHAR_LIMIT
-        ? `${rule.body.slice(0, PER_RULE_CHAR_LIMIT)}\n...[truncated]...`
-        : rule.body;
+    const body = ruleText(rule);
     if (!body) continue;
     if (body.length > budget) {
       listed.push(rule);
@@ -205,4 +210,49 @@ export async function renderProjectRules(
         ]
       : []),
   ].join("\n");
+}
+
+export interface RuleNotes {
+  /** The message to append behind the prompt, or "" when nothing new matched. */
+  text: string;
+  /** The rules it carries — the caller records them so none arrives twice. */
+  paths: string[];
+}
+
+/**
+ * The tail note for the rules that started to apply: a conditional rule whose
+ * `globs` match a file the conversation has already opened or changed, and which
+ * `delivered` has not carried yet.
+ *
+ * The head cannot take them (see the note at the top of this file), so they
+ * arrive as a message behind everything already sent: the provider still answers
+ * the cached prefix, and only this text is charged. Cursor's own split survives —
+ * a rule that never matches stays a path in the list above.
+ */
+export async function renderRuleNotes(
+  cwd: string,
+  patterns: unknown,
+  touched: readonly string[],
+  delivered: ReadonlySet<string>,
+): Promise<RuleNotes> {
+  if (!touched.length) return { text: "", paths: [] };
+  const rules = await discoverProjectRules(cwd, patterns);
+  const fresh = rules.filter(
+    (rule) => !rule.always && !!rule.globs && !delivered.has(rule.path) && globMatches(rule.globs, touched),
+  );
+  if (!fresh.length) return { text: "", paths: [] };
+  const blocks = fresh
+    .filter((rule) => ruleText(rule))
+    .map((rule) => `--- ${rule.path} ---\n${ruleText(rule)}`);
+  // Every matched rule counts as delivered even when its body is empty: the check
+  // runs once per turn and nothing would ever change that answer.
+  const paths = fresh.map((rule) => rule.path);
+  if (!blocks.length) return { text: "", paths };
+  return {
+    text: [
+      "Project rules for the files this conversation has already opened — this repository's own instructions for agents. They are more specific than the rules above: where they disagree, these win. They arrive here, rather than in the instructions above, because those were written once when the chat started.",
+      ...blocks,
+    ].join("\n"),
+    paths,
+  };
 }

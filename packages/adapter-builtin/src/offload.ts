@@ -105,6 +105,15 @@ export class OffloadStore {
     return new OffloadStore(offloadDir(stateDir, sessionId));
   }
 
+  /**
+   * Whether this result's bytes are in the archive — which is the record of a
+   * decision, not a cache of one: a file that exists means the citation below
+   * has already been on the wire and the verbatim text may never come back.
+   */
+  has(id: string): boolean {
+    return this.written.has(id) || existsSync(join(this.dir, `${id}.txt`));
+  }
+
   /** Write one record and return its path; the same id is never written twice. */
   put(record: OffloadRecord): string {
     const file = join(this.dir, `${record.id}.txt`);
@@ -133,16 +142,24 @@ function resultText(output: unknown): string {
 
 /**
  * Replace every archivable tool result above `minTokens` with its citation,
- * writing the bytes to `store` on the way. Deterministic in the message alone —
- * a result over the line is offloaded on every turn, so the prompt prefix never
- * changes for a reason the provider cannot cache.
+ * writing the bytes to `store` on the way.
+ *
+ * Only the tail is decided: messages below `from` have already crossed the wire,
+ * and a prompt is not ours to rewrite once the provider has cached and billed
+ * its head. Lowering the threshold later used to archive an old answer in the
+ * middle of the history, which moved every message after it — chat c88a1a10
+ * matched 41 of 78 messages and paid the remaining 37 again. The archive file is
+ * the other half of the same rule: an id that is in `store` keeps its citation
+ * whatever the boundary says, and a threshold of 0 (the switch off) stops new
+ * archiving without sending the archived results back verbatim.
  */
 export function offloadToolResults(
   messages: ModelMessage[],
   store: OffloadStore,
   minTokens: number,
+  from = 0,
 ): ModelMessage[] {
-  if (!(minTokens > 0)) return messages;
+  const limit = minTokens > 0 ? minTokens : Number.POSITIVE_INFINITY;
   // A result part carries no input of its own — the call that produced it does,
   // and the citation's subject (path, command, pattern) comes from there.
   const calls = new Map<string, Record<string, unknown>>();
@@ -153,17 +170,22 @@ export function offloadToolResults(
     }
   }
   let changed = false;
-  const out = messages.map((message) => {
+  const out = messages.map((message, index) => {
     if (message.role !== "tool" || !Array.isArray(message.content)) return message;
     let touched = false;
     const content = message.content.map((part) => {
       if (part.type !== "tool-result") return part;
       if (NEVER_OFFLOADED.includes(part.toolName)) return part;
+      const id = offloadId(part.toolName, part.toolCallId);
+      // Already archived: the citation is what went out, and it stays.
+      const archived = store.has(id);
+      // Below the boundary the question is settled the other way: this answer
+      // was sent verbatim, so it keeps its bytes and its place in the prefix.
+      if (!archived && index < from) return part;
       const text = resultText(part.output);
       if (!text) return part;
       const tokens = estimateTokens([{ role: "user", content: text }]);
-      if (tokens < minTokens) return part;
-      const id = offloadId(part.toolName, part.toolCallId);
+      if (!archived && tokens < limit) return part;
       const input = calls.get(part.toolCallId);
       const subject =
         typeof input?.path === "string"
