@@ -1717,6 +1717,27 @@ describe("agent files in a chat", () => {
     expect(res.rawPayload).toEqual(Buffer.from([1, 2, 3]));
   });
 
+  // A picture is fetched by path, and a path is not a version: an agent that
+  // re-saves `shot.png` and answers again used to reach the reader only after a
+  // reload — the browser kept the bytes it already had under the same URL. The
+  // route's answer is never reusable, so the next answer brings the new bytes.
+  it("never lets the browser reuse the bytes behind a path", async () => {
+    const session = await seedAgentFileSession();
+    const shot = path.join(session.cwd, "shot.png");
+    await fsp.writeFile(shot, PNG);
+    const url = `/api/sessions/${session.id}/file?path=${encodeURIComponent("shot.png")}&inline=1`;
+
+    const first = await app.inject({ method: "GET", url });
+    expect(first.statusCode).toBe(200);
+    expect(String(first.headers["cache-control"])).toContain("no-store");
+
+    // The agent overwrote the picture: same URL, different bytes.
+    const next = Buffer.concat([PNG, Buffer.from([0])]);
+    await fsp.writeFile(shot, next);
+    const second = await app.inject({ method: "GET", url });
+    expect(second.rawPayload).toEqual(next);
+  });
+
   it("404s for a missing file, a directory and an unknown chat", async () => {
     const session = await seedAgentFileSession();
     const missing = await app.inject({

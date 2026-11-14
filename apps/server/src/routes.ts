@@ -2432,7 +2432,11 @@ export async function registerRoutes(app: FastifyInstance) {
       return reply.code(404).send({ error: "Not found" });
     }
     // Same split the attachment route makes: ?inline=1 renders known image
-    // types in the browser, everything else downloads.
+    // types in the browser, everything else downloads. A path is not a version,
+    // though: the agent that re-saves `shot.png` and answers again writes the
+    // same URL, so the answer must never be reused — otherwise the next message
+    // shows the bytes of the previous one until the reader reloads.
+    reply.header("Cache-Control", "no-store");
     const ext = path.extname(filePath).slice(1).toLowerCase();
     const imageMime = IMAGE_MIME[ext];
     if (q.inline === "1" && imageMime) {
