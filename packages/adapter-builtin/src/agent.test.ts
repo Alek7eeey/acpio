@@ -1818,13 +1818,16 @@ describe("builtin provider routing", () => {
     }
   });
 
-  it("hands a bare tool step back with an empty reasoning echo", async () => {
-    // The incident this guards: a relay in thinking mode answered a step with
-    // tool calls and no reasoning of its own, then refused the very history it
-    // had produced — `400 … The reasoning_content in the thinking mode must be
-    // passed back to the API` — and the turn died mid-flight. Every assistant
-    // message carrying tool calls has to go back with the field, empty where
-    // the step gave none.
+  it("never rewrites a tool step that already crossed the wire, and echoes it next turn", async () => {
+    // Two rules meet here. A relay in thinking mode refuses the history it
+    // produced when a step comes back without the field, so the echo has to
+    // reach it. But a message that has already gone out *keeps its bytes*: the
+    // provider matches the cache from the first message, so a field added behind
+    // the reader's back ends the cached prefix there and the whole tail is
+    // billed again (chat 7a6c147b, cached 9 600 of 11 430). The decision is
+    // therefore the turn's — taken from the stored transcript — and the step
+    // that went out bare stays bare for this turn; the next one owes the echo
+    // and says so from its first request.
     const bodies: Array<{ messages?: Array<Record<string, unknown>> }> = [];
     let requests = 0;
     const server = createServer((req, res) => {
@@ -1845,9 +1848,8 @@ describe("builtin provider routing", () => {
           choices: [{ index: 0, delta: message, finish_reason: null }],
         });
         if (requests === 1) {
-          // Step one thinks and then asks for a tool: the endpoint is in
-          // thinking mode from here on.
-          res.write(chunk(toolCall({ role: "assistant", reasoning_content: "думаю" })));
+          // Step one acts without a word of reasoning: this step goes out bare,
+          // and everything after it is measured against that.
           res.write(
             chunk(
               toolCall({
@@ -1876,8 +1878,10 @@ describe("builtin provider routing", () => {
           return;
         }
         if (requests === 2) {
-          // Step two acts without a word of reasoning — the shape that used to
-          // leave the history unsendable.
+          // Step two thinks: from here on the conversation is a thinking one,
+          // and the step above it has already crossed the wire without the
+          // field the echo would give it.
+          res.write(chunk(toolCall({ role: "assistant", reasoning_content: "думаю" })));
           res.write(
             chunk(
               toolCall({
@@ -1961,11 +1965,34 @@ describe("builtin provider routing", () => {
         (message) => message.role === "assistant" && Array.isArray(message.tool_calls),
       );
       expect(acting).toHaveLength(2);
-      // What the endpoint thought travels back verbatim…
-      expect(acting[0]?.reasoning_content).toBe("думаю");
-      // …and the step that thought nothing still comes back with the field.
-      expect(acting[1]).toHaveProperty("reasoning_content");
-      expect(acting[1]?.reasoning_content).toBe("");
+      // The step that acted bare comes back exactly as it went out — the same
+      // bytes the previous request carried, with no field added behind it.
+      expect(acting[0]).not.toHaveProperty("reasoning_content");
+      expect(JSON.stringify(acting[0])).toBe(
+        JSON.stringify(
+          (bodies[1]?.messages ?? []).find(
+            (message) => message.role === "assistant" && Array.isArray(message.tool_calls),
+          ),
+        ),
+      );
+      // What the endpoint thought travels back verbatim.
+      expect(acting[1]?.reasoning_content).toBe("думаю");
+
+      // The next turn knows the chat thinks: the field is owed from the first
+      // request it sends, so every acting step carries it — the bare one too.
+      const second = await call<{ stopReason: string }>("session/prompt", {
+        prompt: [{ type: "text", text: "ещё" }],
+      });
+      expect(second.stopReason).toBe("end_turn");
+      const later = (bodies.at(-1)?.messages ?? []).filter(
+        (message) => message.role === "assistant" && Array.isArray(message.tool_calls),
+      );
+      expect(later).toHaveLength(2);
+      for (const step of later) expect(typeof step.reasoning_content).toBe("string");
+      // The step that went out bare owes the field now, and pays for it in the
+      // one request where a new turn was starting anyway.
+      expect(later[0]?.reasoning_content).toBe("");
+      expect(later[1]?.reasoning_content).toBe("думаю");
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
