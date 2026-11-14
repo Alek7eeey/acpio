@@ -610,6 +610,85 @@ describe("compaction row", () => {
   });
 });
 
+describe("context drift row", () => {
+  /** A turn that reported its own request head moving mid-history. */
+  const drifted = (logMode: string): SessionDetailDto => ({
+    ...detail,
+    messages: [
+      detail.messages[0]!,
+      {
+        id: "m1",
+        sessionId: "s1",
+        role: "assistant",
+        createdAt: "2026-09-30T10:00:01.000Z",
+        parts: [
+          part("t1", "thought", 0, "Сначала посмотрю файлы"),
+          {
+            id: "d1",
+            messageId: "m1",
+            type: "context_drift",
+            order: 1,
+            payload: {
+              messages: 85,
+              prevMessages: 81,
+              prefixSame: 77,
+              logMode,
+            },
+            createdAt: "2026-09-30T10:00:01.000Z",
+          },
+          part("x1", "text", 2, "Продолжаю"),
+        ],
+      },
+    ],
+  });
+
+  const mount = (session: SessionDetailDto) => {
+    useAppStore.setState({
+      settings: { ...DEFAULT_SETTINGS, locale: "ru" as const },
+      sessions: [session],
+      activeSessionId: "s1",
+      activeSession: session,
+      sessionLoading: false,
+      error: null,
+      chatPaneIds: ["s1"],
+      focusedPaneIndex: 0,
+      unseenFinishedTurns: {},
+      sessionDetails: { s1: session },
+    });
+    return render(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <I18nProvider>
+          <ChatPage />
+        </I18nProvider>
+      </MemoryRouter>,
+    );
+  };
+
+  it("says where the head moved and hands over the chat's own log in full mode", async () => {
+    const { container } = mount(drifted("full"));
+    await expandSteps(container);
+    await screen.findByText("Контекст изменился в середине");
+
+    const row = container.querySelector<HTMLElement>("[data-context-drift-id]");
+    expect(row).toBeTruthy();
+    expect(row?.textContent).toContain("совпало 77 из 81 сообщений, сейчас 85");
+
+    // The bodies behind the warning are one click away, and only that chat's.
+    const link = row?.querySelector<HTMLAnchorElement>("a");
+    expect(link?.getAttribute("href")).toBe("/api/wire-log/archive?session=s1");
+  });
+
+  it("asks for logging instead of offering a download that would be empty", async () => {
+    const { container } = mount(drifted("off"));
+    await expandSteps(container);
+    await screen.findByText("Контекст изменился в середине");
+
+    const row = container.querySelector<HTMLElement>("[data-context-drift-id]");
+    expect(row?.querySelector("a")).toBeNull();
+    expect(row?.textContent).toContain("включи полное логирование");
+  });
+});
+
 // The row header is one ellipsized line, so a long shell command lost its own
 // text: the body offered the tool's output only, and a row still running could
 // not be opened at all.

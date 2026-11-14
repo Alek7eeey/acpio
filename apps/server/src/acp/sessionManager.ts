@@ -1592,6 +1592,32 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
     return;
   }
 
+  // The head of a request moved between two calls of the same turn: a picture
+  // attached twice, a view rewritten between steps, the prompt itself rebuilt.
+  // The provider matches its cache from the first message, so everything past
+  // `prefixSame` was charged in full — the reader learns it here, and in `full`
+  // log mode gets the bodies that say exactly what moved.
+  if (update.kind === "context_drift") {
+    if (!rt.acceptingStream) return;
+    const raw = update.raw;
+    const count = (value: unknown) =>
+      typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.round(value)) : null;
+    const messages = count(raw.messages);
+    const prevMessages = count(raw.prevMessages);
+    const prefixSame = count(raw.prefixSame);
+    if (messages === null || prevMessages === null || prefixSame === null) return;
+    const messageId = await ensureAssistantMessage(rt);
+    await appendPart(rt.sessionId, messageId, "context_drift", {
+      messages,
+      prevMessages,
+      prefixSame,
+      ...(raw.systemChanged === true ? { systemChanged: true } : {}),
+      ...(raw.toolsChanged === true ? { toolsChanged: true } : {}),
+      ...(typeof raw.logMode === "string" ? { logMode: raw.logMode } : {}),
+    });
+    return;
+  }
+
   if (update.kind === "user_message_chunk") {
     if (!rt.ingestingReplay || !update.text) return;
     if (rt.ingestLastRole !== "user" || !rt.ingestUserMessageId) {

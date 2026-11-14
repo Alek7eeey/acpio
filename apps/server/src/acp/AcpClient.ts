@@ -119,6 +119,7 @@ export type AcpUpdate =
   | { kind: "mixed_chunks"; thought?: string; text?: string }
   | { kind: "usage"; usage: AcpUsage; raw: Record<string, unknown> }
   | { kind: "compaction"; raw: Record<string, unknown> }
+  | { kind: "context_drift"; raw: Record<string, unknown> }
   | { kind: "other"; sessionUpdate: string; raw: Record<string, unknown> };
 
 export type AcpRequest =
@@ -2382,6 +2383,13 @@ export class AcpClient extends EventEmitter {
     // gets a top-level chat row for free.
     if (sessionUpdate === "compaction" || sessionUpdate === "compaction_update") {
       return { kind: "compaction", raw: update };
+    }
+    // A harness's report that a request's head no longer matches the request
+    // before it. The provider matches its prompt cache from the first message,
+    // so everything past the shared prefix is billed at full price — the chat
+    // says so instead of leaving it to the invoice.
+    if (sessionUpdate === "context_drift") {
+      return { kind: "context_drift", raw: update };
     }
     return { kind: "other", sessionUpdate, raw: update };
   }

@@ -496,6 +496,7 @@ describe("DEFAULT_SETTINGS", () => {
     permissionAllowlist: [],
     diagnosticsDir: "",
     diagnosticsDeepLogging: false,
+    diagnosticsContextDrift: false,
     editorTheme: "auto",
     editorNavPlacement: "tabs",
     editorSplit: "off",

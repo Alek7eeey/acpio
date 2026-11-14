@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resetProviderKeyCursors, providerFetch } from "./keys.js";
-import { resetWireLogState, sharedPrefix, withWireLog, wireLogDir } from "./wireLog.js";
+import { resetWireLogState, sharedPrefix, withWireLog, wireLogDir, type ContextDrift } from "./wireLog.js";
 
 /** A response shape the SDK/most relays answer with: JSON plus usage. */
 function jsonResponse(body: unknown): Response {
@@ -147,6 +147,80 @@ describe("wire log", () => {
     expect(requests[1].key).toHaveLength(8);
     expect(requests[0].keyChanged).toBe(false);
     expect(requests[1].keyChanged).toBe(true);
+  });
+
+  it("reports a head that moved in the middle, switch or no switch", async () => {
+    // The chat has to learn about a moving head even when nothing is written to
+    // disk: a warning that only exists while logging is on is a warning nobody
+    // has when the bill arrives.
+    process.env.ACPIO_WIRE_LOG = "0";
+    resetWireLogState();
+    const drifts: ContextDrift[] = [];
+    const call = withWireLog(
+      { sessionId: "sess-1", providerId: "legacy" },
+      (async () => jsonResponse({})) as typeof globalThis.fetch,
+      { onDrift: (drift) => drifts.push(drift) },
+    );
+    const send = (messages: unknown[]) =>
+      call("https://relay.test/v1/chat/completions", {
+        method: "POST",
+        body: JSON.stringify({ model: "m", messages }),
+      });
+    const one = { role: "user", content: "one" };
+    const two = { role: "assistant", content: "two" };
+
+    await send([one, two]);
+    // A pure append keeps the head: the cache answers the whole prefix.
+    await send([one, two, { role: "user", content: "three" }]);
+    expect(drifts).toEqual([]);
+
+    // The same three messages with the middle one rewritten: the cache stops at
+    // the first message and everything after it is paid in full.
+    await send([one, { role: "assistant", content: "TWO" }, { role: "user", content: "three" }]);
+
+    expect(drifts).toHaveLength(1);
+    expect(drifts[0]).toMatchObject({
+      sessionId: "sess-1",
+      messages: 3,
+      prevMessages: 3,
+      prefixSame: 1,
+      systemChanged: false,
+      toolsChanged: false,
+    });
+    // Nothing was written: the report does not depend on the log.
+    expect(fs.existsSync(path.join(wireLogDir(), "sess-1.jsonl"))).toBe(false);
+  });
+
+  it("does not look at the head at all while the diagnostics switch is off", async () => {
+    process.env.ACPIO_WIRE_LOG = "0";
+    resetWireLogState();
+    const drifts: ContextDrift[] = [];
+    let questions = 0;
+    const call = withWireLog(
+      { sessionId: "sess-1", providerId: "legacy" },
+      (async () => jsonResponse({})) as typeof globalThis.fetch,
+      {
+        onDrift: (drift) => drifts.push(drift),
+        // Settings → Diagnostics: off means the comparison does not run, so the
+        // prompt is not hashed at all — and nothing is remembered for later.
+        watch: () => {
+          questions += 1;
+          return false;
+        },
+      },
+    );
+    const one = { role: "user", content: "one" };
+    const send = (messages: unknown[]) =>
+      call("https://relay.test/v1/chat/completions", {
+        method: "POST",
+        body: JSON.stringify({ model: "m", messages }),
+      });
+
+    await send([one]);
+    await send([{ role: "user", content: "ONE" }]);
+
+    expect(questions).toBe(2);
+    expect(drifts).toEqual([]);
   });
 
   it("stays silent when the switch is off", async () => {

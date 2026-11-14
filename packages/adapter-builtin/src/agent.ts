@@ -25,7 +25,7 @@ import {
 } from "./config.js";
 import { createHostRpc } from "./host.js";
 import { providerFetch } from "./keys.js";
-import { withWireLog } from "./wireLog.js";
+import { withWireLog, wireLogState, type ContextDrift, type WireLogOptions } from "./wireLog.js";
 import {
   OffloadStore,
   offloadToolResults,
@@ -445,6 +445,8 @@ function builtinEndpoint(
   extraBody?: Record<string, unknown>,
   /** The conversation has reasoned before — see `fillReasoningEcho`. */
   thinking = false,
+  /** Whether the head is compared, and who hears about it — see `withWireLog`. */
+  hooks?: WireLogOptions,
 ) {
   // Provider body first, the per-turn override on top: the turn's pick (the
   // `thinking` the user chose in the ⋯ menu) is the more specific intent.
@@ -466,7 +468,7 @@ function builtinEndpoint(
     // that draws from a pool, which is exactly the chats a rotation costs.
     fetch: providerFetch(
       provider,
-      withWireLog({ sessionId, providerId: provider.id }, fetch),
+      withWireLog({ sessionId, providerId: provider.id }, fetch, hooks),
       undefined,
       sessionId,
     ),
@@ -714,6 +716,12 @@ export class BuiltinAgent implements InProcessAgentTransport {
    * are part of the cached prefix — the summariser reuses them verbatim.
    */
   private lastTools: ToolSet | undefined;
+  /**
+   * The turn already told the reader its context moved in the middle. Reset at
+   * the start of a turn: one warning per turn, or a long tool run would repeat
+   * the same one at every step.
+   */
+  private driftWarned = false;
   /**
    * The skills half of the system prompt, fixed on the session's first turn: an
    * inlined skill body and the rules it replaces must sit still while the
@@ -1410,7 +1418,42 @@ export class BuiltinAgent implements InProcessAgentTransport {
       // The stored transcript, not the view: a pruned view is still a thinking
       // conversation, and the echo must survive the pruning.
       hasReasoning(this.messages),
+      {
+        onDrift: (drift) => this.warnDrift(drift),
+        // Settings → Diagnostics: off means the head is not even hashed. Read
+        // per request, so the switch reaches the very next call.
+        watch: () => this.watching === true,
+      },
     );
+  }
+
+  /**
+   * Settings → Diagnostics → context drift, as of the last turn this chat ran.
+   * `undefined` before the first turn: the endpoint outlives turns, and a switch
+   * turned off right now must not leave the comparison running for a session
+   * that starts on it.
+   */
+  private watching: boolean | undefined;
+
+  /**
+   * The chat says out loud that its context moved in the middle. The provider
+   * matches a cached prompt from the first message, so a head that shifted
+   * below it is billed in full from that point — the reader has to learn it
+   * from the transcript, not from the invoice.
+   *
+   * One warning per turn: a break found at the first step is the same break at
+   * every step after it, and a chat that kept repeating it would bury itself.
+   */
+  private warnDrift(drift: ContextDrift): void {
+    if (this.driftWarned) return;
+    this.driftWarned = true;
+    this.emitUpdate({
+      sessionUpdate: "context_drift",
+      ...drift,
+      // Whether a support archive of this chat can be built right now: bodies
+      // are only on disk in `full` mode, and the button follows that.
+      logMode: wireLogState(),
+    });
   }
 
   /**
@@ -1947,6 +1990,9 @@ export class BuiltinAgent implements InProcessAgentTransport {
     this.settleSteers(false);
 
     const live = await this.settings();
+    // Settings → Diagnostics: whether a request's head is compared at all. Read
+    // here, per turn, so the switch reaches a chat that is already running.
+    this.watching = live.diagnosticsContextDrift === true;
     // The fuse follows this chat's override, else the global setting — a knob
     // turned in Settings reaches this turn instead of a new session.
     this.applyThinkingLimit(normalizeBuiltinThinkingLimit(live.builtinThinkingLimit));
@@ -2096,6 +2142,8 @@ export class BuiltinAgent implements InProcessAgentTransport {
         }),
       };
       this.lastTools = tools;
+      // A fresh turn: the warning about a moving head is its to earn again.
+      this.driftWarned = false;
       // A turn is one `promptHistory` call, so a turn's own growth is the one
       // place the threshold never looked: chat c24d5224 rode its line for twenty
       // minutes. This hands the loop the same pass a turn boundary runs — digest

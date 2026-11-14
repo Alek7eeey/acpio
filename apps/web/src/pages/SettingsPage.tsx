@@ -5243,6 +5243,20 @@ export function SettingsPage() {
               </SettingRow>
 
               <SettingRow
+                label={t("diagnostics.contextDrift")}
+                hint={t("diagnostics.contextDriftHint")}
+              >
+                <Toggle
+                  checked={form.diagnosticsContextDrift === true}
+                  onChange={(v) => {
+                    patch("diagnosticsContextDrift", v);
+                    void saveSettings({ diagnosticsContextDrift: v });
+                  }}
+                  label={t("diagnostics.contextDrift")}
+                />
+              </SettingRow>
+
+              <SettingRow
                 label={t("diagnostics.wireLog")}
                 hint={
                   wireLog?.forcedByEnv

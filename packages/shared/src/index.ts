@@ -1206,6 +1206,12 @@ export type MessagePartType =
   | "status"
   | "file"
   | "compaction"
+  /**
+   * A request whose head moved between two calls: the provider's prompt cache
+   * stops at the first differing message, so the tail was paid in full.
+   * Payload: `{ messages, prevMessages, prefixSame, systemChanged?, toolsChanged?, logMode? }`.
+   */
+  | "context_drift"
   /** A settled background job, written into the turn that took its note. */
   | "note"
   /**
@@ -2397,6 +2403,15 @@ export interface AppSettings {
   diagnosticsDir: string;
   /** Append verbose agent traffic logs (JSONL) into the diagnostics folder. */
   diagnosticsDeepLogging: boolean;
+  /**
+   * Warn in the chat when a request's head no longer matches the request before
+   * it (Settings → Diagnostics). The provider matches its prompt cache from the
+   * first message, so everything past the shared prefix is billed in full; the
+   * warning says where the head moved, and — with the wire log in `full` mode —
+   * offers that chat's bodies as an archive. Off by default: the comparison
+   * hashes every message of every prompt.
+   */
+  diagnosticsContextDrift: boolean;
   /** Folder on the server where chat exports are written. Empty → default under repo. */
   exportDir: string;
   /**
@@ -2741,6 +2756,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   permissionAllowlist: [],
   diagnosticsDir: "",
   diagnosticsDeepLogging: false,
+  diagnosticsContextDrift: false,
   exportDir: "",
   resumeAgentContext: true,
   resumeInterruptedTurns: true,

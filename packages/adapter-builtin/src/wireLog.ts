@@ -27,6 +27,44 @@ export interface WireLogTarget {
 }
 
 /**
+ * A request whose head no longer matches the request before it: the provider
+ * matches its prompt cache from the first message, so everything past
+ * `prefixSame` is billed at full price. Reported whether or not the wire log is
+ * switched on — a chat should say the context moved even when nothing is being
+ * written to disk.
+ */
+export interface ContextDrift {
+  sessionId: string;
+  /** 1-based number of this request within the chat. */
+  seq: number;
+  /** Messages in this request. */
+  messages: number;
+  /** Messages the previous request carried. */
+  prevMessages: number;
+  /** Leading messages whose bytes still match the previous request. */
+  prefixSame: number;
+  /** The system prompt itself changed, which moves the very head. */
+  systemChanged: boolean;
+  /** The tool declarations changed, which also sits ahead of every message. */
+  toolsChanged: boolean;
+}
+
+/** How the turn reacts to a moving head: the host decides, the log only reports. */
+export type ContextDriftListener = (drift: ContextDrift) => void;
+
+/** The wrapper's own knobs: whether to look at the head, and who to tell. */
+export interface WireLogOptions {
+  /** Told when a request's head no longer matches the one before it. */
+  onDrift?: ContextDriftListener;
+  /**
+   * Whether the head is compared at all — the Diagnostics switch. Asked per
+   * request, so flipping it reaches the very next call. Defaults to “on when
+   * somebody is listening”.
+   */
+  watch?: () => boolean;
+}
+
+/**
  * Folder the dumps land in. The host names it — the server points it at the
  * install's `data/wire-log`, beside the database, whatever folder it was
  * started from — and `<cwd>/data/wire-log` is only the fallback for a host that
@@ -87,6 +125,11 @@ function shortHash(value: string): string {
 function bodyMessages(body: Record<string, unknown>): unknown[] {
   const messages = body.messages;
   return Array.isArray(messages) ? messages : [];
+}
+
+/** How many messages the previous request carried. */
+function prevMessagesOf(before: Previous): number {
+  return before.chain.length;
 }
 
 /** A per-message hash chain: comparing two chains names the first differing message. */
@@ -180,10 +223,24 @@ function usageFromText(
  * `fetch` that records what it sends and what it was charged, then hands the
  * untouched response back. The body is only read for the log when the switch
  * says so; the answer is read from a clone, so the caller keeps its stream.
+ *
+ * The head comparison is its own switch (Settings → Diagnostics → context
+ * drift): with it off and the log off, the body is not even parsed — the
+ * wrapper is a pass-through. With it on, the hashes are per-message JSON, which
+ * is a stringify of a prompt that is about to cross the wire anyway.
  */
-export function withWireLog(target: WireLogTarget, base: typeof fetch): typeof fetch {
+export function withWireLog(
+  target: WireLogTarget,
+  base: typeof fetch,
+  options: WireLogOptions = {},
+): typeof fetch {
   return async (input, init) => {
-    if (wireLogState() === "off") return base(input, init);
+    const mode = wireLogState();
+    const logging = mode !== "off";
+    // A switch the reader turns must reach the next call, not the next session:
+    // the endpoint outlives the turn, so the answer is asked per request.
+    const watching = (options.watch?.() ?? options.onDrift !== undefined) || logging;
+    if (!watching) return base(input, init);
     const started = Date.now();
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : String(input?.url ?? "");
     const rawBody = typeof init?.body === "string" ? init.body : "";
@@ -197,14 +254,40 @@ export function withWireLog(target: WireLogTarget, base: typeof fetch): typeof f
     const chain = chainOf(messages);
     const system = shortHash(JSON.stringify(body.system ?? ""));
     const tools = shortHash(JSON.stringify(body.tools ?? ""));
-    const key = keyFingerprint(init);
+    const key = logging ? keyFingerprint(init) : "";
     const chatKey = `${target.providerId}\u0000${target.sessionId}`;
     const before = previous.get(chatKey);
     const seq = (seqOf.get(chatKey) ?? 0) + 1;
     seqOf.set(chatKey, seq);
     previous.set(chatKey, { seq, chain, system, tools, key });
 
-    const mode = wireLogState();
+    // The head moved: fewer leading messages match than the previous request
+    // carried, or something ahead of every message was rewritten. Either way
+    // the provider's cache stops exactly there, so the turn is told.
+    const prefixSame = before ? sharedPrefix(before.chain, chain) : null;
+    const systemChanged = before ? before.system !== system : false;
+    const toolsChanged = before ? before.tools !== tools : false;
+    const drifted =
+      before !== undefined &&
+      prevMessagesOf(before) > 0 &&
+      (prefixSame! < prevMessagesOf(before) || systemChanged || toolsChanged);
+    if (options.onDrift && drifted && (options.watch?.() ?? true)) {
+      try {
+        options.onDrift({
+          sessionId: target.sessionId,
+          seq,
+          messages: messages.length,
+          prevMessages: prevMessagesOf(before!),
+          prefixSame: prefixSame!,
+          systemChanged,
+          toolsChanged,
+        });
+      } catch {
+        /* a warning must never fail the request it describes */
+      }
+    }
+    if (!logging) return base(input, init);
+
     // A body is megabytes: it rides its own file, and the line carries the name
     // so a reader never has to guess it. The line stays small enough to read
     // whole, which is what makes `prefixSame` usable.
@@ -227,12 +310,12 @@ export function withWireLog(target: WireLogTarget, base: typeof fetch): typeof f
       keyChanged: before ? before.key !== key : false,
       messages: messages.length,
       /** Messages whose bytes match the previous request, from the head up. */
-      prefixSame: before ? sharedPrefix(before.chain, chain) : null,
-      prevMessages: before?.chain.length ?? null,
+      prefixSame,
+      prevMessages: before ? prevMessagesOf(before) : null,
       system,
       tools,
-      systemChanged: before ? before.system !== system : false,
-      toolsChanged: before ? before.tools !== tools : false,
+      systemChanged,
+      toolsChanged,
       bodyBytes: rawBody.length,
       ...(bodyFile ? { bodyFile } : {}),
     };

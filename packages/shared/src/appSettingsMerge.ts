@@ -602,6 +602,9 @@ export function mergeClientAppSettings(raw: unknown): AppSettings {
   if (typeof partial.diagnosticsDeepLogging !== "boolean") {
     merged.diagnosticsDeepLogging = DEFAULT_SETTINGS.diagnosticsDeepLogging;
   }
+  if (typeof partial.diagnosticsContextDrift !== "boolean") {
+    merged.diagnosticsContextDrift = DEFAULT_SETTINGS.diagnosticsContextDrift;
+  }
   merged.terminalShell =
     partial.terminalShell === "powershell" ? "powershell" : DEFAULT_SETTINGS.terminalShell;
   merged.disabledProviders = Array.isArray(partial.disabledProviders)

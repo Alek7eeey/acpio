@@ -19,6 +19,23 @@ useResetDb();
 const put = (payload: Record<string, unknown>) =>
   app.inject({ method: "PUT", url: "/api/settings", payload });
 
+describe("settings file: the context drift warning", () => {
+  it("travels with the file the way any other switch does", async () => {
+    expect((await put({ diagnosticsContextDrift: true })).statusCode).toBe(200);
+    const exported = await app.inject({ method: "GET", url: "/api/settings/export" });
+    expect(exported.json().settings.diagnosticsContextDrift).toBe(true);
+
+    const imported = await app.inject({
+      method: "POST",
+      url: "/api/settings/import",
+      payload: { settings: { diagnosticsContextDrift: false } },
+    });
+    expect(imported.statusCode).toBe(200);
+    expect(imported.json().applied).toContain("diagnosticsContextDrift");
+    expect(imported.json().settings.diagnosticsContextDrift).toBe(false);
+  });
+});
+
 describe("settings file: where the editor's arrows sit", () => {
   it("exports the placement the user chose", async () => {
     expect((await put({ editorNavPlacement: "statusBar" })).statusCode).toBe(200);

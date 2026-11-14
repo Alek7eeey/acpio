@@ -894,6 +894,17 @@
   font-weight: 500;
 }
 
+.contextDriftLink {
+  color: color-mix(in srgb, var(--accent) 85%, var(--text));
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.contextDriftLink:hover {
+  color: var(--accent);
+}
+
 .compactionMeta {
   font-variant-numeric: tabular-nums;
   color: color-mix(in srgb, var(--text-secondary) 92%, transparent);

@@ -202,7 +202,12 @@ export function zipEntries(entries: ReadonlyArray<{ name: string; data: Buffer }
  * is too big to send — a support archive that nobody can attach is worse than a
  * clear refusal.
  */
-export function buildWireLogArchive(): { fileName: string; buffer: Buffer; files: number; bytes: number } {
+export function buildWireLogArchive(sessionId?: string): {
+  fileName: string;
+  buffer: Buffer;
+  files: number;
+  bytes: number;
+} {
   const dir = wireLogDir();
   const status = wireLogStatus();
   if (status.bytes > MAX_ARCHIVE_BYTES) {
@@ -211,10 +216,22 @@ export function buildWireLogArchive(): { fileName: string; buffer: Buffer; files
         "удали старые тела запросов или выключи режим full и собери архив снова",
     );
   }
-  const entries = logFiles(dir).map((rel) => ({
-    name: `wire-log/${rel.replace(/\\/g, "/")}`,
-    data: fs.readFileSync(path.join(dir, rel)),
-  }));
+  // One chat's own files: `<sid>.jsonl` and the `full` mode's `<sid>/` folder.
+  // The log is one file per chat, so a warning can hand over exactly the turn
+  // that moved its head instead of everything the machine ever sent.
+  // The log names a chat by the first eight characters of its id.
+  const only = (sessionId ?? "").trim().slice(0, 8);
+  const mine = (rel: string): boolean => {
+    if (!only) return true;
+    const flat = rel.replace(/\\/g, "/");
+    return flat === `${only}.jsonl` || flat.startsWith(`${only}/`);
+  };
+  const entries = logFiles(dir)
+    .filter(mine)
+    .map((rel) => ({
+      name: `wire-log/${rel.replace(/\\/g, "/")}`,
+      data: fs.readFileSync(path.join(dir, rel)),
+    }));
   entries.push({
     name: "wire-log/meta.json",
     data: Buffer.from(
@@ -229,6 +246,7 @@ export function buildWireLogArchive(): { fileName: string; buffer: Buffer; files
           sessions: status.sessions,
           files: status.files,
           bytes: status.bytes,
+          ...(only ? { session: only } : {}),
         },
         null,
         2,
@@ -238,9 +256,9 @@ export function buildWireLogArchive(): { fileName: string; buffer: Buffer; files
   });
   const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
   return {
-    fileName: `acpio-wire-log-${stamp}.zip`,
+    fileName: `acpio-wire-log-${only ? `${only}-` : ""}${stamp}.zip`,
     buffer: zipEntries(entries),
-    files: status.files + 1,
-    bytes: status.bytes,
+    files: entries.length,
+    bytes: entries.reduce((n, entry) => n + entry.data.length, 0),
   };
 }

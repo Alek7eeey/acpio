@@ -117,6 +117,29 @@ describe("wire log control", () => {
     expect(JSON.parse(read("wire-log/meta.json") ?? "{}").mode).toBe("full");
   });
 
+  it("narrows the archive to one chat when the warning asks for it", () => {
+    fs.writeFileSync(path.join(dir, "aaaa1111.jsonl"), "{\n", "utf8");
+    fs.writeFileSync(path.join(dir, "bbbb2222.jsonl"), "{\n", "utf8");
+    fs.mkdirSync(path.join(dir, "aaaa1111"));
+    fs.writeFileSync(path.join(dir, "aaaa1111", "0001.req.json"), "{}", "utf8");
+    fs.mkdirSync(path.join(dir, "bbbb2222"));
+    fs.writeFileSync(path.join(dir, "bbbb2222", "0001.req.json"), "{}", "utf8");
+    writeWireLogMode("full");
+
+    // The chat hands its own id over, complete: the log names a chat by the
+    // first eight characters of it.
+    const archive = buildWireLogArchive("aaaa1111-2222-3333-4444");
+    const names = readZip(archive.buffer)
+      .map((entry) => entry.name)
+      .sort();
+    expect(names).toEqual([
+      "wire-log/aaaa1111.jsonl",
+      "wire-log/aaaa1111/0001.req.json",
+      "wire-log/meta.json",
+    ]);
+    expect(archive.fileName).toContain("aaaa1111");
+  });
+
   it("keeps a large entry intact through deflate", () => {
     const big = Buffer.from("ж".repeat(200_000), "utf8");
     const entries = readZip(zipEntries([{ name: "wire-log/big.txt", data: big }]));

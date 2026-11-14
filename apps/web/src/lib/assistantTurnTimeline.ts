@@ -216,6 +216,8 @@ export type AgentTimelineItem =
   | { kind: "note"; part: MessagePartDto; key: string }
   /** A squeeze of the agent's window: a line the turn crossed, not a step of it. */
   | { kind: "compaction"; part: MessagePartDto; key: string }
+  /** A request whose head moved: the cache stopped there, the tail was paid. */
+  | { kind: "context_drift"; part: MessagePartDto; key: string }
   | AgentQuestionItem;
 
 /**
@@ -379,7 +381,7 @@ export function buildAgentTimeline(parts: MessagePartDto[]): AgentTimelineItem[]
       runBuf.push(part);
       continue;
     }
-    if (part.type === "compaction" || part.type === "note") {
+    if (part.type === "compaction" || part.type === "note" || part.type === "context_drift") {
       // The note closes the run it landed in and stands on its own: the work
       // above it is what made the job finish, the work below is the answer to
       // it. A compaction row is the same shape for a different event: the model

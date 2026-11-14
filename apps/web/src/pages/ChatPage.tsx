@@ -1996,6 +1996,10 @@ function PartView({
     return note ? <BackgroundNoteCard note={note} /> : null;
   }
 
+  if (part.type === "context_drift") {
+    return <ContextDriftRow part={part} sessionId={sessionId} />;
+  }
+
   // Question parts render inside StepsSpoiler / AgentTurnTimeline, not here.
   // Errors are shown only in the composer banner (store.error), never in-thread.
   if (part.type === "tool_call" || part.type === "error") {
@@ -2073,6 +2077,50 @@ function QuestionBucketView({
  * the digest itself behind the toggle, where it can be read back, quoted and
  * checked against what the agent later does.
  */
+/**
+ * A request whose head no longer matched the request before it.
+ *
+ * The provider matches a cached prompt from the first message, so everything
+ * past the shared prefix is billed at full price. The row says where the head
+ * moved — and, when the wire log keeps the bodies, hands over that chat's files
+ * so the answer is in the archive instead of in a guess.
+ */
+function ContextDriftRow({ part, sessionId }: { part: MessagePartDto; sessionId?: string | null }) {
+  const t = useT();
+  const messages = Number(part.payload.messages ?? 0);
+  const prevMessages = Number(part.payload.prevMessages ?? 0);
+  const prefixSame = Number(part.payload.prefixSame ?? 0);
+  const reasons = [
+    part.payload.systemChanged === true ? t("chat.contextDriftSystem") : "",
+    part.payload.toolsChanged === true ? t("chat.contextDriftTools") : "",
+  ].filter(Boolean);
+  const full = String(part.payload.logMode ?? "") === "full";
+  const archiveHref = sessionId
+    ? `/api/wire-log/archive?session=${encodeURIComponent(sessionId)}`
+    : "";
+  return (
+    <div className={styles.compactionRow} data-context-drift-id={part.id}>
+      <div className={styles.compactionHead} title={t("chat.contextDriftHint")}>
+        <span className={styles.compactionIcon} aria-hidden>
+          ⚠
+        </span>
+        <span className={styles.compactionTitle}>{t("chat.contextDriftTitle")}</span>
+        <span className={styles.compactionMeta}>
+          {t("chat.contextDriftMeta", { same: prefixSame, prev: prevMessages, now: messages })}
+          {reasons.length > 0 ? ` · ${reasons.join(" · ")}` : ""}
+        </span>
+        {full && archiveHref ? (
+          <a className={styles.contextDriftLink} href={archiveHref} download>
+            {t("chat.contextDriftDownload")}
+          </a>
+        ) : (
+          <span className={styles.compactionMeta}>{t("chat.contextDriftNoLog")}</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function CompactionRow({ part, sessionId }: { part: MessagePartDto; sessionId?: string | null }) {
   const t = useT();
   const [open, setOpen] = useState(false);
@@ -3300,6 +3348,13 @@ function AgentTimelineItems({
           return <CompactionRow key={item.key} part={item.part} sessionId={sessionId} />;
         }
 
+        if (item.kind === "context_drift") {
+          // The head of a request moved between two calls: drawn on its own row
+          // for the same reason a compaction row is — it says what happened to
+          // the window, not what the agent did with it.
+          return <ContextDriftRow key={item.key} part={item.part} sessionId={sessionId} />;
+        }
+
         if (item.kind === "note") {
           // A settled background job, written into this turn where it arrived:
           // it belongs to the work above and to the answer below it alike, so it
@@ -3408,6 +3463,8 @@ function hasRenderableAssistantContent(parts: MessagePartDto[]) {
     }
     // A compaction row is the whole transcript of a manual `/compact` turn.
     if (p.type === "compaction") return true;
+    // A drift row is the turn's own report about its window.
+    if (p.type === "context_drift") return true;
     return false;
   });
 }

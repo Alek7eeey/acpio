@@ -695,6 +695,20 @@ describe("ACP usage_update normalization", () => {
     expect(ev.kind === "compaction" ? ev.raw.summary : "").toBe("Задача: …");
     expect(acp.mapUpdate({ sessionUpdate: "compaction_update" }).kind).toBe("compaction");
   });
+
+  it("keeps a context drift report instead of filing it as 'other'", () => {
+    const acp = makeClient();
+    const ev = acp.mapUpdate({
+      sessionUpdate: "context_drift",
+      messages: 81,
+      prevMessages: 78,
+      prefixSame: 76,
+      logMode: "full",
+    });
+    expect(ev.kind).toBe("context_drift");
+    // The counts ride along untouched — the chat row is built from them.
+    expect(ev.kind === "context_drift" ? ev.raw.prefixSame : null).toBe(76);
+  });
 });
 
 describe("applyModelSelection against an enumerated model list", () => {

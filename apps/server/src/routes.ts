@@ -381,6 +381,7 @@ const settingsSchema = z.object({
   permissionAllowlist: z.array(z.string()).optional(),
   diagnosticsDir: z.string().optional(),
   diagnosticsDeepLogging: z.boolean().optional(),
+  diagnosticsContextDrift: z.boolean().optional(),
   exportDir: z.string().optional(),
   resumeAgentContext: z.boolean().optional(),
   resumeInterruptedTurns: z.boolean().optional(),
@@ -2622,9 +2623,12 @@ export async function registerRoutes(app: FastifyInstance) {
     writeWireLogMode(body.mode);
     return wireLogStatus();
   });
-  app.get("/api/wire-log/archive", async (_req, reply) => {
+  // `?session=<first 8 of the id>` narrows the archive to one chat: the warning
+  // a chat shows about its own moving head hands over exactly those files.
+  app.get("/api/wire-log/archive", async (req, reply) => {
     try {
-      const archive = buildWireLogArchive();
+      const query = z.object({ session: z.string().trim().max(64).optional() }).parse(req.query ?? {});
+      const archive = buildWireLogArchive(query.session);
       reply.header(
         "Content-Disposition",
         `attachment; filename*=UTF-8''${encodeURIComponent(archive.fileName)}`,

@@ -214,6 +214,9 @@ function mergeSettings(raw: unknown): AppSettings {
   if (typeof merged.diagnosticsDeepLogging !== "boolean") {
     merged.diagnosticsDeepLogging = DEFAULT_SETTINGS.diagnosticsDeepLogging;
   }
+  if (typeof merged.diagnosticsContextDrift !== "boolean") {
+    merged.diagnosticsContextDrift = DEFAULT_SETTINGS.diagnosticsContextDrift;
+  }
   if (typeof merged.exportDir !== "string") {
     merged.exportDir = DEFAULT_SETTINGS.exportDir;
   }
