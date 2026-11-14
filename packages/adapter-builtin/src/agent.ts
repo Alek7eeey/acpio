@@ -613,6 +613,50 @@ export const THINKING_INSTRUCTIONS: Record<ThinkingMode, string> = {
  * `session/load` can restore them after a restart; the harness keeps its own
  * copy and never replays, hence `suppressReplayOnLoad`.
  */
+/**
+ * The instruction the summariser reads after the turns it folds. It travels as
+ * the LAST message, after the very turns the pass folds: the request is then a
+ * prefix of the one this turn already sent — same system prompt, same digest,
+ * same head, same bytes — and the provider serves that prefix from its prompt
+ * cache. Only these few hundred tokens are new. A transcript of its own
+ * (flattened by `renderTranscript`) shares nothing with the previous request and
+ * pays full price for the head: tens of thousands of tokens on the pass that
+ * matters.
+ */
+function digestInstruction(previousSummary: string | undefined, focus: string | undefined): string {
+  return (
+    (previousSummary
+      ? "Не отвечай на переписку выше и не продолжай её. Ты обновляешь конспект диалога программиста с " +
+        "агентом: первое сообщение переписки — прошлый конспект, дальше — новые ходы. Сохрани ВСЁ из " +
+        "прошлого конспекта, добавь новые решения и прогресс, перенеси завершённое из «в работе» в " +
+        "«сделано». Формат: Задача, Ограничения, Сделано, В работе, Заблокировано, Решения, Следующие " +
+        "шаги, Важное. Сохраняй точные пути файлов, имена функций и тексты ошибок. Ответь только " +
+        "конспектом, без вступлений."
+      : "Не отвечай на переписку выше и не продолжай её. Сожми эту переписку в конспект для памяти " +
+        "агента: сохрани исходную задачу и её ограничения, принятые решения, изменённые файлы с сутью " +
+        "правок, выполненные команды и их результат, нерешённые проблемы. Формат: Задача, Ограничения, " +
+        "Сделано, В работе, Заблокировано, Решения, Следующие шаги, Важное. Ответь только конспектом, " +
+        "без вступлений. Инструменты не вызывай.") + (focus ? `\n\nДополнительный фокус: ${focus}` : "")
+  );
+}
+
+/**
+ * The turn's own declarations, with nothing to execute: the wire bytes are what
+ * the provider renders ahead of the messages, and they must match the turn's
+ * exactly for its cached prefix to cover this request. A model that answers with
+ * a tool call anyway finds no executor here, so it cannot run anything — the
+ * caller sees empty prose and asks again.
+ */
+function declareOnly(tools: ToolSet | undefined): ToolSet | undefined {
+  if (!tools) return undefined;
+  const out: ToolSet = {};
+  for (const [name, tool] of Object.entries(tools)) {
+    const { execute: _execute, ...declaration } = tool as { execute?: unknown };
+    out[name] = declaration as ToolSet[string];
+  }
+  return out;
+}
+
 export class BuiltinAgent implements InProcessAgentTransport {
   private out: ((line: string) => void) | null = null;
   private closed: ((info?: { message?: string }) => void) | null = null;
@@ -1621,93 +1665,22 @@ export class BuiltinAgent implements InProcessAgentTransport {
       return noted.slice(this.prunedFrom);
     }
     const maxSummaryTokens = settings.builtinMaxSummaryTokens;
-    /**
-     * The instruction travels as the LAST message, after the very turns the pass
-     * folds: the summariser's request is then a prefix of the request this turn
-     * already sent — same system prompt, same digest, same head, same bytes —
-     * and the provider serves that prefix from its prompt cache. Only these few
-     * hundred tokens are new. A transcript of its own (flattened by
-     * `renderTranscript`) shares nothing with the previous request and pays full
-     * price for the head: tens of thousands of tokens on the pass that matters.
-     */
-    const instruction = (previousSummary: string | undefined, focus: string | undefined) =>
-      (previousSummary
-        ? "Не отвечай на переписку выше и не продолжай её. Ты обновляешь конспект диалога программиста с " +
-          "агентом: первое сообщение переписки — прошлый конспект, дальше — новые ходы. Сохрани ВСЁ из " +
-          "прошлого конспекта, добавь новые решения и прогресс, перенеси завершённое из «в работе» в " +
-          "«сделано». Формат: Задача, Ограничения, Сделано, В работе, Заблокировано, Решения, Следующие " +
-          "шаги, Важное. Сохраняй точные пути файлов, имена функций и тексты ошибок. Ответь только " +
-          "конспектом, без вступлений."
-        : "Не отвечай на переписку выше и не продолжай её. Сожми эту переписку в конспект для памяти " +
-          "агента: сохрани исходную задачу и её ограничения, принятые решения, изменённые файлы с сутью " +
-          "правок, выполненные команды и их результат, нерешённые проблемы. Формат: Задача, Ограничения, " +
-          "Сделано, В работе, Заблокировано, Решения, Следующие шаги, Важное. Ответь только конспектом, " +
-          "без вступлений. Инструменты не вызывай.") + (focus ? `\n\nДополнительный фокус: ${focus}` : "");
-    /**
-     * The turn's own declarations, with nothing to execute: the wire bytes are
-     * what the provider renders ahead of the messages, and they must match the
-     * turn's exactly for its cached prefix to cover this request. A model that
-     * answers with a tool call anyway finds no executor here, so it cannot run
-     * anything — the caller sees empty prose and asks again.
-     */
-    const declared = (tools: ToolSet | undefined): ToolSet | undefined => {
-      if (!tools) return undefined;
-      const out: ToolSet = {};
-      for (const [name, tool] of Object.entries(tools)) {
-        const { execute: _execute, ...declaration } = tool as { execute?: unknown };
-        out[name] = declaration as ToolSet[string];
-      }
-      return out;
-    };
     // Output tokens the summariser wrote for THIS pass — every ask it makes,
     // retries included. The bill rides the compaction row: a digest the reader
     // can see but cannot price is half a bill.
     let summaryOutputTokens = 0;
     const ask = async (delta: ModelMessage[], previousSummary?: string, focus?: string) => {
-      const head: ModelMessage[] = [
-        ...(previousSummary ? [digestMessage(previousSummary)] : []),
-        ...delta,
-      ];
-      const tools = declared(opts.tools);
-      // `tool_choice` stays at the provider default (`auto`): naming `none`
-      // makes it drop the declarations from the prompt altogether, and the
-      // request then shares nothing with the turn's (8188 vs 9690 tokens, 0%
-      // cached against 99%).
-      const call = async (last: string) => {
-        const { text, usage } = await generateText({
-          model: opts.model,
-          ...(opts.system ? { system: opts.system } : {}),
-          messages: [...head, { role: "user", content: last }],
-          ...(tools ? { tools } : {}),
-          abortSignal: opts.abortSignal,
-          maxRetries: 1,
-          // 0 = the setting says "no ceiling": the provider default applies.
-          ...(maxSummaryTokens > 0 ? { maxOutputTokens: maxSummaryTokens } : {}),
-        });
-        summaryOutputTokens += Number(usage?.outputTokens ?? 0) || 0;
-        // This call is part of the prompt's bill, but no turn's usage report
-        // would ever contain it: it goes straight into the session's totals,
-        // and the next `usage_update` reports them (see `decorateUpdate`).
-        // `pendingUsage` keeps its own copy — `/compact` reads it to decide
-        // whether the pass cost anything worth reporting.
-        const inTokens = Number(usage?.inputTokens ?? 0) || 0;
-        const outTokens = Number(usage?.outputTokens ?? 0) || 0;
-        const cachedTokens = Number(usage?.inputTokenDetails?.cacheReadTokens ?? 0) || 0;
-        this.pendingUsage.inputTokens += inTokens;
-        this.pendingUsage.outputTokens += outTokens;
-        this.pendingUsage.cachedInputTokens += cachedTokens;
-        this.sessionUsage.inputTokens += inTokens;
-        this.sessionUsage.outputTokens += outTokens;
-        this.sessionUsage.cachedInputTokens += cachedTokens;
-        return text;
-      };
-      const first = await call(instruction(previousSummary, focus));
-      if (first.trim()) return first;
-      // Nothing but a tool call came back: ask again on the same prefix (still
-      // cached) with the line that leaves no room for one.
-      return call(
-        `${instruction(previousSummary, focus)}\n\nИнструменты не вызывай — ответь только текстом конспекта.`,
-      );
+      const answered = await this.askDigest(delta, {
+        model: opts.model,
+        system: opts.system,
+        tools: opts.tools,
+        abortSignal: opts.abortSignal,
+        maxSummaryTokens,
+        previousSummary,
+        focus,
+      });
+      summaryOutputTokens += answered.outputTokens;
+      return answered.text;
     };
     const before = this.compaction?.covered ?? 0;
     // The "before" the row reports is the view this pass started from — digest
@@ -1762,6 +1735,132 @@ export class BuiltinAgent implements InProcessAgentTransport {
       }
     }
     return result.messages;
+  }
+
+  /**
+   * One digest ask: the turns to fold, the previous digest when there is one,
+   * and the instruction — over the very declarations and system prompt the turn
+   * sends, with none of them able to execute. Its bill goes straight into the
+   * session's totals: no turn's usage report would ever contain it.
+   */
+  private async askDigest(
+    delta: ModelMessage[],
+    opts: {
+      model: TurnModel;
+      system?: string | undefined;
+      tools?: ToolSet | undefined;
+      abortSignal: AbortSignal;
+      maxSummaryTokens: number;
+      previousSummary?: string | undefined;
+      focus?: string | undefined;
+    },
+  ): Promise<{ text: string; outputTokens: number }> {
+    const head: ModelMessage[] = [
+      ...(opts.previousSummary ? [digestMessage(opts.previousSummary)] : []),
+      ...delta,
+    ];
+    const tools = declareOnly(opts.tools);
+    let outputTokens = 0;
+    const instruction = digestInstruction(opts.previousSummary, opts.focus);
+    // `tool_choice` stays at the provider default (`auto`): naming `none` makes
+    // it drop the declarations from the prompt altogether, and the request then
+    // shares nothing with the turn's (8188 vs 9690 tokens, 0% cached against 99%).
+    const call = async (last: string): Promise<string> => {
+      const { text, usage } = await generateText({
+        model: opts.model,
+        ...(opts.system ? { system: opts.system } : {}),
+        messages: [...head, { role: "user", content: last }],
+        ...(tools ? { tools } : {}),
+        abortSignal: opts.abortSignal,
+        maxRetries: 1,
+        // 0 = the setting says "no ceiling": the provider default applies.
+        ...(opts.maxSummaryTokens > 0 ? { maxOutputTokens: opts.maxSummaryTokens } : {}),
+      });
+      // This call is part of the prompt's bill, but no turn's usage report would
+      // ever contain it: it goes straight into the session's totals, and the
+      // next `usage_update` reports them (see `decorateUpdate`). `pendingUsage`
+      // keeps its own copy — `/compact` reads it to decide whether the pass cost
+      // anything worth reporting.
+      const inTokens = Number(usage?.inputTokens ?? 0) || 0;
+      const outTokens = Number(usage?.outputTokens ?? 0) || 0;
+      const cachedTokens = Number(usage?.inputTokenDetails?.cacheReadTokens ?? 0) || 0;
+      this.pendingUsage.inputTokens += inTokens;
+      this.pendingUsage.outputTokens += outTokens;
+      this.pendingUsage.cachedInputTokens += cachedTokens;
+      this.sessionUsage.inputTokens += inTokens;
+      this.sessionUsage.outputTokens += outTokens;
+      this.sessionUsage.cachedInputTokens += cachedTokens;
+      outputTokens += outTokens;
+      return text;
+    };
+    const first = await call(instruction);
+    if (first.trim()) return { text: first, outputTokens };
+    // Nothing but a tool call came back: ask again on the same prefix (still
+    // cached) with the line that leaves no room for one.
+    return {
+      text: await call(`${instruction}\n\nИнструменты не вызывай — ответь только текстом конспекта.`),
+      outputTokens,
+    };
+  }
+
+  /**
+   * A full compaction between the steps of one turn — the pass a turn boundary
+   * runs, digest and all, over the view the next step is about to send.
+   *
+   * A turn is one `promptHistory` call, so a turn's own growth was the one place
+   * the threshold never looked. The digest written here stands in for this
+   * turn's own head only: the stored transcript is untouched, and the next
+   * turn's pass writes the digest that outlives it.
+   */
+  private async compactView(
+    view: ModelMessage[],
+    opts: {
+      model: TurnModel;
+      system?: string | undefined;
+      tools?: ToolSet | undefined;
+      abortSignal: AbortSignal;
+      contextWindow: number;
+      settings: AppSettings;
+      state?: CompactionState | undefined;
+    },
+  ): Promise<{ messages: ModelMessage[]; state?: CompactionState }> {
+    const settings = opts.settings;
+    let summaryOutputTokens = 0;
+    const ask = async (delta: ModelMessage[], previousSummary?: string) => {
+      const answered = await this.askDigest(delta, {
+        model: opts.model,
+        system: opts.system,
+        tools: opts.tools,
+        abortSignal: opts.abortSignal,
+        maxSummaryTokens: settings.builtinMaxSummaryTokens,
+        previousSummary,
+      });
+      summaryOutputTokens += answered.outputTokens;
+      return answered.text;
+    };
+    const tokensBefore = estimateTokens(promptView(view, opts.state));
+    const result = await compactHistory({
+      messages: view,
+      contextWindow: opts.contextWindow,
+      thresholdPercent: settings.builtinCompactionThresholdPercent,
+      fitPercent: settings.builtinCompactionThresholdPercent,
+      keepRecentPercent: settings.builtinKeepRecentPercent,
+      ...(opts.state ? { state: opts.state } : {}),
+      summarize: (dropped) => ask(dropped, undefined),
+      update: (delta, previous) => ask(delta, previous),
+    });
+    if (result.state) {
+      this.emitCompaction({
+        manual: false,
+        coveredBefore: opts.state?.covered ?? 0,
+        coveredAfter: result.state.covered,
+        tokensBefore,
+        tokensAfter: estimateTokens(result.messages),
+        summary: result.state.summary,
+        summaryOutputTokens,
+      });
+    }
+    return result;
   }
 
   /**
@@ -1997,6 +2096,28 @@ export class BuiltinAgent implements InProcessAgentTransport {
         }),
       };
       this.lastTools = tools;
+      // A turn is one `promptHistory` call, so a turn's own growth is the one
+      // place the threshold never looked: chat c24d5224 rode its line for twenty
+      // minutes. This hands the loop the same pass a turn boundary runs — digest
+      // and all — at the step where the view crosses the line. The digest lives
+      // for the rest of the turn, so a second crossing only folds the delta.
+      let liveCompaction: CompactionState | undefined;
+      const compactBetweenSteps = async (view: ModelMessage[], billed: number) => {
+        if (live.builtinContextMode !== "summary") return undefined;
+        const line = contextWindow * (live.builtinCompactionThresholdPercent / 100);
+        if (!(line > 0) || !(billed > line)) return undefined;
+        const passed = await this.compactView(view, {
+          model: endpoint.chatModel(selection.modelId),
+          system,
+          tools,
+          abortSignal: abort.signal,
+          contextWindow,
+          settings: live,
+          state: liveCompaction,
+        });
+        liveCompaction = passed.state;
+        return passed.messages;
+      };
       const turn = async () =>
         runTurn({
           model: endpoint.chatModel(selection.modelId),
@@ -2012,14 +2133,6 @@ export class BuiltinAgent implements InProcessAgentTransport {
           abortSignal: abort.signal,
           contextWindow,
           maxOutputTokens: live.builtinMaxOutputTokens,
-          // The line the settings draw is a per-step thing, not a per-turn one:
-          // a turn is one `promptHistory` call, and chat 6a9e7e2e rode 225 steps
-          // past it because nothing looked again. Unset means the same thing it
-          // means there — "off" touches nothing, pruned only at the turn.
-          fitLine:
-            live.builtinContextMode === "off"
-              ? undefined
-              : contextWindow * (live.builtinCompactionThresholdPercent / 100),
           // The `/thinking-limit` fuse: past this many chars of one step's
           // private reasoning the call is cut and the turn carries on below.
           reasoningLimitChars: this.thinkingLimit,
@@ -2027,6 +2140,7 @@ export class BuiltinAgent implements InProcessAgentTransport {
           // `afterStep`: the host's mid-turn messages join the next model call
           // instead of waiting for this turn to end.
           takeSteer: () => this.takeSteers(),
+          compactBetweenSteps,
           toolImages,
         });
       // The folded messages sit where the model read them — mid-step, not at

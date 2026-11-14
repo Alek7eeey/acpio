@@ -674,17 +674,18 @@ describe("runTurn failure handling", () => {
       .mockReturnValueOnce([{ message: steer, ack: acked }]);
     /** The prompts the SDK would actually send, one per model call. */
     const prompts: ModelMessage[][] = [];
+    // `prepareStep` is the host's hook and may await work of its own (a
+    // compaction between steps), so the SDK gets a promise back; the stub keeps
+    // each one and resolves them once the turn is over.
+    const prepared: Array<{ args: { messages: ModelMessage[] }; answer: unknown }> = [];
     vi.mocked(streamText).mockImplementation(((
-      opts: Parameters<typeof runTurn>[0] & { prepareStep?: (args: unknown) => { messages?: ModelMessage[] } },
+      opts: Parameters<typeof runTurn>[0] & { prepareStep?: (args: unknown) => unknown },
     ) => {
-      for (const [step, args] of [
+      for (const args of [
         { messages: [hi], responseMessages: [] },
         { messages: [hi, step0], responseMessages: [step0] },
-      ].entries()) {
-        const override = opts.prepareStep?.(args);
-        prompts.push(override?.messages ?? args.messages);
-        // The default path must stay untouched: no pending message, no override.
-        if (step === 0) expect(override).toEqual({});
+      ]) {
+        prepared.push({ args, answer: opts.prepareStep?.(args) });
       }
       return {
         fullStream: streamOf([]),
@@ -696,6 +697,12 @@ describe("runTurn failure handling", () => {
     }) as never);
 
     const outcome = await runTurn(turnOpts({ takeSteer }));
+    for (const [step, { args, answer }] of prepared.entries()) {
+      const override = (await answer) as { messages?: ModelMessage[] } | undefined;
+      prompts.push(override?.messages ?? args.messages);
+      // The default path must stay untouched: no pending message, no override.
+      if (step === 0) expect(override).toEqual({});
+    }
 
     // The text rides with the call after the step the host aimed it at — and
     // only with that one, not with every later step twice.
@@ -1125,13 +1132,12 @@ describe("runTurnWithRetry", () => {
 
 
 /**
- * A turn is one `promptHistory` call: the settings behind it are read before the
- * first step, and for the next 200 nothing looks again. Chat 6a9e7e2e spent 225
- * steps that way — it ended at 348K on the wire with no compaction ever asked
- * for, while the same settings compacted another chat eight times because that
- * one happened to be split into 74 turns.
+ * A turn is one `promptHistory` call: the history behind it is read before the
+ * first step, and for the next 200 nothing looks again. That is by design — the
+ * history changes at compaction, on a turn's own boundary, and nowhere else. A
+ * view that keeps its head is a view the provider's prefix cache already holds.
  */
-describe("the line between steps", () => {
+describe("the view between steps", () => {
   /** The turn's own `prepareStep`, as the SDK would have called it. */
   async function stepOf(
     opts: Partial<Parameters<typeof runTurn>[0]> = {},
@@ -1161,8 +1167,12 @@ describe("the line between steps", () => {
     return prepare;
   }
 
-  it("cuts the view when the provider's own bill crossed the line", async () => {
-    const prepare = await stepOf({ fitLine: 1000 });
+  // Whatever the provider says it billed, the view of the next step is the one
+  // the turn already produced: the history is not rewritten between steps, only
+  // at compaction. Chat c24d5224 paid full price nine times near its line for
+  // cuts that freed a few hundred tokens each.
+  it("never cuts the view, however big the bill says it is", async () => {
+    const prepare = await stepOf();
     const history = [...turn("t0", 600), ...turn("t1", 600), ...turn("t2", 600)];
     const out = await prepare({
       messages: history,
@@ -1171,60 +1181,24 @@ describe("the line between steps", () => {
       // the same bytes (Cyrillic runs ~2 chars per token, not 4).
       steps: [{ usage: { inputTokens: 4000 } }],
     });
-    expect(out.messages).toBeDefined();
-    expect(out.messages!.length).toBeLessThan(history.length);
-    // A note stands where the dropped steps were, so the view still opens with
-    // a user message the provider will take.
-    expect(out.messages![0]!.role).toBe("user");
-    expect(text(out.messages![0]!)).toMatch(/earlier steps of this turn were dropped/);
-    expect(text(out.messages![1]!)).toMatch(/^t2-/);
-  });
-
-  // A turn opened by ONE user message: there is no user boundary to cut at, and
-  // a history that starts with a tool result is one the SDK rejects.
-  it("never starts the cut turn on a tool result", async () => {
-    const prepare = await stepOf({ fitLine: 500 });
-    const call = (id: string): ModelMessage => ({
-      role: "assistant",
-      content: [{ type: "tool-call", toolCallId: id, toolName: "read", input: { path: id } }],
-    });
-    const result = (id: string): ModelMessage => ({
-      role: "tool",
-      content: [
-        { type: "tool-result", toolCallId: id, toolName: "read", output: { type: "text", value: "x".repeat(2000) } },
-      ],
-    });
-    const history: ModelMessage[] = [
-      { role: "user", content: [{ type: "text", text: "go" }] },
-      call("c1"),
-      result("c1"),
-      call("c2"),
-      result("c2"),
-    ];
-    const out = await prepare({
-      messages: history,
-      responseMessages: [],
-      steps: [{ usage: { inputTokens: 5000 } }],
-    });
-    expect(out.messages![0]!.role).toBe("user");
-    expect(out.messages![1]!.role).not.toBe("tool");
-    expect(out.messages!.length).toBeLessThan(history.length);
-  });
-
-  it("leaves the view alone while the bill is under the line", async () => {
-    const prepare = await stepOf({ fitLine: 1000 });
-    const history = [...turn("t0", 600), ...turn("t1", 600)];
-    const out = await prepare({
-      messages: history,
-      responseMessages: [],
-      steps: [{ usage: { inputTokens: 400 } }],
-    });
     expect(out).toEqual({});
   });
 
-  it("does not touch anything when the setting is off", async () => {
-    const prepare = await stepOf({});
-    const history = [...turn("t0", 600), ...turn("t1", 600)];
+  it("passes the turn's own view through untouched", async () => {
+    const prepare = await stepOf();
+    const history: ModelMessage[] = [
+      { role: "user", content: [{ type: "text", text: "go" }] },
+      {
+        role: "assistant",
+        content: [{ type: "tool-call", toolCallId: "c1", toolName: "read", input: { path: "f1" } }],
+      },
+      {
+        role: "tool",
+        content: [
+          { type: "tool-result", toolCallId: "c1", toolName: "read", output: { type: "text", value: "x".repeat(2000) } },
+        ],
+      },
+    ];
     const out = await prepare({
       messages: history,
       responseMessages: [],

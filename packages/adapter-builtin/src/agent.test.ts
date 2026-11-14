@@ -3016,6 +3016,165 @@ describe("compaction reporting", () => {
       await stub.close();
     }
   });
+
+  it("compacts between the steps of one turn, not only at its boundary", async () => {
+    // A turn is one `promptHistory` call, so its own growth was the one place
+    // the threshold never looked: chat c24d5224 rode its line for twenty
+    // minutes. Here the stored history sits under the line and the turn's own
+    // tool result is what crosses it — the pass has to happen mid-turn.
+    let requests = 0;
+    const server = createServer((req, res) => {
+      let body = "";
+      req.on("data", (chunk) => {
+        body += chunk;
+      });
+      req.on("end", () => {
+        requests += 1;
+        const parsed = JSON.parse(body) as Record<string, unknown>;
+        if (!parsed.stream) {
+          // The digest pass: a plain completion, same shape as the stub's.
+          res.setHeader("content-type", "application/json");
+          res.end(
+            JSON.stringify({
+              id: "c1",
+              object: "chat.completion",
+              created: 0,
+              model: "stub",
+              choices: [{ index: 0, message: { role: "assistant", content: "конспект" }, finish_reason: "stop" }],
+              usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+            }),
+          );
+          return;
+        }
+        res.setHeader("content-type", "text/event-stream");
+        const chunk = (payload: Record<string, unknown>) => `data: ${JSON.stringify(payload)}\n\n`;
+        if (requests === 1) {
+          res.write(
+            chunk({
+              id: "c1",
+              object: "chat.completion.chunk",
+              created: 0,
+              model: "stub",
+              choices: [
+                {
+                  index: 0,
+                  delta: {
+                    role: "assistant",
+                    tool_calls: [
+                      {
+                        index: 0,
+                        id: "call-1",
+                        type: "function",
+                        // The turn's own growth: this result is what pushes the
+                        // view over the line, mid-turn.
+                        function: { name: "bash", arguments: '{"command":"echo hi"}' },
+                      },
+                    ],
+                  },
+                  finish_reason: null,
+                },
+              ],
+            }),
+          );
+          res.write(
+            chunk({
+              id: "c1",
+              object: "chat.completion.chunk",
+              created: 0,
+              model: "stub",
+              choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
+              // The provider's own count of the step: past the line, which is
+              // what asks the host for a pass before the next call.
+              usage: { prompt_tokens: 5_000, completion_tokens: 1, total_tokens: 5_001 },
+            }),
+          );
+          res.write("data: [DONE]\n\n");
+          res.end();
+          return;
+        }
+        res.write(
+          chunk({
+            id: "c1",
+            object: "chat.completion.chunk",
+            created: 0,
+            model: "stub",
+            choices: [{ index: 0, delta: { role: "assistant", content: "готово" }, finish_reason: null }],
+          }),
+        );
+        res.write(
+          chunk({
+            id: "c1",
+            object: "chat.completion.chunk",
+            created: 0,
+            model: "stub",
+            choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+            usage: { prompt_tokens: 5_000, completion_tokens: 1, total_tokens: 5_001 },
+          }),
+        );
+        res.write("data: [DONE]\n\n");
+        res.end();
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("stub did not bind a port");
+
+    const dir = tempDir();
+    // Under the line (20% of 20k = 4k tokens ≈ 16k chars) and with a small turn
+    // boundary at its tail, so the pass has somewhere to cut.
+    saveBuiltinSession(dir, "mid-1", {
+      version: 1,
+      cwd: dir,
+      modelId: "p1::m1",
+      messages: [
+        { role: "user", content: `начало: ${"д".repeat(8_000)}` },
+        { role: "assistant", content: "принято" },
+        { role: "user", content: `ещё: ${"д".repeat(4_000)}` },
+        { role: "assistant", content: "ок" },
+        { role: "user", content: "проверь" },
+        { role: "assistant", content: "да" },
+      ],
+    });
+    // The host's terminal is what answers the step's tool call: a ~1.5K-token
+    // result, which on top of the history is what crosses the line.
+    const answerHost = (method: string): unknown => {
+      if (method === "session/request_permission") {
+        return { outcome: { outcome: "selected", optionId: "allow" } };
+      }
+      if (method === "terminal/create") return { terminalId: "t1" };
+      if (method === "terminal/wait_for_exit") return { exitCode: 0 };
+      if (method === "terminal/output") return { output: `${'д'.repeat(6_000)}\n` };
+      return {};
+    };
+    try {
+      const { call, frames } = boot(
+        {
+          builtinProviders: [provider(`http://127.0.0.1:${address.port}/v1`, 20_000)],
+          // A line of 20% of the window = 4K tokens: the stored history sits
+          // under it, so a pass at the turn's boundary would have nothing to do.
+          builtinCompactionThresholdPercent: 20,
+          locale: "ru",
+        },
+        dir,
+        answerHost,
+      );
+      await call("session/load", { sessionId: "mid-1", cwd: dir });
+      const res = await call<{ stopReason: string }>("session/prompt", {
+        prompt: [{ type: "text", text: "сделай" }],
+      });
+
+      const row = compactionRows(frames).at(-1);
+      expect(row).toBeTruthy();
+      expect(row?.manual).toBe(false);
+      expect(row?.summary).toBe("конспект");
+      // The digest is shorter than the head it stood in for, and the turn
+      // still finished its answer on top of it.
+      expect(Number(row?.tokensAfter)).toBeLessThan(Number(row?.tokensBefore));
+      expect(res.stopReason).toBe("end_turn");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
 });
 
 describe("builtin session store", () => {
