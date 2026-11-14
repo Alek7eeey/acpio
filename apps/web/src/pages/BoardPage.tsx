@@ -1965,6 +1965,11 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
    * short hold (a swipe that moves earlier is the lane's scroll). While it
    * travels, a copy of the card rides under the pointer — the reader always
    * sees what they are carrying and where it would land.
+   *
+   * A phone has no right button, so the hold is also where the card's menu
+   * lives: the hold arms the card and blocks the lane's pan, the first travel
+   * turns it into the drag, and a finger lifted where it stood opens the menu
+   * — the press that the card answers with a right-click on a desktop.
    */
   const startTaskDrag =
     (task: SessionDto, group: TodoGroup | null) =>
@@ -1982,6 +1987,9 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
       const text = task.taskDescription?.trim() || task.title;
       const fromColumnId = columnOf(task).id;
       let moved = false;
+      /** The finger has held long enough: the card is the gesture's, waiting
+       *  for a travel to make it a drag — or for the lift that opens its menu. */
+      let held = false;
       /**
        * The board must not pan under a drag. Before the hold the listener sits
        * idle so a swipe over a card still scrolls; it is registered on the
@@ -1989,7 +1997,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
        * whether it may scroll without asking anyone.
        */
       const blockPan = (ev: TouchEvent) => {
-        if (moved) ev.preventDefault();
+        if (moved || held) ev.preventDefault();
       };
       if (isTouch) window.addEventListener("touchmove", blockPan, { passive: false });
       /** The gesture became a drag: the card leaves its slot and follows the pointer. */
@@ -2019,7 +2027,11 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
       let holdTimer: number | null = isTouch
         ? window.setTimeout(() => {
             holdTimer = null;
-            begin(startX, startY);
+            held = true;
+            // The held card is the gesture's already: the browser's own long
+            // press must not open a menu under a finger that may still move
+            // it, and the menu the lift opens is this page's own.
+            dragActiveRef.current = true;
           }, TOUCH_DRAG_HOLD_MS)
         : null;
       let overId: string | null = null;
@@ -2105,7 +2117,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
           // A finger must hold the card still first: a touch that travels
           // sooner is the lane's scroll, and stealing it would make a lane of
           // cards impossible to scroll.
-          if (isTouch) {
+          if (isTouch && !held) {
             if (distance > 8 && holdTimer !== null) {
               window.clearTimeout(holdTimer);
               holdTimer = null;
@@ -2175,7 +2187,17 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
         const lane = overColumnId;
         const blocked = blockedColumnId;
         const action = homeAction;
+        // A held finger lifted where it stood carried the card nowhere: that
+        // press is the card's menu, the one a mouse reaches with a right click.
+        const menu = held && !moved;
         finish();
+        if (menu) {
+          // The lift still arrives as a click on the card, which would open the
+          // task under the menu just opened.
+          suppressCardClickRef.current = true;
+          openTaskMenu(ev, task);
+          return;
+        }
         if (!moved) return;
         // A stage home refused the card: the drop is a no-op, with nothing
         // written and the card staying where it stood.
@@ -2278,8 +2300,13 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
     });
   };
 
-  /** Open the card menu where the press landed; place it after measuring. */
-  const openTaskMenu = (e: React.MouseEvent, task: SessionDto) => {
+  /** Open the card menu where the press landed; place it after measuring. A
+   *  desktop right-click and a phone's hold both arrive here — the held press
+   *  is not a React mouse event, so the two share its shape, not its type. */
+  const openTaskMenu = (
+    e: { clientX: number; clientY: number; preventDefault(): void; stopPropagation(): void },
+    task: SessionDto,
+  ) => {
     e.preventDefault();
     e.stopPropagation();
     // A long press that has already become a drag must not open the menu under

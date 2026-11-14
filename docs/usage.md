@@ -198,7 +198,9 @@ apart from a turn that simply ended. A card moves to a lane of your own by
 being dragged there — by the card itself with a mouse, by the card itself with a finger after a
 short hold (a swipe that starts moving at once stays the lane's scroll). While it travels, a copy
 of the card rides under the pointer and the slot it was taken from keeps a dashed outline, so
-both what is moving and where it would land are on screen. Stage columns are targets too, but as
+both what is moving and where it would land are on screen. The same hold is the card's menu on a
+phone, where there is no right button: a held finger lifted where it stood opens it, and only a
+finger that travels carries the card. Stage columns are targets too, but as
 actions rather than places: a drop on **Done**
 marks the card ready (a tick under the pointer) and lets go of the hand placement — a closed card
 stands in **Done** instead of staying on its own lane; a card that is already closed and standing

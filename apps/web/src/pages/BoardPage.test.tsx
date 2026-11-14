@@ -234,6 +234,12 @@ describe("BoardPage Todo drag and drop", () => {
     const card = container.querySelector('[data-task-id="t1"]') as HTMLElement;
 
     vi.useFakeTimers();
+    // jsdom ships no point hit-testing: the finger travels over no lane at all.
+    Object.defineProperty(document, "elementsFromPoint", {
+      configurable: true,
+      writable: true,
+      value: () => [],
+    });
     try {
       // A swipe travels before the hold: the drag gives up, nothing is blocked.
       fireEvent.pointerDown(card, { pointerId: 1, pointerType: "touch", clientY: 10 });
@@ -247,24 +253,91 @@ describe("BoardPage Todo drag and drop", () => {
       expect(swipe.defaultPrevented).toBe(false);
       fireEvent.pointerUp(window, { pointerId: 1, pointerType: "touch", clientY: 10 });
 
-      // A held finger takes the card, and from then on the pan is refused.
+      // A held finger owns the card: the pan is refused from the hold on, and
+      // the card is carried as soon as the finger travels.
       fireEvent.pointerDown(card, { pointerId: 2, pointerType: "touch", clientY: 10 });
       act(() => {
         vi.advanceTimersByTime(400);
       });
+      const held = new Event("touchmove", { cancelable: true, bubbles: true });
+      window.dispatchEvent(held);
+      expect(held.defaultPrevented).toBe(true);
+      fireEvent.pointerMove(window, { pointerId: 2, pointerType: "touch", clientY: 80 });
       expect(document.body.querySelector("[data-drag-preview]")).toBeTruthy();
       const pan = new Event("touchmove", { cancelable: true, bubbles: true });
       window.dispatchEvent(pan);
       expect(pan.defaultPrevented).toBe(true);
 
       // The end of the drag hands the gesture back.
-      fireEvent.pointerUp(window, { pointerId: 2, pointerType: "touch", clientY: 10 });
+      fireEvent.pointerUp(window, { pointerId: 2, pointerType: "touch", clientY: 80 });
       const later = new Event("touchmove", { cancelable: true, bubbles: true });
       window.dispatchEvent(later);
       expect(later.defaultPrevented).toBe(false);
     } finally {
       vi.useRealTimers();
+      Reflect.deleteProperty(document, "elementsFromPoint");
     }
+  });
+
+  // A phone has no right button, so the hold is where the card's menu lives:
+  // a held finger lifted where it stood opens it, and nothing is carried.
+  it("opens the card's menu on a held finger that lifts without travelling", async () => {
+    const { container } = renderBoard();
+    await screen.findByText("Fix the login bug");
+    const card = container.querySelector('[data-task-id="t1"]') as HTMLElement;
+
+    vi.useFakeTimers();
+    try {
+      fireEvent.pointerDown(card, { pointerId: 1, pointerType: "touch", clientX: 20, clientY: 10 });
+      act(() => {
+        vi.advanceTimersByTime(400);
+      });
+      // The hold arms the card; nothing rides under the finger until it moves.
+      expect(document.body.querySelector("[data-drag-preview]")).toBeNull();
+      fireEvent.pointerUp(window, { pointerId: 1, pointerType: "touch", clientX: 20, clientY: 10 });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    await waitFor(() => expect(document.querySelector('[role="menu"]')).toBeTruthy());
+  });
+
+  // The same hold that travels is the drag — and a drag is not a menu.
+  it("keeps the drag for a held finger that travels and opens no menu", async () => {
+    const { container } = renderBoard();
+    await screen.findByText("Fix the login bug");
+    const card = container.querySelector('[data-task-id="t1"]') as HTMLElement;
+
+    vi.useFakeTimers();
+    try {
+      fireEvent.pointerDown(card, { pointerId: 1, pointerType: "touch", clientX: 20, clientY: 10 });
+      act(() => {
+        vi.advanceTimersByTime(400);
+      });
+      // The point test has nothing to answer with in jsdom: the finger carries
+      // the card over no lane, so the release writes nothing.
+      Object.defineProperty(document, "elementsFromPoint", {
+        configurable: true,
+        writable: true,
+        value: () => [],
+      });
+      try {
+        fireEvent.pointerMove(window, {
+          pointerId: 1,
+          pointerType: "touch",
+          clientX: 60,
+          clientY: 10,
+        });
+        expect(document.body.querySelector("[data-drag-preview]")).toBeTruthy();
+        fireEvent.pointerUp(window, { pointerId: 1, pointerType: "touch", clientX: 60, clientY: 10 });
+      } finally {
+        Reflect.deleteProperty(document, "elementsFromPoint");
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(document.querySelector('[role="menu"]')).toBeNull();
   });
 
   // The arrows move a card one slot at a time; the drag is the same move made
