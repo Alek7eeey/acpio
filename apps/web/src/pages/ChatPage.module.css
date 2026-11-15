@@ -3428,15 +3428,18 @@ button.userSlashCmd:focus-visible {
 }
 
 .userFiles {
-  /* Breathing room around the attached-files block: separation from the
-     text bubble above, an indent from the message's right edge, and a small
-     gap before the next element. */
-  margin: 8px 10px 4px 0;
+  /* One file per line, the stack flush with the message's right edge: the
+     chips are not the answer's text up there, they are this message's own
+     files and belong under its bubble, on the same edge. */
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: flex-end;
+  margin: 8px 0 4px;
 }
 
 /* Several files in one message: an image per file would stack into a tall
    block, so the message keeps the bare chips and packs them tighter — no
-   previews to space out, no indent around the row. */
+   previews to space out. */
 .userFilesCompact {
   gap: 4px;
   margin: 6px 0 2px;
