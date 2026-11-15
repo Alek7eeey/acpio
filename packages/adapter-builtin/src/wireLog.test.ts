@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetProviderKeyCursors, providerFetch } from "./keys.js";
 import {
   ContextDriftStop,
@@ -438,33 +438,41 @@ describe("wire log", () => {
   it("keeps the body an earlier run recorded when the counter starts over", async () => {
     process.env.ACPIO_WIRE_LOG = "full";
     resetWireLogState();
-    const fetch = withWireLog(
-      { sessionId: "sess-1", providerId: "legacy" },
-      (async () => jsonResponse({})) as typeof globalThis.fetch,
-    );
-    const send = (content: string) =>
-      fetch("https://relay.test/v1/chat/completions", {
-        method: "POST",
-        body: JSON.stringify({ model: "m", messages: [{ role: "user", content }] }),
-      });
+    // The restart lands in the same millisecond, which is what a suite sees: the
+    // name carries the clock beside the counter, so both restart claims would
+    // agree and the first body would be written over.
+    vi.useFakeTimers({ now: 1_794_768_829_983, toFake: ["Date"] });
+    try {
+      const fetch = withWireLog(
+        { sessionId: "sess-1", providerId: "legacy" },
+        (async () => jsonResponse({})) as typeof globalThis.fetch,
+      );
+      const send = (content: string) =>
+        fetch("https://relay.test/v1/chat/completions", {
+          method: "POST",
+          body: JSON.stringify({ model: "m", messages: [{ role: "user", content }] }),
+        });
 
-    await send("one");
-    const folder = path.join(wireLogDir(), "sess-1");
-    expect(fs.readdirSync(folder)).toHaveLength(1);
+      await send("one");
+      const folder = path.join(wireLogDir(), "sess-1");
+      expect(fs.readdirSync(folder)).toHaveLength(1);
 
-    // A restart on a machine whose head file is gone — the counter starts at 1
-    // again, and the body of the request that already went out must survive it.
-    resetWireLogState();
-    fs.rmSync(path.join(wireLogDir(), "sess-1.head.json"), { force: true });
-    await send("two");
+      // A restart on a machine whose head file is gone — the counter starts at 1
+      // again, and the body of the request that already went out must survive it.
+      resetWireLogState();
+      fs.rmSync(path.join(wireLogDir(), "sess-1.head.json"), { force: true });
+      await send("two");
 
-    const bodies = fs.readdirSync(folder);
-    expect(bodies).toHaveLength(2);
-    expect(
-      bodies
-        .map((name) => fs.readFileSync(path.join(folder, name), "utf8"))
-        .some((body) => body.includes('"one"')),
-    ).toBe(true);
+      const bodies = fs.readdirSync(folder);
+      expect(bodies).toHaveLength(2);
+      expect(
+        bodies
+          .map((name) => fs.readFileSync(path.join(folder, name), "utf8"))
+          .some((body) => body.includes('"one"')),
+      ).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("stays silent when the switch is off", async () => {

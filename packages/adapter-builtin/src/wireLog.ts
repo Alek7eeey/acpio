@@ -138,6 +138,20 @@ export function wireLogState(): "off" | "summary" | "full" {
   return state;
 }
 
+/** A body file name no earlier body took. The counter and the clock are both
+ *  too weak on their own: a restarted process whose head file is gone counts
+ *  from 1 again, and two requests that start inside the same millisecond —
+ *  which a suite does — name the second body exactly like the first and lose
+ *  it. The file on disk is the only record that the name is taken. */
+function freeBodyName(sessionId: string, seq: number, started: number): string {
+  const base = `${shortId(sessionId)}/${String(seq).padStart(4, "0")}-${started}`;
+  let name = `${base}.req.json`;
+  for (let n = 2; fs.existsSync(path.join(wireLogDir(), name)); n += 1) {
+    name = `${base}-${n}.req.json`;
+  }
+  return name;
+}
+
 /** What the previous request of one chat looked like, for the prefix comparison. */
 interface Previous {
   seq: number;
@@ -429,10 +443,7 @@ export function withWireLog(
     // request's own start beside the counter: a lost head file resets the
     // counter, and a reset counter must cost one line, not the bodies of every
     // earlier request (chat c88a1a10 kept 5 of the 22 it recorded).
-    const bodyFile =
-      mode === "full"
-        ? `${shortId(target.sessionId)}/${String(seq).padStart(4, "0")}-${started}.req.json`
-        : "";
+    const bodyFile = mode === "full" ? freeBodyName(target.sessionId, seq, started) : "";
     const file = path.join(wireLogDir(), `${shortId(target.sessionId)}.jsonl`);
     const entry: Record<string, unknown> = {
       ts: new Date(started).toISOString(),
