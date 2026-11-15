@@ -16,10 +16,17 @@ import {
   resolveBuiltinModel,
   type BuiltinModelSelection,
 } from "@acpio/adapter-builtin";
+import { appendDeepLog } from "./deepLogging.js";
 import { getSessionTitle, updateSession } from "./sessions.js";
 
-/** Give up on a slow endpoint: a title is cosmetic, the turn must not wait. */
-const TITLE_FETCH_TIMEOUT_MS = 15_000;
+/**
+ * Give up on a slow endpoint: a title is cosmetic, the turn must not wait — and
+ * this call is fire-and-forget, so its ceiling costs the turn nothing. 30s, not
+ * the old 15: a reasoning model handed a four-thousand-character source can
+ * spend that long thinking before its first content token arrives, and a chat
+ * left unnamed because its endpoint thinks is the worst of both.
+ */
+const TITLE_FETCH_TIMEOUT_MS = 30_000;
 /**
  * One retry, after a pause, for the failures that are the endpoint's mood and
  * not the request's fault — a timeout (the first call of a session can sit in
@@ -184,8 +191,11 @@ export async function generateChatTitle(
   });
   const timeoutMs = timing?.timeoutMs ?? TITLE_FETCH_TIMEOUT_MS;
 
-  /** One attempt: the answer, or `retry` when only another try can help. */
-  const ask = async (): Promise<{ answer?: string; retry?: boolean }> => {
+  /**
+   * One attempt: the answer, or `retry` when only another try can help — plus
+   * the reason, which is what a chat that stayed unnamed can be told about.
+   */
+  const ask = async (): Promise<{ answer?: string; retry?: boolean; reason: string }> => {
     // A key per attempt, from the provider's pool: the rotation the agent's own
     // requests follow, so a title never keeps knocking with a refused key.
     const key = ownAuth ? "" : nextProviderKey(selection.provider);
@@ -200,25 +210,111 @@ export async function generateChatTitle(
       });
     } catch {
       // Timeout or network drop — exactly the transient case a retry is for.
-      return { retry: true };
+      return { retry: true, reason: `no answer within ${timeoutMs} ms` };
     }
-    // A 4xx is the request's own fault (bad key, missing session header): the
+    // A 4xx that says the key cannot serve (the pool's own set: 401/402/403/
+    // 429) is worth the one retry `ask` already does — it takes the next key
+    // from the provider's pool, the way the agent's own calls do. Any other
+    // 4xx is the request's own fault (a wrong model id, a missing header): the
     // same request again would fail the same way.
-    if (!res.ok) return { retry: res.status === 429 || res.status >= 500 };
+    if (!res.ok) {
+      const keyRefused = res.status === 401 || res.status === 402 || res.status === 403;
+      return {
+        retry: keyRefused || res.status === 429 || res.status >= 500,
+        reason: `http ${res.status}`,
+      };
+    }
     try {
-      return { answer: extractContent(await res.json()) };
+      return { answer: extractContent(await res.json()), reason: "the answer carried no text" };
     } catch {
-      return { answer: "" };
+      return { answer: "", reason: "unreadable response body" };
     }
   };
 
+  const pause = () =>
+    new Promise((resolve) => setTimeout(resolve, timing?.retryDelayMs ?? TITLE_RETRY_DELAY_MS));
+
   let attempt = await ask();
   if (!attempt.answer && attempt.retry) {
-    await new Promise((resolve) => setTimeout(resolve, timing?.retryDelayMs ?? TITLE_RETRY_DELAY_MS));
+    await pause();
     attempt = await ask();
   }
-  const title = attempt.answer ? cleanTitle(attempt.answer, maxLen) : "";
-  return title && !looksLikeReply(title) && !looksLikeMarkup(title) ? title : null;
+  if (!attempt.answer) {
+    return reportSkippedTitle(sessionId, selection, attempt.reason);
+  }
+  const title = cleanTitle(attempt.answer, maxLen);
+  if (!title) return reportSkippedTitle(sessionId, selection, "the answer held no words", attempt.answer);
+  // A title the model closed with a full stop is the one shape the guard below
+  // cannot tell from a reply (and throwing the words away costs the reader the
+  // whole title). Ask once more instead: a second sample usually lands without
+  // the stop, and the guard itself stays as strict as it was.
+  if (onlyTheStopRejects(title)) {
+    await pause();
+    const again = await ask();
+    const second = again.answer ? cleanTitle(again.answer, maxLen) : "";
+    if (second && !looksLikeReply(second) && !looksLikeMarkup(second)) {
+      reportTitle(sessionId, selection, second);
+      return second;
+    }
+  }
+  if (looksLikeReply(title) || looksLikeMarkup(title)) {
+    return reportSkippedTitle(sessionId, selection, "the answer read as a reply", attempt.answer);
+  }
+  reportTitle(sessionId, selection, title);
+  return title;
+}
+
+/**
+ * The answer is a title ending with a full stop, and nothing else about it is
+ * wrong — no second sentence, no markup. Exactly the case the reply guard
+ * cannot decide on its own.
+ */
+function onlyTheStopRejects(title: string): boolean {
+  return (
+    !looksLikeMarkup(title) &&
+    /[.!]["»'”’]?$/.test(title) &&
+    !/[.!?…]["»'”’]?\s+\S/.test(title)
+  );
+}
+
+/** A title did land: the one line that says what the chat is called now. */
+function reportTitle(
+  sessionId: string | undefined,
+  selection: BuiltinModelSelection,
+  title: string,
+): void {
+  appendDeepLog({
+    kind: "chat-title",
+    sessionId,
+    provider: selection.provider.id,
+    model: selection.modelId,
+    data: { title },
+  });
+}
+
+/**
+ * A chat kept its message-derived name, and this is why. The call is background
+ * and its failure is invisible by design — which is exactly why "why did this
+ * chat never get a title" must have an answer in the log instead of a guess.
+ */
+function reportSkippedTitle(
+  sessionId: string | undefined,
+  selection: BuiltinModelSelection,
+  reason: string,
+  answer = "",
+): null {
+  appendDeepLog({
+    kind: "chat-title",
+    sessionId,
+    provider: selection.provider.id,
+    model: selection.modelId,
+    data: { skipped: reason, answer: answer.slice(0, 300) },
+  });
+  console.warn(
+    `[chat-title] ${selection.modelId}: skipped — ${reason}` +
+      (answer ? `; answer: ${answer.slice(0, 120).replace(/\s+/g, " ")}` : ""),
+  );
+  return null;
 }
 
 /** Sessions whose title a model call is currently in flight for. */

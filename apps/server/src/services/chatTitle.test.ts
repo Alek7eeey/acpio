@@ -1,6 +1,6 @@
 // Model-written chat titles: what the endpoint call sends and what of the
 // answer survives, plus the DB write that must not clobber a hand rename.
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import http from "node:http";
 import { DEFAULT_SETTINGS, builtinModelValue, type AppSettings } from "@acpio/shared";
 import { ensureSchema } from "../db/ensureSchema.js";
@@ -22,7 +22,7 @@ let lastHeaders: http.IncomingHttpHeaders = {};
 /** How many /chat/completions calls arrived — how many tries a call took. */
 let requestCount = 0;
 /** Per-request overrides, one entry per call, to script a failing first try. */
-let steps: { status?: number; delayMs?: number }[] = [];
+let steps: { status?: number; delayMs?: number; content?: unknown }[] = [];
 /** What the stub answers — override per test. */
 let reply: { status: number; content: unknown } = { status: 200, content: "plain title" };
 /** Set to delay the answer so a rename can land mid-flight. */
@@ -65,7 +65,7 @@ beforeAll(async () => {
         if (res.destroyed) return; // the caller timed out and walked away
         res.statusCode = step?.status ?? reply.status;
         res.setHeader("content-type", "application/json");
-        res.end(JSON.stringify({ choices: [{ message: { content: reply.content } }] }));
+        res.end(JSON.stringify({ choices: [{ message: { content: step?.content ?? reply.content } }] }));
       };
       const wait = step?.delayMs ?? delayMs;
       if (wait) setTimeout(answer, wait);
@@ -147,6 +147,58 @@ describe("generateChatTitle", () => {
     expect(await generateChatTitle(settings, "посмотри на чат ...")).toBeNull();
     reply = { status: 200, content: "Я не вижу других чатов." };
     expect(await generateChatTitle(settings, "посмотри на чат ...")).toBeNull();
+  });
+
+  // The reply guard cannot tell a title that closes with a full stop from a
+  // reply that is one sentence long. Dropping the words costs the reader the
+  // whole title, so the answer is asked for once more — the guard stays strict.
+  it("asks again when the only thing wrong is a closing full stop", async () => {
+    const settings = settingsWith({ builtinProviders: [provider("p", base, ["m"])] });
+    steps = [
+      { content: "Уроки по точкам расширения для десктопа." },
+      { content: "Уроки по точкам расширения для десктопа" },
+    ];
+    const title = await generateChatTitle(settings, "источник", undefined, { retryDelayMs: 0 });
+    expect(title).toBe("Уроки по точкам расширения для десктопа");
+    expect(requestCount).toBe(2);
+    // A real reply is still a reply: two sentences are never retried into a title.
+    requestCount = 0;
+    steps = [];
+    reply = { status: 200, content: "Я не имею доступа к чатам. Откройте нужный." };
+    expect(await generateChatTitle(settings, "источник", undefined, { retryDelayMs: 0 })).toBeNull();
+    expect(requestCount).toBe(1);
+  });
+
+  // A refused key is the pool's business, and the pool hands the next one out
+  // on the next call: a chat whose endpoint took its traffic must not stay
+  // unnamed because the first key of the pool was dead.
+  it("retries a refused key on the pool's next key", async () => {
+    const settings = settingsWith({ builtinProviders: [provider("p", base, ["m"])] });
+    steps = [{ status: 401 }, {}];
+    reply = { status: 200, content: "Уроки по точкам расширения" };
+    expect(await generateChatTitle(settings, "источник", undefined, { retryDelayMs: 0 })).toBe(
+      "Уроки по точкам расширения",
+    );
+    expect(requestCount).toBe(2);
+  });
+
+  // A chat left unnamed is the reader's question; the log has to answer it
+  // instead of the feature failing silently.
+  it("says in the log why a chat kept its message-derived name", async () => {
+    const settings = settingsWith({ builtinProviders: [provider("p", base, ["m"])] });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      reply = { status: 401, content: "nope" };
+      expect(await generateChatTitle(settings, "источник", "s1", { retryDelayMs: 0 })).toBeNull();
+      expect(warn.mock.calls.map((c) => String(c[0])).join("\n")).toContain("http 401");
+      reply = { status: 200, content: "Я не вижу других чатов." };
+      expect(await generateChatTitle(settings, "источник", "s1", { retryDelayMs: 0 })).toBeNull();
+      expect(warn.mock.calls.map((c) => String(c[0])).join("\n")).toContain(
+        "the answer read as a reply",
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("sends the named command's own description, and only that one", async () => {
