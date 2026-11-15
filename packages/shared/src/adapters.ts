@@ -433,8 +433,13 @@ export interface HarnessAdapter {
   subagentToolKinds: readonly string[];
 
   // ── Extension methods ────────────────────────────────────────────────────
-  /** Raw ACP request method → normalized core request kind. */
-  requestKinds: Record<string, "permission" | "ask_question" | "create_plan">;
+  /** Raw ACP request method → normalized core request kind. `context_drift` is
+   *  the harness's own hold on a request, not something the model asked: the
+   *  card is the drift row, never a question bubble. */
+  requestKinds: Record<
+    string,
+    "permission" | "ask_question" | "create_plan" | "context_drift"
+  >;
   /**
    * Map a permission-shaped ACP request to an ask_question payload for the UI.
    * Return null to keep the default permission card (allow/deny).

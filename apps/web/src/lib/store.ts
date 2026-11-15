@@ -168,7 +168,7 @@ export type ConnectionState = "connecting" | "open" | "reconnecting" | "offline"
 type PendingQuestion = {
   sessionId: string;
   requestId: string;
-  kind: "ask_question" | "create_plan" | "switch_mode";
+  kind: "ask_question" | "create_plan" | "switch_mode" | "context_drift";
   payload: Record<string, unknown>;
 };
 
@@ -183,14 +183,25 @@ function pendingQuestionFromDetail(detail: SessionDetailDto): PendingQuestion | 
       // the `question.request` frame does: re-opening a chat whose plan waits
       // for an approval has to find the card here too, or the chat reads as a
       // finished turn with nothing to answer.
-      if (part?.type !== "question" && part?.type !== "plan") continue;
+      if (
+        part?.type !== "question" &&
+        part?.type !== "plan" &&
+        part?.type !== "context_drift"
+      ) {
+        continue;
+      }
       if (!part.payload.pending) continue;
       const requestId = String(part.payload.requestId ?? "");
       if (!requestId) continue;
       return {
         sessionId: detail.id,
         requestId,
-        kind: part.type === "plan" ? "create_plan" : "ask_question",
+        kind:
+          part.type === "plan"
+            ? "create_plan"
+            : part.type === "context_drift"
+              ? "context_drift"
+              : "ask_question",
         payload: part.payload as Record<string, unknown>,
       };
     }
@@ -752,7 +763,9 @@ function applyQuestionAnswerLocally(
   const messages = current.messages.map((message) => {
     if (message.role !== "assistant") return message;
     const parts = message.parts.map((part) => {
-      if (part.type !== "question") return part;
+      // The drift row answers in place: it is the harness's hold, drawn on its
+      // own row, not a question part.
+      if (part.type !== "question" && part.type !== "context_drift") return part;
       if (String(part.payload.requestId ?? "") !== requestId) return part;
       touched = true;
       const payload = {

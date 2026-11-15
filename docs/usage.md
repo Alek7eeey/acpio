@@ -287,7 +287,12 @@ endpoint it can reach.
   the `⋯` menu picks it. Both values shape the *prompt* only: **Default** leaves it alone,
   **Low** appends a hard budget to the system prompt — 150 words of private reasoning,
   written as a failure rather than a wish, because a preference gets reasoned around. The
-  pick is stored per model and comes back when the chat reopens.
+  pick is stored per model and comes back when the chat reopens. It is frozen into a chat's
+  prompt when that chat starts: a pick made mid-chat arrives with the next chat, because the
+  mode's rider is the last block of the system prompt and rewriting it mid-chat moves the head
+  of the cached prompt — the provider then bills the whole history again. The same holds for
+  every other switch that shapes the prompt or the tool list (reply language, the plan tool,
+  subagents, the bash limit, the context tiers): they are read on a chat's first turn.
 - **Turning thinking off is a chat command, not a mode.** `/thinking off` (or `/thinking on`;
   bare `/thinking` toggles) makes the agent put `thinking: {"type": "disabled"}` into every
   request body — the field an endpoint with a thinking knob (MiMo's `thinking`, the common

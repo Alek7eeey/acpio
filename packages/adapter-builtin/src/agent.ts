@@ -2,13 +2,17 @@ import { randomUUID } from "node:crypto";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type {
   AppSettings,
+  BuiltinContextMode,
   BuiltinProviderConfig,
+  BuiltinReasoningPolicy,
   BuiltinReplyLanguage,
+  BuiltinSubagentsSetting,
   InProcessAgentOptions,
   InProcessAgentTransport,
 } from "@acpio/shared";
 import {
   builtinProviderHeaders,
+  DEFAULT_BUILTIN_SUBAGENTS,
   normalizeBuiltinBashTimeoutSec,
   normalizeBuiltinReplyLanguage,
   normalizeBuiltinThinkingLimit,
@@ -62,8 +66,15 @@ import {
   expandSkillInvocation,
   renderSkillsSection,
   supersededRules,
+  type BuiltinSkill,
 } from "./skills.js";
-import { isValidSessionId, loadBuiltinSession, saveBuiltinSession } from "./store.js";
+import {
+  isValidSessionId,
+  loadBuiltinSession,
+  PROMPT_THINKING_MODES,
+  saveBuiltinSession,
+  type PromptThinkingMode,
+} from "./store.js";
 import {
   PLAN_DIR,
   PLAN_FILE,
@@ -337,9 +348,8 @@ export function systemPrompt(
     // The repository's rules sit right below: more specific than the laws
     // above, less than a skill the user turned on.
     ...(projectRules ? [projectRules] : []),
-    // Stable to volatile, top to bottom: the rules and the frozen skills block
-    // come first so a MCP server coming online or the thinking knob turning mid
-    // chat rewrites only the tail, never the head the provider has cached.
+    // Stable to volatile, top to bottom: the rules and the skills block come
+    // first, the MCP list and the user's own instructions after them.
     skillsSection,
     ...(mcp.servers.length
       ? [
@@ -362,7 +372,10 @@ export function systemPrompt(
       : []),
     // The harness's rider goes in bare: under the header above it would read as
     // the user's own words, and a user who writes instructions of their own
-    // would have no way to tell the two apart.
+    // would have no way to tell the two apart. It is the block a knob controls,
+    // but it is frozen with the head (see `frozenHead.thinking`): "last" is still
+    // inside `messages[0]`, so a rider that changed mid-chat rewrote the prefix
+    // in front of every message the provider had cached.
     ...(thinkingInstructions.trim() ? ["", thinkingInstructions.trim()] : []),
   ].join("\n");
 }
@@ -501,11 +514,12 @@ function builtinEndpoint(
  * first). It shapes the prompt only: "High" asks for the thinking that decides
  * the design, "Low"/"Extra low" cap the private-reasoning budget, "Default"
  * leaves the prompt alone. What the endpoint actually spends is the other,
- * independent knob — `reasoning_effort` (see `effort`).
+ * independent knob — `reasoning_effort` (see `effort`). The list itself lives in
+ * `store.ts`, with the frozen head this mode is part of.
  */
-const THINKING_MODES = ["high", "default", "low", "extra-low"] as const;
+const THINKING_MODES = PROMPT_THINKING_MODES;
 
-type ThinkingMode = (typeof THINKING_MODES)[number];
+type ThinkingMode = PromptThinkingMode;
 
 /**
  * Body field that switches an endpoint's thinking pass off. Endpoints with a
@@ -726,16 +740,6 @@ export class BuiltinAgent implements InProcessAgentTransport {
    */
   private prunedFrom = 0;
   /**
-   * System prompt the last turn sent. The summariser reuses it verbatim so its
-   * own request stays a prefix of that turn's — see `ask`.
-   */
-  private lastSystem = "";
-  /**
-   * Tool declarations the last turn sent. Rendered ahead of the messages, they
-   * are part of the cached prefix — the summariser reuses them verbatim.
-   */
-  private lastTools: ToolSet | undefined;
-  /**
    * The turn already told the reader its context moved in the middle. Reset at
    * the start of a turn: one warning per turn, or a long tool run would repeat
    * the same one at every step.
@@ -777,12 +781,19 @@ export class BuiltinAgent implements InProcessAgentTransport {
    * messages: reading them live meant a switch flipped in Settings rewrote the
    * head of the next request and billed the whole history again — chat
    * b0c36ffa paid 50 768 tokens for a head that moved. A knob turned there
-   * arrives with the next session, deliberately; live is only what the reader's
-   * own turn decides (`thinking`, see `echoThinking`).
+   * arrives with the next session, deliberately; live is only what a single
+   * request decides by itself (the wire effort, the fences, the reasoning echo —
+   * see `echoThinking`).
    */
   private frozenHead: {
     locale: string;
     replyLanguage: BuiltinReplyLanguage;
+    /**
+     * The ⋯ menu's prompt mode. Its rider is the last block of the system prompt —
+     * last, but still inside `messages[0]`, so a switch flipped mid-chat rewrote
+     * the head and billed every message behind it again.
+     */
+    thinking: ThinkingMode;
     /** `plan` tool offered, so its rule holds and the tool is declared. */
     planTool: boolean;
     outsideCwd: boolean;
@@ -790,6 +801,21 @@ export class BuiltinAgent implements InProcessAgentTransport {
     extraInstructions: string;
     /** MCP servers the head names — and the only ones whose tools it offers. */
     servers: string[];
+    /**
+     * The tiers `promptHistory` renders the view with. Not the head, but they
+     * rewrite messages the head stands in front of: a mask policy flipped
+     * mid-chat puts already-sent results back on the wire in another shape and
+     * the cache breaks at the first one.
+     */
+    contextMode: BuiltinContextMode;
+    pruneReasoning: BuiltinReasoningPolicy;
+    respectReasoningHistory: boolean;
+    /**
+     * Subagents as the first turn read them. The `task` declaration names this
+     * roster, so an agent added or edited mid-chat moves the head just like a
+     * switch would.
+     */
+    subagents: BuiltinSubagentsSetting;
   } | null = null;
   /**
    * The plan as this session last read it out of `.acpio/plan.md` — title,
@@ -1083,6 +1109,10 @@ export class BuiltinAgent implements InProcessAgentTransport {
     // transport built again mid-chat (a restart, a settings save) must resume on
     // the bytes the provider has cached, not on the settings as they are now.
     this.frozenHead = stored?.promptHead ? { ...stored.promptHead } : null;
+    // …and whether the history that head wrote went out with the reasoning echo:
+    // the field is added to every assistant message that has none, so a
+    // transport built again mid-chat may not take that decision again either.
+    this.echoThinking = stored?.echoReasoning;
     this.offload = OffloadStore.forSession(this.opts.stateDir, sessionId);
     // Announce discovered skills before the boot reply: the harness merges them
     // into the composer's slash menu, exactly like a CLI agent's own list. The
@@ -1181,6 +1211,9 @@ export class BuiltinAgent implements InProcessAgentTransport {
         ? { promptRules: { section: this.frozenRules ?? "", delivered: [...this.deliveredRules] } }
         : {}),
       ...(this.frozenHead ? { promptHead: { ...this.frozenHead, servers: [...this.frozenHead.servers] } } : {}),
+      // The echo decision rides with the same bytes: a restart that retook it
+      // would add the field to messages the provider has already cached.
+      ...(this.echoThinking !== undefined ? { echoReasoning: this.echoThinking } : {}),
       // The spend rows ride along: a restart must resume the session's totals,
       // not restart them from zero and make the panel's first update after the
       // reboot hand back what the session had already spent.
@@ -1520,13 +1553,16 @@ export class BuiltinAgent implements InProcessAgentTransport {
   /**
    * Does the conversation think, as far as this turn's requests are concerned?
    *
-   * Asked once, at the turn's first request, and held for the rest of it: the
-   * transcript grows its own reasoning while the turn runs, and a decision
-   * retaken per request would add `reasoning_content` to an assistant message
-   * that already went out without it. The provider's cache stops at the first
-   * message that changed, so that field cost the whole tail of every later
-   * request in the turn (chat 7a6c147b: cached 9 600 of 11 430 where the step
-   * before it read 9 088 of 9 698).
+   * Asked once, at the session's first request, and held from then on — across
+   * turns, and across a restart (the answer is stored with the session): the
+   * transcript grows its own reasoning while a chat runs, and a decision
+   * retaken would add `reasoning_content` to an assistant message that already
+   * went out without it. The provider's cache stops at the first message that
+   * changed, so that field cost the whole tail of every later request in the
+   * turn (chat 7a6c147b: cached 9 600 of 11 430 where the step before it read
+   * 9 088 of 9 698) — and a turn boundary is not free either: chat b5852ea0
+   * was answered from cache for 2 of its 67 messages, because a steer started a
+   * turn that retook the decision.
    *
    * A refused attempt is the other half of the rule: a 400 turned no prefix into
    * a cached one, so the question may be asked again and the rerun can satisfy
@@ -1566,25 +1602,46 @@ export class BuiltinAgent implements InProcessAgentTransport {
   }
 
   /**
-   * Park the request on the reader: continue as planned, or stop the turn. The
-   * question is the host's ordinary question card, so it survives a reconnect
-   * and is answerable from the panel like any other — see `responseFromUi`.
+   * Park the request on the reader: continue as planned, or stop the turn. This
+   * is not the model asking anything — it is the loop holding its own next
+   * request — so the answer is drawn on the drift row itself (its own request
+   * kind, `context_drift`), never as a question bubble with a model preamble.
+   * The row is still durable: the answer survives a reconnect like any other.
    */
   private async confirmDrift(drift: ContextDrift): Promise<boolean> {
     const ru = this.opts.settings.locale === "ru";
-    const prompt = ru
-      ? `Начало запроса изменилось: совпало ${drift.prefixSame} из ${drift.prevMessages} ` +
-        `сообщений, сейчас ${drift.messages}. Запрос ещё не отправлен. Кэш провайдера отвечает ` +
-        "только на неизменное начало — всё после сдвига оплачивается полностью."
-      : `The request's head moved: ${drift.prefixSame} of ${drift.prevMessages} messages still ` +
-        `match, ${drift.messages} now. The request has not been sent yet. The provider's cache ` +
-        "only answers an unchanged head — everything past the shift is billed in full.";
+    // Which head moved is the whole answer: the system prompt, the tool list, or
+    // a message in the middle. Without it the card read "0 of 279" and left the
+    // reader to guess (chat a26a4eca).
+    const what = drift.systemChanged
+      ? ru
+        ? "Системный промпт (правила, скиллы, настройки) изменился целиком."
+        : "The system prompt itself changed — rules, skills or the settings it is written from."
+      : drift.toolsChanged
+        ? ru
+          ? "Набор инструментов изменился."
+          : "The tool list changed."
+        : "";
+    const prompt = (
+      ru
+        ? `Начало запроса изменилось: совпало ${drift.prefixSame} из ${drift.prevMessages} ` +
+          `сообщений, сейчас ${drift.messages}. ${what}${what ? " " : ""}Запрос ещё не отправлен. ` +
+          "Кэш провайдера отвечает только на неизменное начало — всё после сдвига оплачивается полностью."
+        : `The request's head moved: ${drift.prefixSame} of ${drift.prevMessages} messages still ` +
+          `match, ${drift.messages} now. ${what}${what ? " " : ""}The request has not been sent yet. ` +
+          "The provider's cache only answers an unchanged head — everything past the shift is billed in full."
+    );
     let picked = "";
     try {
       const res = await this.rpc.request<{
         outcome?: { answers?: Array<{ selectedOptionIds?: string[] }> };
       }>("builtin/context_drift", {
         title: ru ? "Контекст изменился в середине хода" : "The context changed mid-turn",
+        // The row these answers belong to is already in the transcript; the
+        // counts ride along so a host that lost it can still draw one.
+        messages: drift.messages,
+        prevMessages: drift.prevMessages,
+        prefixSame: drift.prefixSame,
         questions: [
           {
             id: "drift",
@@ -1627,9 +1684,11 @@ export class BuiltinAgent implements InProcessAgentTransport {
     selection: BuiltinModelSelection,
     focus: string,
   ): Promise<{ stopReason: string }> {
-    // The pass is its own turn: it takes the echo decision for itself instead
-    // of riding the last turn's.
+    // The pass rewrites the prefix (the covered messages become one digest), so
+    // its own requests have already lost the cache: the echo may be decided
+    // again here, where nothing of the old bytes survives anyway.
     this.echoThinking = undefined;
+    const live = await this.settings();
     const endpoint = this.endpointFor(selection);
     const abort = new AbortController();
     this.abort = abort;
@@ -1638,15 +1697,23 @@ export class BuiltinAgent implements InProcessAgentTransport {
       // This prompt's own accumulator: its pass bill has nowhere else to go —
       // there is no turn after it to carry the report.
       this.pendingUsage = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 };
+      // The pass rides on the head the chat sends, rebuilt from what the session
+      // froze (see `freezeHead`): after a restart nothing of the last turn is in
+      // memory, and a digest request without the head shares no prefix with the
+      // turn's — billed in full, on the one pass that matters.
+      await this.freezeHead(live);
+      const { system, tools } = await this.renderHead({
+        // A pass cannot call a tool (`declareOnly` strips every executor), so no
+        // picture ever needs a place in the turn.
+        onImages: () => {},
+        bashTimeoutMs: normalizeBuiltinBashTimeoutSec(live.builtinBashTimeoutSec) * 1000,
+      });
       await this.promptHistory({
         contextWindow: selection.contextWindow,
         model: endpoint.chatModel(selection.modelId),
         abortSignal: abort.signal,
-        // The system prompt of the last turn, so a manual pass rides on the
-        // prefix that turn already warmed. A session opened on `/compact` has
-        // none — and nothing to fold either.
-        system: this.lastSystem,
-        tools: this.lastTools,
+        system,
+        tools,
         force: focus,
         manual: true,
       });
@@ -1829,6 +1896,16 @@ export class BuiltinAgent implements InProcessAgentTransport {
     manual?: boolean;
   }): Promise<ModelMessage[]> {
     const settings = await this.settings();
+    // The tiers and the mask policy rewrite messages rather than the head, and
+    // the provider's cache breaks at the first message whose bytes changed: they
+    // read what the session's first turn froze, exactly like the head (see
+    // `frozenHead`). Only the thresholds stay live — they decide when a pass runs,
+    // and a pass rewrites the prompt on purpose and reports itself.
+    const frozen = this.frozenHead;
+    const contextMode = frozen?.contextMode ?? settings.builtinContextMode;
+    const pruneReasoning = frozen?.pruneReasoning ?? settings.builtinPruneReasoning;
+    const respectReasoningHistory =
+      frozen?.respectReasoningHistory ?? settings.builtinRespectReasoningHistory;
     const keepLastConfigured = settings.builtinPruneToolResultsKeepLast;
     // Tier 0: bulky results move to the session archive under a stable id and
     // reach the model as a citation it can read back — reversible, unlike a
@@ -1858,15 +1935,13 @@ export class BuiltinAgent implements InProcessAgentTransport {
     // ~10% of its solve rate (arXiv 2508.21433): leave it alone when reasoning
     // is present, unless the setting says otherwise.
     const skipMask =
-      keepLastConfigured > 0 &&
-      settings.builtinRespectReasoningHistory &&
-      hasReasoning(offloaded);
+      keepLastConfigured > 0 && respectReasoningHistory && hasReasoning(offloaded);
     const view = skipMask
       ? offloaded
-      : maskToolResults(offloaded, keepLast, settings.builtinPruneReasoning);
+      : maskToolResults(offloaded, keepLast, pruneReasoning);
     const thresholdPercent = opts.force !== undefined ? 1 : settings.builtinCompactionThresholdPercent;
-    if (settings.builtinContextMode === "off" && opts.force === undefined) return view;
-    if (settings.builtinContextMode === "prune" && opts.force === undefined) {
+    if (contextMode === "off" && opts.force === undefined) return view;
+    if (contextMode === "prune" && opts.force === undefined) {
       const line = opts.contextWindow * (settings.builtinCompactionThresholdPercent / 100);
       // Both boundaries are sticky and move together: the cut only when the kept
       // view outgrows the line again, the notes with it. Advancing them every
@@ -1883,7 +1958,7 @@ export class BuiltinAgent implements InProcessAgentTransport {
       // in front of the tail.
       const noted = skipMask
         ? this.messages
-        : maskToolResults(this.messages, this.messages.length - this.maskUpTo, settings.builtinPruneReasoning);
+        : maskToolResults(this.messages, this.messages.length - this.maskUpTo, pruneReasoning);
       return noted.slice(this.prunedFrom);
     }
     const maxSummaryTokens = settings.builtinMaxSummaryTokens;
@@ -1951,7 +2026,7 @@ export class BuiltinAgent implements InProcessAgentTransport {
           const keepFromEnd = Math.max(0, this.messages.length - this.maskUpTo);
           return [
             ...result.messages.slice(0, prefix),
-            ...maskToolResults(tail, keepFromEnd, settings.builtinPruneReasoning),
+            ...maskToolResults(tail, keepFromEnd, pruneReasoning),
           ];
         }
       }
@@ -2124,6 +2199,117 @@ export class BuiltinAgent implements InProcessAgentTransport {
     this.maskUpTo = Math.max(this.maskUpTo, Math.max(0, this.messages.length - keepLastConfigured));
   }
 
+  /**
+   * Fix the parts of the prompt that ride ahead of the messages, once per
+   * session: the skills block, the repository's rules and the settings the
+   * system prompt and the tool declarations are written from (see `frozenHead`).
+   *
+   * `prompt` and a `/compact` pass both call it, so a pass that has no turn
+   * behind it — a chat restored from disk — sends the same head instead of none.
+   * A setting that shapes any of it therefore lands with the next session, not
+   * with the next turn: rewriting the head mid-chat bills the whole history
+   * again (chat b0c36ffa paid 50 768 tokens for exactly that).
+   */
+  private async freezeHead(live: AppSettings, knownSkills?: BuiltinSkill[]): Promise<void> {
+    // The skills block is the one part of the prompt that depends on skill
+    // settings, and those are read live on every turn. The locale rides in it
+    // too, so a chat keeps the language it started in — as it keeps the list.
+    if (!this.frozenSkills) {
+      const skills = knownSkills ?? (await discoverSettingsSkills(this.opts.settings, this.cwd));
+      this.frozenSkills = {
+        section: await renderSkillsSection(skills, live.builtinSkillModes, live.locale),
+        supersedes: supersededRules(skills, live.builtinSkillModes),
+      };
+      this.persist();
+    }
+    // A rule that inlines itself between two requests moves the head of the
+    // prompt, and the provider's cache only answers an unchanged head.
+    if (this.frozenRules === null) {
+      this.frozenRules = await renderProjectRules(this.cwd, live.builtinProjectRules);
+      this.persist();
+    }
+    // The rest of the head: the system prompt and the tool declarations both sit
+    // in front of the messages, so a knob turned in Settings must not reach them
+    // mid-chat. The view tiers join them for the same money: they rewrite
+    // messages rather than the head, and the cache breaks at the first one.
+    if (!this.frozenHead) {
+      const { tools: mcpEntries } = await this.mcp.ensure();
+      this.frozenHead = {
+        locale: live.locale,
+        replyLanguage: normalizeBuiltinReplyLanguage(live.builtinReplyLanguage),
+        thinking: this.thinking,
+        planTool: live.builtinPlanTool !== false,
+        outsideCwd: live.builtinAllowOutsideCwd === true,
+        markdownImages: live.builtinMarkdownImages === true,
+        extraInstructions: live.builtinExtraInstructions ?? "",
+        servers: [...new Set(mcpEntries.map((entry) => entry.server))].sort(),
+        contextMode: live.builtinContextMode,
+        pruneReasoning: live.builtinPruneReasoning,
+        respectReasoningHistory: live.builtinRespectReasoningHistory !== false,
+        subagents: live.builtinSubagents ?? DEFAULT_BUILTIN_SUBAGENTS,
+      };
+      this.persist();
+    }
+  }
+
+  /**
+   * The head of every request this session sends: the system prompt and the tool
+   * declarations, both written from what {@link freezeHead} fixed. Rebuilt
+   * rather than remembered so the digest pass (and a `/compact` that follows a
+   * restart) sends the same bytes the turn does — the declarations ride ahead of
+   * the messages, and a summariser that omits them stops being a prefix of the
+   * turn's (measured: 0% of the head from the provider's cache without them,
+   * 98% with them).
+   */
+  private async renderHead(opts: {
+    onImages: (toolCallId: string, images: ToolImagePart[]) => void;
+    /** `bash`'s kill time when a call names none — live, and never in the schema. */
+    bashTimeoutMs: number;
+  }): Promise<{ system: string; tools: ToolSet }> {
+    const head = this.frozenHead;
+    if (!head) throw new Error("prompt head не заморожен");
+    const ask = (toolCall: { title: string; kind: string; input: Record<string, unknown> }) =>
+      this.askPermission(toolCall);
+    // The tools follow the head: a server connected mid-chat (or a switch
+    // flipped) must not add one here — its tools arrive with the next session.
+    const { tools: mcpEntries } = await this.mcp.ensure();
+    const offered = mcpEntries.filter((entry) => head.servers.includes(entry.server));
+    const system = systemPrompt(
+      head.locale,
+      head.replyLanguage,
+      this.cwd,
+      { servers: head.servers },
+      this.frozenSkills?.section ?? "",
+      this.frozenSkills?.supersedes ?? new Set<string>(),
+      head.outsideCwd,
+      head.markdownImages,
+      // Its rule leaves the prompt with the tool, or the model would be told to
+      // call a `plan` it does not have.
+      head.planTool,
+      head.extraInstructions,
+      THINKING_INSTRUCTIONS[head.thinking],
+      this.frozenRules ?? "",
+    );
+    const tools = {
+      ...createBuiltinTools({
+        host: this.rpc,
+        sessionId: this.sessionId,
+        ask,
+        outsideCwd: head.outsideCwd,
+        bashTimeoutMs: opts.bashTimeoutMs,
+        subagents: head.subagents.enabled
+          ? { settings: head.subagents, bridge: () => this.activeSubagents }
+          : undefined,
+        plan: head.planTool ? this.planBridge() : undefined,
+        // Same channel as the MCP tools: `read` on a picture hands the bytes to
+        // the turn, which puts them right after that call's result.
+        onImages: opts.onImages,
+      }),
+      ...mcpToolSet(offered, { ask, onImages: opts.onImages }),
+    };
+    return { system, tools };
+  }
+
   // ── The turn ──────────────────────────────────────────────────────────────
 
   private async prompt(params: Record<string, unknown>): Promise<{ stopReason: string }> {
@@ -2175,14 +2361,35 @@ export class BuiltinAgent implements InProcessAgentTransport {
     // The fuse follows this chat's override, else the global setting — a knob
     // turned in Settings reaches this turn instead of a new session.
     this.applyThinkingLimit(normalizeBuiltinThinkingLimit(live.builtinThinkingLimit));
-    // Settings → Built-in agent: the plan tool is offered unless it was
-    // switched off. Every switch below is read once per session (see
-    // `frozenHead`), so a toggle here arrives with the next chat.
+    // Settings → Built-in agent: every switch below is read once per session
+    // (see `freezeHead`), so a toggle here arrives with the next chat.
     const { contextWindow } = selection;
     const abort = new AbortController();
     this.abort = abort;
-    const { tools: mcpEntries, warnings } = await this.mcp.ensure();
+    const { warnings } = await this.mcp.ensure();
     for (const warning of warnings) console.warn(`[builtin] MCP ${warning}`);
+    await this.freezeHead(live, skills);
+    const head = this.frozenHead;
+    if (!head) throw new Error("prompt head не заморожен");
+    // A rule whose `globs` match a file this conversation has already opened
+    // belongs in front of the model — but behind everything already sent, so
+    // the cached prefix still answers and only the note is charged. It lands
+    // in front of the reader's own turn, never inside it.
+    const ruleNotes = await renderRuleNotes(
+      this.cwd,
+      live.builtinProjectRules,
+      touchedFiles(this.messages, this.cwd),
+      new Set(this.deliveredRules),
+    );
+    if (ruleNotes.text) {
+      this.deliveredRules.push(...ruleNotes.paths);
+      this.messages.splice(
+        Math.max(0, this.messages.length - 1),
+        0,
+        userContent([{ type: "text", text: ruleNotes.text }]),
+      );
+      this.persist();
+    }
     const ask = (toolCall: {
       title: string;
       kind: string;
@@ -2194,13 +2401,13 @@ export class BuiltinAgent implements InProcessAgentTransport {
       // turn and its wrap-up continuation.
       // Children run on their own model when one is configured — a fresh
       // endpoint for that provider — and on the session's model otherwise.
-      const subagentsEnabled = this.opts.settings.builtinSubagents?.enabled === true;
+      const subagentsEnabled = head.subagents.enabled;
       const childChoice = subagentsEnabled
         ? subagentModelChoice(this.opts.settings, selection)
         : null;
       if (childChoice?.fellBack) {
         console.warn(
-          `[builtin] subagent model "${this.opts.settings.builtinSubagents?.model}" is not configured — children run on the session model`,
+          `[builtin] subagent model "${head.subagents.model}" is not configured — children run on the session model`,
         );
       }
       const childModel =
@@ -2215,13 +2422,15 @@ export class BuiltinAgent implements InProcessAgentTransport {
         ? createSubagentsBridge({
             ask,
             model: childModel,
-            extraSystem: THINKING_INSTRUCTIONS[this.thinking],
+            extraSystem: THINKING_INSTRUCTIONS[head.thinking],
             // Children ruminate at the same prices: the parent's fuse binds them.
             reasoningLimitChars: this.thinkingLimit,
             contextWindow: childChoice?.selection.contextWindow ?? contextWindow,
             cwd: this.cwd,
             signal: abort.signal,
-            settings: this.opts.settings.builtinSubagents,
+            // The roster the `task` declaration names, frozen with the head: a
+            // child can never be addressed by a name the prompt does not list.
+            settings: head.subagents,
             emit: (update: Record<string, unknown>) => this.emitUpdate(update),
             buildChildTools: (childAsk) =>
               createBuiltinTools({
@@ -2241,121 +2450,27 @@ export class BuiltinAgent implements InProcessAgentTransport {
       // The new bridge's counter starts at zero, so the totals it feeds have
       // nothing counted yet.
       this.bridgeReported = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 };
-      // Frozen once per session (see `frozenSkills`): the skills block is the
-      // one part of the prompt that depends on skill settings, and those are
-      // read live on every turn. The locale rides in it too, so a chat keeps the
-      // language it started in — as it keeps the skill list.
-      if (!this.frozenSkills) {
-        this.frozenSkills = {
-          section: await renderSkillsSection(skills, live.builtinSkillModes, live.locale),
-          supersedes: supersededRules(skills, live.builtinSkillModes),
-        };
-        this.persist();
-      }
-      const skillsPrompt = this.frozenSkills;
-      // Built once for the whole session and then frozen (see `frozenRules`): a
-      // rule that inlines itself between two requests moves the head of the
-      // prompt, and the provider's cache only answers an unchanged head.
-      if (this.frozenRules === null) {
-        this.frozenRules = await renderProjectRules(this.cwd, live.builtinProjectRules);
-        this.persist();
-      }
-      const projectRules = this.frozenRules;
-      // The rest of the head is written from the settings the session's first
-      // turn read (see `frozenHead`): the system prompt and the tool
-      // declarations both sit in front of the messages, so a knob turned in
-      // Settings must not reach them mid-chat — it would move the head of the
-      // next request and bill the entire history again.
-      if (!this.frozenHead) {
-        this.frozenHead = {
-          locale: live.locale,
-          replyLanguage: normalizeBuiltinReplyLanguage(live.builtinReplyLanguage),
-          planTool: live.builtinPlanTool !== false,
-          outsideCwd: live.builtinAllowOutsideCwd === true,
-          markdownImages: live.builtinMarkdownImages === true,
-          extraInstructions: live.builtinExtraInstructions ?? "",
-          servers: [...new Set(mcpEntries.map((entry) => entry.server))].sort(),
-        };
-        this.persist();
-      }
-      const head = this.frozenHead;
-      // The tools follow the head: the declarations are part of the same cached
-      // prefix, so a server connected mid-chat (or a switch flipped) must not
-      // add one here — its tools arrive with the next session.
-      const offered = mcpEntries.filter((entry) => head.servers.includes(entry.server));
-      // A rule whose `globs` match a file this conversation has already opened
-      // belongs in front of the model — but behind everything already sent, so
-      // the cached prefix still answers and only the note is charged. It lands
-      // in front of the reader's own turn, never inside it.
-      const ruleNotes = await renderRuleNotes(
-        this.cwd,
-        live.builtinProjectRules,
-        touchedFiles(this.messages, this.cwd),
-        new Set(this.deliveredRules),
-      );
-      if (ruleNotes.text) {
-        this.deliveredRules.push(...ruleNotes.paths);
-        this.messages.splice(
-          Math.max(0, this.messages.length - 1),
-          0,
-          userContent([{ type: "text", text: ruleNotes.text }]),
-        );
-        this.persist();
-      }
-      const system = systemPrompt(
-        head.locale,
-        head.replyLanguage,
-        this.cwd,
-        { servers: head.servers },
-        skillsPrompt.section,
-        skillsPrompt.supersedes,
-        head.outsideCwd,
-        head.markdownImages,
-        // Settings → Built-in agent: the `plan` tool is offered unless it was
-        // switched off; its rule leaves the prompt with it, or the model would
-        // be told to call a tool it does not have.
-        head.planTool,
-        head.extraInstructions,
-        THINKING_INSTRUCTIONS[this.thinking],
-        projectRules,
-      );
-      this.lastSystem = system;
-      // Built before the prompt for the same reason as the system prompt: the
-      // tool declarations are rendered ahead of the messages, so the
-      // summariser has to send the very same ones or its request stops being a
-      // prefix of this turn's (measured: without them 0% of the head comes from
-      // the provider's cache, with them 98%).
-      // Tool pictures are collected out of band, per call: the tool result
-      // stays text (the wire takes nothing else there) and `runTurn` inserts
-      // each picture as a user message right after its own result.
+      // Tool pictures are collected out of band, per call: the tool result stays
+      // text (the wire takes nothing else there) and `runTurn` inserts each
+      // picture as a user message right after its own result.
       const toolImages = new Map<string, ToolImagePart[]>();
-      const tools = {
-        ...createBuiltinTools({
-          host: this.rpc,
-          sessionId: this.sessionId,
-          ask,
-          outsideCwd: head.outsideCwd,
-          // Read live, like the switch above: a raised limit reaches the very
-          // next call, without restarting the chat.
-          bashTimeoutMs: normalizeBuiltinBashTimeoutSec(live.builtinBashTimeoutSec) * 1000,
-          subagents: subagents ?? undefined,
-          plan: head.planTool ? this.planBridge() : undefined,
-          // Same channel as the MCP tools: `read` on a picture hands the bytes
-          // to the turn, which puts them right after that call's result.
-          onImages: (toolCallId, images) => toolImages.set(toolCallId, images),
-        }),
-        ...mcpToolSet(offered, {
-          ask,
-          onImages: (toolCallId, images) => toolImages.set(toolCallId, images),
-        }),
-      };
-      this.lastTools = tools;
+      // The head is rebuilt from what `freezeHead` fixed rather than remembered
+      // here, so every request of this chat — the summariser's, a `/compact`
+      // after a restart — sends the very same bytes the provider has cached.
+      const { system, tools } = await this.renderHead({
+        onImages: (toolCallId, images) => toolImages.set(toolCallId, images),
+        // Read live and kept out of the declarations: a raised limit reaches the
+        // very next call without moving the head (see the `bash` schema).
+        bashTimeoutMs: normalizeBuiltinBashTimeoutSec(live.builtinBashTimeoutSec) * 1000,
+      });
       // A fresh turn: the warning about a moving head is its to earn again.
       this.driftWarned = false;
-      // …and the reasoning echo is this turn's decision to take, not the last
-      // turn's to keep: a chat that has reasoned since then owes the field, and
-      // this is the one place where paying for a changed head is expected.
-      this.echoThinking = undefined;
+      // The reasoning echo is not retaken at a turn boundary: the field rides
+      // every assistant message that has none, so a decision made again there
+      // rewrites messages the provider has already cached — a steer ends one
+      // turn and starts another, and that is how chat b5852ea0 lost the prefix
+      // of 66 messages to one field on message 2. A failed attempt is the one
+      // place it may be decided again (see the retry below): nothing cached it.
       this.driftStopped = false;
       // A turn is one `promptHistory` call, so a turn's own growth is the one
       // place the threshold never looked: chat c24d5224 rode its line for twenty

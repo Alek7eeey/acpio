@@ -146,7 +146,18 @@ interface Previous {
   system: string;
   tools: string;
   key: string;
+  /**
+   * The fingerprint scheme that computed the hashes above. A head is only a
+   * comparison when both numbers came from the same code: the `system` hash
+   * moved from `body.system` to `messages[0]` (see below) and every chat then
+   * read its own unchanged prompt as rewritten — chat 70eb2dfe drew the card at
+   * 103 of 107 with `messages[0]` byte-identical in both bodies. Bump
+   * {@link HEAD_SCHEME} whenever a hash changes meaning.
+   */
+  scheme: number;
 }
+/** Version of every hash in a head file; see {@link Previous.scheme}. */
+const HEAD_SCHEME = 2;
 const previous = new Map<string, Previous>();
 const seqOf = new Map<string, number>();
 /**
@@ -181,6 +192,9 @@ function loadHead(chatKey: string, sessionId: string): void {
     if (!head || typeof head !== "object") return;
     if (!Number.isInteger(head.seq) || head.seq < 0) return;
     if (!Array.isArray(head.chain) || head.chain.some((hash) => typeof hash !== "string")) return;
+    // A head from an older scheme is an upgrade, not a break: comparing it would
+    // report the whole prompt as rewritten on the first request of every chat.
+    if (head.scheme !== HEAD_SCHEME) return;
     // A head already remembered in this process is newer than the file.
     if (!previous.has(chatKey)) {
       previous.set(chatKey, {
@@ -189,6 +203,7 @@ function loadHead(chatKey: string, sessionId: string): void {
         system: String(head.system ?? ""),
         tools: String(head.tools ?? ""),
         key: String(head.key ?? ""),
+        scheme: HEAD_SCHEME,
       });
     }
     if (!seqOf.has(chatKey)) seqOf.set(chatKey, head.seq);
@@ -352,7 +367,15 @@ export function withWireLog(
     }
     const messages = bodyMessages(body);
     const chain = chainOf(messages);
-    const system = shortHash(JSON.stringify(body.system ?? ""));
+    // An OpenAI `/chat/completions` body has no `system` field: the system prompt
+    // is `messages[0]`. Hashing only `body.system` gave every such request the
+    // same empty hash, so a chat whose rules block grew reported "0 of 279" and
+    // never named the one thing that moved (chat a26a4eca: five
+    // `.cursor/rules/*.mdc` files inlined themselves into `messages[0]`).
+    const first = messages[0] as { role?: unknown } | undefined;
+    const system = shortHash(
+      JSON.stringify(body.system ?? (first?.role === "system" ? first : "")),
+    );
     const tools = shortHash(JSON.stringify(body.tools ?? ""));
     const key = logging ? keyFingerprint(init) : "";
     const chatKey = `${target.providerId}\u0000${target.sessionId}`;
@@ -362,7 +385,7 @@ export function withWireLog(
     const before = previous.get(chatKey);
     const seq = (seqOf.get(chatKey) ?? 0) + 1;
     seqOf.set(chatKey, seq);
-    const head: Previous = { seq, chain, system, tools, key };
+    const head: Previous = { seq, chain, system, tools, key, scheme: HEAD_SCHEME };
     previous.set(chatKey, head);
     saveHead(chatKey, target.sessionId, head);
 

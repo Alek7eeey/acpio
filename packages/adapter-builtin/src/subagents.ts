@@ -171,11 +171,25 @@ const taskInputSchema = z.object({
   prompt: z.string().min(1),
 });
 
+/**
+ * What the `task` tool is built from: the declaration follows the frozen roster
+ * (`settings`), the run goes through the turn's bridge.
+ */
+export interface TaskToolHost {
+  settings: BuiltinSubagentsSetting;
+  /**
+   * The bridge of the turn in flight. A `/compact` pass declares the tool with no
+   * turn behind it: the declaration has to be the same bytes (the provider caches
+   * by prefix) while nothing there can execute.
+   */
+  bridge: () => SubagentsBridge | null;
+}
+
 /** The `task` tool: spawns a child run and returns its final report. */
-export function makeTaskTool(bridge: SubagentsBridge) {
-  const roster = subagentRoster(bridge.settings);
+export function makeTaskTool(host: TaskToolHost) {
+  const roster = subagentRoster(host.settings);
   const named = roster.map((a) => `${a.name} — ${a.description}`).join("; ");
-  const rules = bridge.settings.allowAdhoc
+  const rules = host.settings.allowAdhoc
     ? "Pass `agent` (roster name) or `system_prompt` (ad-hoc child, `tools` defaults " +
       "read/glob/grep), never both; children cannot spawn subagents."
     : "Pass `agent`, a roster name — ad-hoc children are disabled; children cannot spawn subagents.";
@@ -188,6 +202,8 @@ export function makeTaskTool(bridge: SubagentsBridge) {
       `${rules} Named: ${named}`,
     inputSchema: taskInputSchema,
     execute: async (input, ctx) => {
+      const bridge = host.bridge();
+      if (!bridge) throw new Error("`task` runs only inside a turn — no turn is in flight.");
       const report = await runSubagent(bridge, ctx.toolCallId, input);
       bridge.results.set(ctx.toolCallId, report);
       return report;

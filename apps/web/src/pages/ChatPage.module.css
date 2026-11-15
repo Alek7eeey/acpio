@@ -905,6 +905,71 @@
   color: var(--accent);
 }
 
+/* The loop's own hold, not the model asking: the card sits on the drift row so
+   the reader sees one decision in one place. */
+.contextDriftCard {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.contextDriftCardTitle {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.contextDriftPrompt {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+.contextDriftActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.contextDriftButton {
+  padding: 4px 12px;
+  border: 1px solid color-mix(in srgb, var(--text-secondary) 35%, transparent);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.contextDriftButton:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.contextDriftButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.contextDriftAnswer {
+  display: flex;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.contextDriftAnswerLabel {
+  color: color-mix(in srgb, var(--text-secondary) 92%, transparent);
+}
+
 .compactionMeta {
   font-variant-numeric: tabular-nums;
   color: color-mix(in srgb, var(--text-secondary) 92%, transparent);

@@ -1,6 +1,23 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import {
+  BUILTIN_CONTEXT_MODES,
+  BUILTIN_REASONING_POLICIES,
+  normalizeBuiltinSubagents,
+  type BuiltinContextMode,
+  type BuiltinReasoningPolicy,
+  type BuiltinSubagentsSetting,
+} from "@acpio/shared";
 import type { ModelMessage } from "ai";
+
+/**
+ * The prompt mode the composer's ⋯ menu picks (`prompt_style`, once `thinking`).
+ * It lives here because it is part of the frozen head: the mode's rider is the
+ * last block of the system prompt, so flipping it mid-chat rewrote `messages[0]`
+ * and made the provider bill the whole history again.
+ */
+export const PROMPT_THINKING_MODES = ["high", "default", "low", "extra-low"] as const;
+export type PromptThinkingMode = (typeof PROMPT_THINKING_MODES)[number];
 
 /** One conversation as the agent keeps it — enough to resume after a restart. */
 export interface BuiltinStoredSession {
@@ -48,6 +65,16 @@ export interface BuiltinStoredSession {
    */
   offloadUpTo?: number;
   /**
+   * Whether this chat's requests carry the reasoning echo, as its first request
+   * decided it. The field is added to every assistant message that has none, so
+   * taking the decision again rewrites the bytes of messages that already
+   * crossed the wire: chat b5852ea0 sent 67 messages, gained the field on one
+   * acting step it had sent bare, and the provider answered 2 of them from its
+   * cache — the other 66 were billed again by a steer, which ends a turn and
+   * starts another one. Absent on a history stored before the field existed.
+   */
+  echoReasoning?: boolean;
+  /**
    * Session-to-date token spend — what the context panel's in/cached/out rows
    * report. Stored so a restart resumes the totals instead of handing the panel
    * a smaller number than the session has already spent.
@@ -78,11 +105,31 @@ export interface BuiltinStoredSession {
   promptHead?: {
     locale: string;
     replyLanguage: "auto" | "en" | "ru";
+    /**
+     * The ⋯ menu's prompt mode. Its rider is the *last* block of the system
+     * prompt, which is still inside `messages[0]`: a switch mid-chat moved the
+     * head and billed the whole history again, so it is frozen with the rest.
+     */
+    thinking: PromptThinkingMode;
     planTool: boolean;
     outsideCwd: boolean;
     markdownImages: boolean;
     extraInstructions: string;
     servers: string[];
+    /**
+     * The context tiers `promptHistory` renders the view with. They are not the
+     * head, but they rewrite messages the head stands in front of — a mask policy
+     * flipped mid-chat puts previously sent results back on the wire in another
+     * shape, and the cache breaks at the first one.
+     */
+    contextMode: BuiltinContextMode;
+    pruneReasoning: BuiltinReasoningPolicy;
+    respectReasoningHistory: boolean;
+    /**
+     * The subagents feature as the first turn read it: `task` is declared from
+     * this roster, so a subagent added mid-chat arrives with the next chat.
+     */
+    subagents: BuiltinSubagentsSetting;
   };
 }
 
@@ -112,6 +159,7 @@ export function loadBuiltinSession(stateDir: string, sessionId: string): Builtin
     const prunedFrom = startedAt(parsed.prunedFrom, parsed.messages.length);
     const offloadUpTo = startedAt(parsed.offloadUpTo, parsed.messages.length);
     const thinkingOff = parsed.thinkingOff === true;
+    const echoReasoning = typeof parsed.echoReasoning === "boolean" ? parsed.echoReasoning : undefined;
     const effort =
       typeof parsed.effort === "string" && /^[a-z0-9_-]{1,32}$/i.test(parsed.effort.trim())
         ? parsed.effort.trim()
@@ -148,20 +196,31 @@ export function loadBuiltinSession(stateDir: string, sessionId: string): Builtin
       headRaw &&
       typeof headRaw.locale === "string" &&
       (headRaw.replyLanguage === "auto" || headRaw.replyLanguage === "en" || headRaw.replyLanguage === "ru") &&
+      (PROMPT_THINKING_MODES as readonly string[]).includes(headRaw.thinking) &&
       typeof headRaw.planTool === "boolean" &&
       typeof headRaw.outsideCwd === "boolean" &&
       typeof headRaw.markdownImages === "boolean" &&
       typeof headRaw.extraInstructions === "string" &&
       Array.isArray(headRaw.servers) &&
-      headRaw.servers.every((server) => typeof server === "string")
+      headRaw.servers.every((server) => typeof server === "string") &&
+      (BUILTIN_CONTEXT_MODES as readonly string[]).includes(headRaw.contextMode) &&
+      (BUILTIN_REASONING_POLICIES as readonly string[]).includes(headRaw.pruneReasoning) &&
+      typeof headRaw.respectReasoningHistory === "boolean" &&
+      !!headRaw.subagents &&
+      typeof headRaw.subagents === "object"
         ? {
             locale: headRaw.locale,
             replyLanguage: headRaw.replyLanguage,
+            thinking: headRaw.thinking as PromptThinkingMode,
             planTool: headRaw.planTool,
             outsideCwd: headRaw.outsideCwd,
             markdownImages: headRaw.markdownImages,
             extraInstructions: headRaw.extraInstructions,
             servers: headRaw.servers as string[],
+            contextMode: headRaw.contextMode as BuiltinContextMode,
+            pruneReasoning: headRaw.pruneReasoning as BuiltinReasoningPolicy,
+            respectReasoningHistory: headRaw.respectReasoningHistory,
+            subagents: normalizeBuiltinSubagents(headRaw.subagents),
           }
         : undefined;
     const count = (value: unknown) =>
@@ -190,6 +249,7 @@ export function loadBuiltinSession(stateDir: string, sessionId: string): Builtin
       ...(maskUpTo !== undefined ? { maskUpTo } : {}),
       ...(prunedFrom !== undefined ? { prunedFrom } : {}),
       ...(offloadUpTo !== undefined ? { offloadUpTo } : {}),
+      ...(echoReasoning !== undefined ? { echoReasoning } : {}),
       // A half-written or hand-edited total reads as "unknown": the session
       // starts its spend rows over rather than trusting a broken figure.
       ...(usageInput !== undefined && usageOutput !== undefined && usageCached !== undefined

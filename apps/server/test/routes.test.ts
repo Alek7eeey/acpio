@@ -1973,6 +1973,21 @@ describe("wire log", () => {
     // A local file header is what makes the download an archive, not a blob.
     expect(res.rawPayload.subarray(0, 4)).toEqual(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
   });
+
+  it("GET /api/wire-log/archive?session=<chat id> carries the log its agent wrote", async () => {
+    // A chat has two ids and the log file carries only one of them: the link in
+    // the transcript names the chat, the file is named by `acp_session_id`.
+    const acpId = "70eb2dfe-2362-414e-8e8d-7e54821e142e";
+    const chat = await seedSession({ provider: "builtin", acpSessionId: acpId });
+    await fsp.writeFile(path.join(dir, "70eb2dfe.jsonl"), '{"kind":"request"}\n', "utf8");
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/wire-log/archive?session=${chat.id}`,
+    });
+    expect(res.statusCode).toBe(200);
+    // The file name rides the zip's entry headers: finding it is finding the log.
+    expect(Buffer.from(res.rawPayload).includes(Buffer.from("70eb2dfe.jsonl"))).toBe(true);
+  });
 });
 
 describe("agent status", () => {

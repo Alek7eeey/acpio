@@ -31,6 +31,7 @@ import {
   type HarnessAdapter,
   type HarnessSessionDto,
   type ModelOption,
+  type MessagePartDto,
   type ModelParamDto,
   type PromptDelivery,
   type SessionDetailDto,
@@ -2210,6 +2211,46 @@ async function handleIncomingRequest(rt: SessionRuntime, req: AcpRequest) {
       payload: { ...req.params, options },
     });
     await permissionAnswered;
+    return;
+  }
+
+  // The harness holds its own next request: the head of the prompt moved and
+  // the reader says whether it is sent at all. Not a model question — the
+  // answers land on the drift row that warned about it, so the thread never
+  // grows a question bubble with a model's preamble over a decision the loop
+  // took by itself.
+  if (req.kind === "context_drift") {
+    const answered = registerInteractivePending(rt, reqKey, {
+      kind: "context_drift",
+      rpcId: req.id,
+    });
+    const payload = {
+      requestId: reqKey,
+      pending: true,
+      ...(typeof req.params.title === "string" ? { title: req.params.title } : {}),
+      ...(Array.isArray(req.params.questions) ? { questions: req.params.questions } : {}),
+    };
+    const driftPart = findOpenDriftPart(await getSessionDetail(rt.sessionId));
+    if (driftPart) {
+      await updatePart(rt.sessionId, driftPart.id, payload);
+    } else {
+      const messageId = await ensureAssistantMessage(rt);
+      await appendPart(rt.sessionId, messageId, "context_drift", {
+        messages: Number(req.params.messages ?? 0),
+        prevMessages: Number(req.params.prevMessages ?? 0),
+        prefixSame: Number(req.params.prefixSame ?? 0),
+        ...payload,
+      });
+    }
+    await updateSession(rt.sessionId, { status: "waiting" });
+    broadcastToSession(rt.sessionId, {
+      type: "question.request",
+      sessionId: rt.sessionId,
+      requestId: reqKey,
+      kind: "context_drift",
+      payload,
+    });
+    await answered;
     return;
   }
 
@@ -4987,7 +5028,13 @@ async function markQuestionPartAnswered(
     if (!msg) continue;
     for (let pi = msg.parts.length - 1; pi >= 0; pi -= 1) {
       const part = msg.parts[pi];
-      if (part?.type !== "question" && part?.type !== "plan") continue;
+      if (
+        part?.type !== "question" &&
+        part?.type !== "plan" &&
+        part?.type !== "context_drift"
+      ) {
+        continue;
+      }
       if (String(part.payload.requestId ?? "") !== requestId) continue;
       const answerSummary = summarizeQuestionAnswer({
         ...(part.payload as Record<string, unknown>),
@@ -4997,6 +5044,51 @@ async function markQuestionPartAnswered(
       return;
     }
   }
+}
+
+/** Close a drift row whose request is gone (server restarted, harness
+ *  respawned): the loop that held it died with the process, so there is nothing
+ *  to answer and nothing to re-drive — the row must only stop claiming it still
+ *  waits. */
+async function markDriftPartAnswered(
+  sessionId: string,
+  requestId: string,
+  result: Record<string, unknown>,
+): Promise<boolean> {
+  const detail = await getSessionDetail(sessionId);
+  if (!detail) return false;
+  const part = findOpenDriftPart(detail, requestId);
+  if (!part) return false;
+  await updatePart(sessionId, part.id, {
+    pending: false,
+    result,
+    answerSummary: summarizeQuestionAnswer({
+      ...(part.payload as Record<string, unknown>),
+      result,
+    }),
+  });
+  return true;
+}
+
+/** The drift row the harness is parked on: its warning is written first and
+ *  this hold turns that same row into the card with the two answers on it. */
+function findOpenDriftPart(
+  detail: SessionDetailDto | null,
+  requestId?: string,
+): MessagePartDto | null {
+  if (!detail) return null;
+  for (let mi = detail.messages.length - 1; mi >= 0; mi -= 1) {
+    const msg = detail.messages[mi];
+    if (!msg) continue;
+    for (let pi = msg.parts.length - 1; pi >= 0; pi -= 1) {
+      const part = msg.parts[pi];
+      if (part?.type !== "context_drift") continue;
+      const bound = String(part.payload.requestId ?? "");
+      if (requestId === undefined ? bound.length > 0 : bound !== requestId) continue;
+      return part;
+    }
+  }
+  return null;
 }
 
 /** Payload of the still-unanswered question part `requestId` belongs to. A
@@ -5012,7 +5104,13 @@ function findPendingQuestionPayload(
     if (!msg) continue;
     for (let pi = msg.parts.length - 1; pi >= 0; pi -= 1) {
       const part = msg.parts[pi];
-      if (part?.type !== "question" && part?.type !== "plan") continue;
+      if (
+        part?.type !== "question" &&
+        part?.type !== "plan" &&
+        part?.type !== "context_drift"
+      ) {
+        continue;
+      }
       if (!part.payload.pending) continue;
       if (String(part.payload.requestId ?? "") !== requestId) continue;
       return part.payload as Record<string, unknown>;
@@ -5021,13 +5119,20 @@ function findPendingQuestionPayload(
   return null;
 }
 
-/** True when the chat holds an unanswered question — or a plan waiting for its
- *  approval — which is its durable parked state. */
+/** True when the chat holds an unanswered question, a plan waiting for its
+ *  approval, or a drift row holding the loop — which is its durable parked
+ *  state. */
 function hasPendingQuestion(detail: SessionDetailDto | null): boolean {
   if (!detail) return false;
   for (const message of detail.messages) {
     for (const part of message.parts) {
-      if (part.type !== "question" && part.type !== "plan") continue;
+      if (
+        part.type !== "question" &&
+        part.type !== "plan" &&
+        part.type !== "context_drift"
+      ) {
+        continue;
+      }
       if (part.payload.pending) return true;
     }
   }
@@ -5096,7 +5201,12 @@ export function replayPendingInteractive(sessionId: string) {
         type: "question.request",
         sessionId,
         requestId: reqKey,
-        kind: p.kind === "create_plan" ? "create_plan" : "ask_question",
+        kind:
+          p.kind === "create_plan"
+            ? "create_plan"
+            : p.kind === "context_drift"
+              ? "context_drift"
+              : "ask_question",
         payload,
       });
     }
@@ -5242,8 +5352,25 @@ export async function answerQuestion(
   // still the fixed, answerable state — persist the answer and resume the turn
   // instead of failing the click.
   if (!rt || !pending) {
+    // A drift row is the one parked card that cannot be re-driven: the answer
+    // says whether a request the dead process was about to send goes out, and
+    // that request no longer exists. The row is simply closed.
+    if (await markDriftPartAnswered(sessionId, requestId, result)) return;
     const redriven = await redriveAnsweredQuestion(sessionId, requestId, result);
     if (!redriven) throw new Error("Question request not found");
+    return;
+  }
+
+  // The drift hold answers the harness' own next request: the reply is the
+  // reader's verdict on sending it, nothing is re-driven when the process that
+  // asked is gone (the turn died with it) — the row is only marked answered.
+  if (pending.kind === "context_drift") {
+    const id = pending.rpcId ?? parseRpcId(requestId, sessionId);
+    rt.client?.respond(id, result);
+    pending.resolve(result);
+    rt.pending.delete(requestId);
+    void updateSession(sessionId, { status: "running" });
+    void markQuestionPartAnswered(sessionId, requestId, result);
     return;
   }
 

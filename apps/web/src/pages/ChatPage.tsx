@@ -2087,6 +2087,15 @@ function QuestionBucketView({
  */
 function ContextDriftRow({ part, sessionId }: { part: MessagePartDto; sessionId?: string | null }) {
   const t = useT();
+  const answerQuestionFor = useAppStore((s) => s.answerQuestionFor);
+  const requestId = String(part.payload.requestId ?? "");
+  const pending = part.payload.pending === true && Boolean(requestId);
+  const question = (
+    Array.isArray(part.payload.questions) ? part.payload.questions : []
+  )[0] as
+    | { id?: string; prompt?: string; options?: Array<{ id: string; label: string }> }
+    | undefined;
+  const answer = String(part.payload.answerSummary ?? "").trim();
   const messages = Number(part.payload.messages ?? 0);
   const prevMessages = Number(part.payload.prevMessages ?? 0);
   const prefixSame = Number(part.payload.prefixSame ?? 0);
@@ -2117,6 +2126,43 @@ function ContextDriftRow({ part, sessionId }: { part: MessagePartDto; sessionId?
           <span className={styles.compactionMeta}>{t("chat.contextDriftNoLog")}</span>
         )}
       </div>
+      {/* The loop held its own next request here — this is not the model
+          asking anything, so the decision lives on this row: no question
+          bubble, no preamble the agent never wrote. */}
+      {pending ? (
+        <div className={styles.contextDriftCard}>
+          <div className={styles.contextDriftCardTitle}>{t("chat.contextDriftParked")}</div>
+          {question?.prompt ? (
+            <p className={styles.contextDriftPrompt}>{question.prompt}</p>
+          ) : null}
+          <div className={styles.contextDriftActions}>
+            {(question?.options ?? []).map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                className={styles.contextDriftButton}
+                disabled={!sessionId}
+                onClick={() =>
+                  void answerQuestionFor(sessionId ?? "", requestId, {
+                    outcome: {
+                      answers: [
+                        { questionId: question?.id ?? "drift", selectedOptionIds: [option.id] },
+                      ],
+                    },
+                  })
+                }
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : answer ? (
+        <div className={styles.contextDriftAnswer}>
+          <span className={styles.contextDriftAnswerLabel}>{t("chat.contextDriftYourAnswer")}</span>
+          {answer}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -7942,7 +7988,8 @@ function ChatThread() {
 
       {(pendingPermission ||
         (pendingQuestion &&
-          pendingQuestion.kind !== "ask_question")) &&
+          pendingQuestion.kind !== "ask_question" &&
+          pendingQuestion.kind !== "context_drift")) &&
       (!pendingPermission || pendingPermission.sessionId === activeSession?.id) &&
       (!pendingQuestion || pendingQuestion.sessionId === activeSession?.id) ? (
         <div className={styles.inlinePromptDock}>

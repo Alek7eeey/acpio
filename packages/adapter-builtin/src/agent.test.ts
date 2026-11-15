@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -738,49 +738,49 @@ describe("builtin provider routing", () => {
         "thinking",
       );
 
+      const systemOf = () =>
+        String(
+          (stub.bodies.at(-1)?.messages as Array<Record<string, unknown>> | undefined)?.[0]
+            ?.content ?? "",
+        );
       // Default: a plain request, nothing reasoning-related on the wire.
       await call("session/prompt", { prompt: [{ type: "text", text: "hi" }] });
       expect(stub.bodies.at(-1)?.thinking).toBeUndefined();
+      const plain = systemOf();
+      expect(plain).not.toContain("private reasoning budget is 150 words");
 
-      // Low: the wire stays plain, but the budget rule rides the system prompt.
-      await call("session/set_config_option", { configId: "prompt_style", value: "low" });
-      await call("session/prompt", { prompt: [{ type: "text", text: "hi" }] });
-      const low = stub.bodies.at(-1);
-      expect(low?.thinking).toBeUndefined();
-      expect(String((low?.messages as Array<Record<string, unknown>>)[0]?.content)).toContain(
-        "private reasoning budget is 150 words",
-      );
-
-      // Extra low: the tighter per-step cap rides the same prompt slot.
-      await call("session/set_config_option", { configId: "prompt_style", value: "extra-low" });
-      await call("session/prompt", { prompt: [{ type: "text", text: "hi" }] });
-      const extra = stub.bodies.at(-1);
-      expect(extra?.thinking).toBeUndefined();
-      expect(String((extra?.messages as Array<Record<string, unknown>>)[0]?.content)).toContain(
-        "capped at 3 sentences per step",
-      );
-      expect(String((extra?.messages as Array<Record<string, unknown>>)[0]?.content)).not.toContain(
-        "private reasoning budget is 150 words",
-      );
-      // High: the other direction — the design decision rides the same slot.
-      await call("session/set_config_option", { configId: "prompt_style", value: "high" });
-      await call("session/prompt", { prompt: [{ type: "text", text: "hi" }] });
-      const high = stub.bodies.at(-1);
-      expect(high?.thinking).toBeUndefined();
-      expect(String((high?.messages as Array<Record<string, unknown>>)[0]?.content)).toContain(
-        "the case that will part a working change from a broken one",
-      );
-      expect(String((high?.messages as Array<Record<string, unknown>>)[0]?.content)).not.toContain(
-        "private reasoning budget is 150 words",
-      );
+      // The mode's rider is the last block of the system prompt — last, but still
+      // inside `messages[0]`, so a pick mid-chat may not rewrite it: everything
+      // behind it would be billed again. The pick arrives with the next chat, and
+      // the wire stays plain in this one.
+      const riders: Array<[string, string]> = [
+        ["low", "private reasoning budget is 150 words"],
+        ["extra-low", "capped at 3 sentences per step"],
+        ["high", "the case that will part a working change from a broken one"],
+      ];
+      for (const [value, marker] of riders) {
+        // A chat's first turn is written from the mode the picker shows…
+        await call("session/set_config_option", { configId: "prompt_style", value });
+        await call("session/new", { cwd: "/w" });
+        await call("session/prompt", { prompt: [{ type: "text", text: "hi" }] });
+        expect(stub.bodies.at(-1)?.thinking).toBeUndefined();
+        expect(systemOf()).toContain(marker);
+        for (const [other, otherMarker] of riders) {
+          if (other === value) continue;
+          expect(systemOf()).not.toContain(otherMarker);
+        }
+        // …and a pick after it does not rewrite the head, whatever it names.
+        const frozen = systemOf();
+        await call("session/set_config_option", { configId: "thinking", value: "default" });
+        await call("session/prompt", { prompt: [{ type: "text", text: "hi" }] });
+        expect(systemOf()).toBe(frozen);
+      }
       // Back to default: the prompt is clean of budget rules again.
       // The old id still means the same mode: a client built before the split.
       await call("session/set_config_option", { configId: "thinking", value: "default" });
+      const last = await call<SessionResult>("session/new", { cwd: "/w" });
       await call("session/prompt", { prompt: [{ type: "text", text: "hi" }] });
-      const back = stub.bodies.at(-1);
-      expect(String((back?.messages as Array<Record<string, unknown>>)[0]?.content)).not.toContain(
-        "capped at 3 sentences per step",
-      );
+      expect(systemOf()).not.toContain("capped at 3 sentences per step");
 
       // /thinking off flips the wire switch without calling the model.
       const before = stub.bodies.length;
@@ -794,7 +794,7 @@ describe("builtin provider routing", () => {
       // A command is not a turn: it never enters the history the model reads.
       expect(JSON.stringify(stub.bodies.at(-1)?.messages)).not.toContain("/thinking");
       // And it outlives the process.
-      expect(loadBuiltinSession(dir, session.sessionId)?.thinkingOff).toBe(true);
+      expect(loadBuiltinSession(dir, last.sessionId)?.thinkingOff).toBe(true);
 
       // Bare /thinking toggles it back on.
       await call("session/prompt", { prompt: [{ type: "text", text: "/thinking" }] });
@@ -916,7 +916,11 @@ describe("builtin provider routing", () => {
       ];
 
       for (const [style, marker] of styles) {
+        // The mode is frozen with a chat's first turn (its rider sits inside
+        // `messages[0]`), so each style gets its own chat while the wire level is
+        // flipped inside it — the two knobs stay independent either way.
         await call("session/set_config_option", { configId: "prompt_style", value: style });
+        await call("session/new", { cwd: "/w" });
         for (const [level, wire] of levels) {
           await call("session/set_config_option", { configId: "effort", value: level });
           await call("session/prompt", { prompt: [{ type: "text", text: "hi" }] });
@@ -1841,16 +1845,17 @@ describe("builtin provider routing", () => {
     }
   });
 
-  it("never rewrites a tool step that already crossed the wire, and echoes it next turn", async () => {
-    // Two rules meet here. A relay in thinking mode refuses the history it
-    // produced when a step comes back without the field, so the echo has to
-    // reach it. But a message that has already gone out *keeps its bytes*: the
-    // provider matches the cache from the first message, so a field added behind
-    // the reader's back ends the cached prefix there and the whole tail is
-    // billed again (chat 7a6c147b, cached 9 600 of 11 430). The decision is
-    // therefore the turn's — taken from the stored transcript — and the step
-    // that went out bare stays bare for this turn; the next one owes the echo
-    // and says so from its first request.
+  it("never rewrites a tool step that already crossed the wire, not even next turn", async () => {
+    // Two rules meet here. A relay in thinking mode wants the field on every
+    // assistant message it produced, so the echo has to reach it once the chat
+    // is a thinking one. But a message that has already gone out *keeps its
+    // bytes*: the provider matches the cache from the first message, so a field
+    // added behind the reader's back ends the cached prefix there and the whole
+    // tail is billed again (chat 7a6c147b, cached 9 600 of 11 430). The decision
+    // is therefore the session's — taken at its first request and stored with
+    // it — so a step that went out bare stays bare next turn and after a
+    // restart; only a refused attempt (a 400, which cached nothing) may decide
+    // again.
     const bodies: Array<{ messages?: Array<Record<string, unknown>> }> = [];
     let requests = 0;
     const server = createServer((req, res) => {
@@ -2001,8 +2006,10 @@ describe("builtin provider routing", () => {
       // What the endpoint thought travels back verbatim.
       expect(acting[1]?.reasoning_content).toBe("думаю");
 
-      // The next turn knows the chat thinks: the field is owed from the first
-      // request it sends, so every acting step carries it — the bare one too.
+      // A new turn does not take the decision again: a steer ends one turn and
+      // starts another, and that is exactly how the bill landed (chat b5852ea0
+      // was answered from cache for 2 of its 67 messages). The bare step keeps
+      // the bytes it went out with, so the cached prefix still answers.
       const second = await call<{ stopReason: string }>("session/prompt", {
         prompt: [{ type: "text", text: "ещё" }],
       });
@@ -2011,11 +2018,14 @@ describe("builtin provider routing", () => {
         (message) => message.role === "assistant" && Array.isArray(message.tool_calls),
       );
       expect(later).toHaveLength(2);
-      for (const step of later) expect(typeof step.reasoning_content).toBe("string");
-      // The step that went out bare owes the field now, and pays for it in the
-      // one request where a new turn was starting anyway.
-      expect(later[0]?.reasoning_content).toBe("");
+      expect(later[0]).not.toHaveProperty("reasoning_content");
+      expect(JSON.stringify(later[0])).toBe(JSON.stringify(acting[0]));
       expect(later[1]?.reasoning_content).toBe("думаю");
+
+      // …and the decision rides with the stored history, so a transport built
+      // again mid-chat resumes on the same bytes instead of rewriting them.
+      const [stateFile] = readdirSync(dir).filter((name) => name.endsWith(".json"));
+      expect(loadBuiltinSession(dir, String(stateFile).slice(0, -5))?.echoReasoning).toBe(false);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
@@ -3010,6 +3020,41 @@ describe("compaction reporting", () => {
     }
   });
 
+  it("rides a /compact on the head even when no turn ran since the restart", async () => {
+    const stub = await startStub();
+    const dir = tempDir();
+    saveBuiltinSession(dir, "warm-3", {
+      version: 1,
+      cwd: dir,
+      modelId: "p1::m1",
+      messages: bulky(),
+    });
+    try {
+      const { call } = boot(
+        { builtinProviders: [provider(stub.url, 20_000)], locale: "ru" },
+        dir,
+      );
+      await call("session/load", { sessionId: "warm-3", cwd: dir });
+      // No turn has run in this process, so there is nothing to remember the head
+      // from: the pass rebuilds it from what the session froze. A pass sent
+      // without it shares no prefix with the turn that follows — full price on
+      // the one request the pass exists to make cheap.
+      await call("session/prompt", { prompt: [{ type: "text", text: "/compact" }] });
+      const summary = stub.bodies.at(-1)!;
+      expect(summary.stream).not.toBe(true);
+      expect(summary.tools).toBeTruthy();
+      expect(String(sentMessages(summary)[0]?.content)).toContain("Acpio");
+
+      await call("session/prompt", { prompt: [{ type: "text", text: "привет" }] });
+      const turn = stub.bodies.at(-1)!;
+      expect(turn.stream).toBe(true);
+      expect(summary.tools).toEqual(turn.tools);
+      expect(sentMessages(summary)[0]).toEqual(sentMessages(turn)[0]);
+    } finally {
+      await stub.close();
+    }
+  });
+
   it("keeps the carried digest as the head of the pass's own request", async () => {
     const stub = await startStub();
     const dir = tempDir();
@@ -3385,11 +3430,16 @@ describe("builtin session store", () => {
     const frozen = {
       locale: "ru",
       replyLanguage: "en" as const,
+      thinking: "low" as const,
       planTool: false,
       outsideCwd: true,
       markdownImages: false,
       extraInstructions: "Think briefly.",
       servers: ["fs", "git"],
+      contextMode: "prune" as const,
+      pruneReasoning: "drop" as const,
+      respectReasoningHistory: false,
+      subagents: { enabled: true, allowAdhoc: false, agents: [] },
     };
     saveBuiltinSession(dir, "s-head", { ...sample, promptHead: frozen });
     expect(loadBuiltinSession(dir, "s-head")?.promptHead).toEqual(frozen);
@@ -3401,6 +3451,18 @@ describe("builtin session store", () => {
       promptHead: { ...frozen, servers: "fs" } as never,
     });
     expect(loadBuiltinSession(dir, "s-head-broken")?.promptHead).toBeUndefined();
+  });
+
+  it("keeps the echo decision the history was sent with, and drops a broken one", () => {
+    const dir = tempDir();
+    saveBuiltinSession(dir, "s-echo", { ...sample, echoReasoning: false });
+    expect(loadBuiltinSession(dir, "s-echo")?.echoReasoning).toBe(false);
+    saveBuiltinSession(dir, "s-echo-on", { ...sample, echoReasoning: true });
+    expect(loadBuiltinSession(dir, "s-echo-on")?.echoReasoning).toBe(true);
+    // Anything but a boolean reads as "not decided": the next request asks the
+    // transcript instead of trusting a hand-edited file.
+    saveBuiltinSession(dir, "s-echo-broken", { ...sample, echoReasoning: "yes" as never });
+    expect(loadBuiltinSession(dir, "s-echo-broken")?.echoReasoning).toBeUndefined();
   });
 
   it("starts fresh on a corrupt file instead of throwing", () => {
@@ -3467,11 +3529,23 @@ describe("builtin subagents wiring", () => {
     script: StubReply[] = [],
   ): Promise<{
     url: string;
-    hits: Array<{ system: string; toolNames: string[]; model: string; messages: number }>;
+    hits: Array<{
+      system: string;
+      /** The declarations exactly as the wire carried them — the other half of the head. */
+      tools: string;
+      toolNames: string[];
+      model: string;
+      messages: number;
+    }>;
     close(): Promise<void>;
   }> {
-    const hits: Array<{ system: string; toolNames: string[]; model: string; messages: number }> =
-      [];
+    const hits: Array<{
+      system: string;
+      tools: string;
+      toolNames: string[];
+      model: string;
+      messages: number;
+    }> = [];
     const server = createServer((req, res) => {
       let body = "";
       req.on("data", (chunk) => {
@@ -3496,6 +3570,7 @@ describe("builtin subagents wiring", () => {
                 )
               : "",
           ),
+          tools: JSON.stringify(rawTools ?? null),
           // OpenAI wire format: [{ type: "function", function: { name } }].
           toolNames: Array.isArray(rawTools)
             ? rawTools.map((t) =>
@@ -3625,19 +3700,29 @@ describe("builtin subagents wiring", () => {
       const head = stub.hits[0]!.system;
       expect(head).toContain("![shot](shot.png)");
       expect(stub.hits[0]!.toolNames).toContain("plan");
-      // Four head-side switches flipped while the chat is open.
+      // Every head-side switch flipped while the chat is open — including the
+      // prompt mode (its rider is the system prompt's last block, still inside
+      // `messages[0]`), the bash limit (its number rides the `bash` schema) and the
+      // subagents switch (the `task` declaration names the roster).
       current = {
         ...current,
         builtinMarkdownImages: false,
         builtinPlanTool: false,
         builtinReplyLanguage: "en",
         builtinExtraInstructions: "Think briefly.",
+        builtinBashTimeoutSec: 120,
+        builtinSubagents: { enabled: true, allowAdhoc: true, agents: [] },
+        builtinContextMode: "off",
       };
+      await call("session/set_config_option", { configId: "prompt_style", value: "extra-low" });
       await call("session/prompt", { prompt: [{ type: "text", text: "again" }] });
       expect(stub.hits[1]!.system).toBe(head);
       // The declarations follow the same head, or the model is told about a
       // tool it no longer has.
       expect(stub.hits[1]!.toolNames).toEqual(stub.hits[0]!.toolNames);
+      // Byte for byte: a schema that gained a number or lost a tool is the same
+      // cache miss as a rewritten system prompt.
+      expect(stub.hits[1]!.tools).toBe(stub.hits[0]!.tools);
     } finally {
       await stub.close();
     }

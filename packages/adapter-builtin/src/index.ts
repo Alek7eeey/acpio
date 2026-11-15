@@ -151,8 +151,10 @@ export const builtinAdapter: HarnessAdapter = {
     // the reader is being asked about (see `PlanBridge`).
     "builtin/plan_approval": "create_plan",
     // The drift card (Settings → Diagnostics → context drift): the reader says
-    // whether a request whose head moved is sent at all.
-    "builtin/context_drift": "ask_question",
+    // whether a request whose head moved is sent at all. Its own kind, because
+    // the question is the harness's hold, not something the model asked — the
+    // card is the drift row with the two answers on it.
+    "builtin/context_drift": "context_drift",
   },
 };
 

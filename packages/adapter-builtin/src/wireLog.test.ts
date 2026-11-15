@@ -117,6 +117,36 @@ describe("wire log", () => {
     expect(requests[2].systemChanged).toBe(false);
   });
 
+  it("names a changed system prompt that rides messages[0]", async () => {
+    // The built-in agent's endpoint has no `system` field: the whole prompt
+    // head — reply language, plan tool, the project-rules block, the MCP
+    // servers — is the first message. Hashing only `body.system` left that
+    // request reading "0 of 279" with `systemChanged: false`, so a chat whose
+    // rules block grew could never say which head had moved (a26a4eca).
+    const base = (async () => jsonResponse({})) as typeof globalThis.fetch;
+    const fetch = withWireLog({ sessionId: "sess-1", providerId: "builtin" }, base);
+    const send = (rules: string) =>
+      fetch("https://relay.test/v1/chat/completions", {
+        method: "POST",
+        body: JSON.stringify({
+          model: "m",
+          messages: [
+            { role: "system", content: rules },
+            { role: "user", content: "x" },
+          ],
+        }),
+      });
+    await send("rules");
+    await send("rules");
+    await send("rules\n--- .cursor/rules/browser-automation.mdc ---\nbody");
+    const requests = lines().filter((line) => line.kind === "request");
+    expect(requests[1].systemChanged).toBe(false);
+    expect(requests[1].prefixSame).toBe(2);
+    expect(requests[2].systemChanged).toBe(true);
+    expect(requests[2].prefixSame).toBe(0);
+    expect(requests[2].toolsChanged).toBe(false);
+  });
+
   it("records the key the pool put on the request, and names the swap when it moves", async () => {
     // The log must sit under `providerFetch`, not above it: the pool is what
     // writes the authorization header, so a wrapper outside it would fingerprint
@@ -347,6 +377,62 @@ describe("wire log", () => {
     // The counter carries on across the restart, so both runs stay apart in the
     // log as well.
     expect(lines().filter((line) => line.kind === "request").map((line) => line.seq)).toEqual([1, 2]);
+  });
+
+  it("ignores a head another fingerprint scheme wrote instead of calling it a break", async () => {
+    process.env.ACPIO_WIRE_LOG = "1";
+    resetWireLogState();
+    const drifts: ContextDrift[] = [];
+    // The system prompt rides `messages[0]` here, the way an OpenAI-compatible
+    // body carries it: that is the hash the scheme changed.
+    const messages = [
+      { role: "system", content: "rules" },
+      { role: "user", content: "one" },
+      { role: "assistant", content: "two" },
+    ];
+    const send = async () => {
+      // Each call is a fresh process: the map is gone, the head file is not.
+      resetWireLogState();
+      const call = withWireLog(
+        { sessionId: "sess-1", providerId: "legacy" },
+        (async () => jsonResponse({})) as typeof globalThis.fetch,
+        { onDrift: (drift) => drifts.push(drift) },
+      );
+      await call("https://relay.test/v1/chat/completions", {
+        method: "POST",
+        body: JSON.stringify({ model: "m", messages }),
+      });
+    };
+    const headFile = path.join(dir, "sess-1.head.json");
+    const rewrite = (change: (head: Record<string, unknown>) => void) => {
+      const all = JSON.parse(fs.readFileSync(headFile, "utf8"));
+      change(all[Object.keys(all)[0]!]);
+      fs.writeFileSync(headFile, JSON.stringify(all), "utf8");
+      drifts.length = 0;
+    };
+
+    await send();
+
+    // A head from before the `system` hash moved off `body.system`, into
+    // `messages[0]` (chat 70eb2dfe: byte-identical prompt, a card saying it
+    // changed entirely). Its hashes cannot be compared by this code at all.
+    rewrite((head) => {
+      head.scheme = 1;
+      head.system = "dd29ecf524";
+    });
+    await send();
+    expect(drifts).toEqual([]);
+
+    // The same head under the current scheme is a comparison — the card here is
+    // what proves the silence above came from the scheme, not from a head that
+    // was never read at all.
+    rewrite((head) => {
+      head.scheme = 2;
+      head.system = "dd29ecf524";
+    });
+    await send();
+    expect(drifts).toHaveLength(1);
+    expect(drifts[0]?.systemChanged).toBe(true);
   });
 
   it("keeps the body an earlier run recorded when the counter starts over", async () => {

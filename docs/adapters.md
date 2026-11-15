@@ -86,7 +86,12 @@ interface HarnessAdapter {
   subagentToolKinds: readonly string[]; // ACP tool kinds denoting a subagent
 
   // Extensions
-  requestKinds: Record<string, "permission" | "ask_question" | "create_plan">;
+  // `context_drift` = the harness holding its own next request: the card is
+  // the drift row, never a question bubble.
+  requestKinds: Record<
+    string,
+    "permission" | "ask_question" | "create_plan" | "context_drift"
+  >;
   extensionKinds: Record<string, AdapterExtensionKind>;
   extensionReply?: (method, params) => unknown;       // reply envelope
   subagentTaskCard?: (params) => { toolCallId?; card } | null;

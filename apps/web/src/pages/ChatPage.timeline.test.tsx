@@ -678,6 +678,35 @@ describe("context drift row", () => {
     expect(link?.getAttribute("href")).toBe("/api/wire-log/archive?session=s1");
   });
 
+  it("holds the turn on its own row instead of asking as the agent", async () => {
+    const parked = drifted("off");
+    const driftPart = parked.messages[1]!.parts[1]!;
+    driftPart.payload = {
+      ...driftPart.payload,
+      requestId: "r1",
+      pending: true,
+      title: "Контекст изменился в середине хода",
+      questions: [
+        {
+          id: "drift",
+          prompt: "Запрос ещё не отправлен. Кэш провайдера отвечает только на неизменное начало.",
+          options: [
+            { id: "continue", label: "Продолжить" },
+            { id: "stop", label: "Остановить ход" },
+          ],
+        },
+      ],
+    };
+    const { container } = mount(parked);
+    await expandSteps(container);
+    await screen.findByText("Ход приостановлен");
+
+    // The loop held its own next request: nothing here may read as the model
+    // asking the reader a question.
+    expect(container.textContent).not.toContain("Вопрос агента");
+    expect(screen.getByRole("button", { name: "Остановить ход" })).toBeTruthy();
+  });
+
   it("asks for logging instead of offering a download that would be empty", async () => {
     const { container } = mount(drifted("off"));
     await expandSteps(container);

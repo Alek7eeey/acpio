@@ -126,6 +126,7 @@ export type AcpRequest =
   | { kind: "permission"; id: JsonRpcId; params: Record<string, unknown> }
   | { kind: "ask_question"; id: JsonRpcId; params: Record<string, unknown> }
   | { kind: "create_plan"; id: JsonRpcId; params: Record<string, unknown> }
+  | { kind: "context_drift"; id: JsonRpcId; params: Record<string, unknown> }
   | { kind: "elicitation"; id: JsonRpcId; params: Record<string, unknown> };
 
 /**

@@ -497,6 +497,8 @@
     "contextDriftTools": "изменён набор инструментов",
     "contextDriftDownload": "скачать логи чата (zip)",
     "contextDriftNoLog": "включи полное логирование, чтобы скачать тела запросов",
+    "contextDriftParked": "Ход приостановлен",
+    "contextDriftYourAnswer": "Ваш ответ:",
     "modelNoticeModel": "Модель",
     "exportChat": "Экспорт чата",
     "exportDescription": "Выгрузка разговора файлом или сохранение на сервере — удобно переслать работу заказчику.",

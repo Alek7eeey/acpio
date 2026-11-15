@@ -310,7 +310,7 @@ describe("makeTaskTool", () => {
         ],
       },
     });
-    const task = makeTaskTool(bridge);
+    const task = makeTaskTool({ settings: bridge.settings, bridge: () => bridge });
     expect(task.description).toContain("explore —");
     expect(task.description).toContain("tester — Runs the tests.");
     expect(task.description).toContain("ad-hoc");

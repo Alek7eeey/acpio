@@ -14,7 +14,7 @@ import {
   type PlanStage,
   type PlanState,
 } from "./planFile.js";
-import { makeTaskTool, type SubagentsBridge } from "./subagents.js";
+import { makeTaskTool, type TaskToolHost } from "./subagents.js";
 
 /** Ask the harness permission dialog; throws when the user declines. */
 export type AskPermission = (toolCall: {
@@ -55,9 +55,11 @@ export interface BuiltinToolOptions {
   ask: AskPermission;
   /**
    * Present only when the subagents feature is on: adds the `task` tool. The
-   * child toolset is built without it, so subagents cannot nest.
+   * child toolset is built without it, so subagents cannot nest. The roster comes
+   * from the frozen setting, the runs go through the turn's bridge — a pass with
+   * no turn behind it still declares the same tool.
    */
-  subagents?: SubagentsBridge;
+  subagents?: TaskToolHost;
   /**
    * Session these calls belong to. The question card is an ACP
    * `elicitation/create`, and the harness binds that request to the session
@@ -1020,8 +1022,12 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
         .max(MAX_BASH_TIMEOUT_MS)
         .optional()
         .describe(
-          `Kill after this long (default ${Math.round(bashTimeoutMs / 1000)}s, ` +
-            `max ${Math.round(MAX_BASH_TIMEOUT_MS / 1000)}s — longer work runs in the background).`,
+          // No interval here: this text rides every request, and a number the
+          // reader can change in Settings would rewrite the declarations in the
+          // middle of a chat — the prefix the provider has cached. The chat's own
+          // limit still applies when the call names none.
+          "Kill after this long; the chat's own limit applies when it is omitted " +
+            `(max ${Math.round(MAX_BASH_TIMEOUT_MS / 1000)}s — longer work runs in the background).`,
         ),
     }),
     execute: async ({ command, timeout_ms }, ctx) => {

@@ -589,6 +589,25 @@ function decodeHeaderFileName(value: string | string[] | undefined): string {
   }
 }
 
+/**
+ * The id the wire log files a chat under.
+ *
+ * A chat has two ids — the one this app made (`sessions.id`) and the one its
+ * agent runs under (`sessions.acp_session_id`) — and only the second names the
+ * log file. The drift card in the transcript links with the chat's own id, so
+ * the archive came back as 290 bytes of `meta.json` and nothing else while the
+ * real file sat beside it under the other id (chat 5be3beb4 was filed as
+ * `70eb2dfe.jsonl`).
+ */
+async function wireLogChatId(sessionId: string): Promise<string | null> {
+  const rows = await db
+    .select({ acpSessionId: sessions.acpSessionId })
+    .from(sessions)
+    .where(eq(sessions.id, sessionId))
+    .limit(1);
+  return rows[0]?.acpSessionId ?? null;
+}
+
 export async function registerRoutes(app: FastifyInstance) {
   // Attachment uploads post raw bytes (see /attachments/upload), so the body
   // arrives as a Buffer rather than JSON; the limit matches the service's cap.
@@ -2616,7 +2635,11 @@ export async function registerRoutes(app: FastifyInstance) {
   app.get("/api/wire-log/archive", async (req, reply) => {
     try {
       const query = z.object({ session: z.string().trim().max(64).optional() }).parse(req.query ?? {});
-      const archive = buildWireLogArchive(query.session);
+      // `?session=` is a chat as the app knows it; the log knows it by the id its
+      // agent ran under. A chat that never started one (a harness logging its own
+      // way) falls back to the query as given.
+      const logId = query.session ? await wireLogChatId(query.session) : null;
+      const archive = buildWireLogArchive(logId ?? query.session);
       reply.header(
         "Content-Disposition",
         `attachment; filename*=UTF-8''${encodeURIComponent(archive.fileName)}`,

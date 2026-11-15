@@ -83,7 +83,12 @@ interface HarnessAdapter {
   subagentToolKinds: readonly string[]; // ACP tool kinds, означающие субагента
 
   // Расширения
-  requestKinds: Record<string, "permission" | "ask_question" | "create_plan">;
+  // `context_drift` — харнесс придержал свой же следующий запрос: карточка
+  // рисуется на строке дрифта, а не пузырём вопроса.
+  requestKinds: Record<
+    string,
+    "permission" | "ask_question" | "create_plan" | "context_drift"
+  >;
   extensionKinds: Record<string, AdapterExtensionKind>;
   extensionReply?: (method, params) => unknown;       // ответный конверт
   subagentTaskCard?: (params) => { toolCallId?; card } | null;

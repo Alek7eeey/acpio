@@ -3604,7 +3604,7 @@ export type WsServerEvent =
       type: "question.request";
       sessionId: string;
       requestId: string;
-      kind: "ask_question" | "create_plan" | "switch_mode";
+      kind: "ask_question" | "create_plan" | "switch_mode" | "context_drift";
       payload: Record<string, unknown>;
     }
   | {
