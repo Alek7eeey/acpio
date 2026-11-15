@@ -458,6 +458,25 @@ describe("attached image in a landed user message", () => {
     expect(document.body.querySelector<HTMLImageElement>(`img[src*="/attachments/shot.png"]`)).toBeTruthy();
   });
 
+  // Editing a message rewrites its words, not its files: what the message
+  // carries shows up in the composer as chips, next to the text it also carries.
+  it("brings the message's own files back into the composer for an edit", async () => {
+    const detail = landedImageSession();
+    useAppStore.setState({ sessions: [detail], activeSession: detail, sessionDetails: { s1: detail } });
+
+    const { container } = renderComposer();
+    fireEvent.click(await screen.findByLabelText("Редактировать"));
+
+    const chip = await waitFor(() => {
+      const found = container.querySelector(`.${styles.pendingFiles} .${styles.pendingFileChip}`);
+      expect(found).toBeTruthy();
+      return found!;
+    });
+    expect(chip.textContent).toContain("shot.png");
+    // The text of the message came back with them.
+    expect(container.querySelector<HTMLTextAreaElement>("textarea")?.value).toBe("что тут");
+  });
+
   it("opens the picture under the viewer from its preview", async () => {
     const detail = landedImageSession();
     useAppStore.setState({ sessions: [detail], activeSession: detail, sessionDetails: { s1: detail } });

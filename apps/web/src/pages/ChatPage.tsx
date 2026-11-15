@@ -6277,7 +6277,10 @@ function ChatThread() {
     }
     userJustSentRef.current = true;
     const editId = editingMessageId;
-    const attach = editId ? undefined : readyAttachments(pendingFiles);
+    // An edit sends no files: the chips it shows are the message's own and stay
+    // on it (see `replaceUserMessageText`), and a file staged here cannot reach
+    // an edit at all — `rewriting` keeps the paperclip shut.
+    const attach = editId ? [] : readyAttachments(pendingFiles);
     for (const url of previewUrlsRef.current.values()) URL.revokeObjectURL(url);
     previewUrlsRef.current.clear();
     resetComposerHistory();
@@ -6297,7 +6300,7 @@ function ChatThread() {
     }
     const sendOpts = editId
       ? { editMessageId: editId }
-      : attach && attach.length > 0
+      : attach.length > 0
         ? { attachments: attach }
         : undefined;
     if (shouldAutoFocusComposer()) {
@@ -7171,6 +7174,35 @@ function ChatThread() {
         onEditUser={(messageId, value) => {
           setEditingMessageId(messageId);
           setText(value);
+          // The message's own files come back with its text, shown so the
+          // reader sees what the bubble carries while rewriting it. They are
+          // this message's, not a draft's: nothing is staged, nothing is sent
+          // (see `sendPrompt` below) and nothing can be dropped here — the edit
+          // rewrites words, and the files stay on the message.
+          setPendingFiles(
+            msg.parts.flatMap((part) => {
+              if (part.type !== "file") return [];
+              const name = String(part.payload.name ?? "").trim();
+              const fileId = String(part.payload.fileId ?? "").trim();
+              if (!name) return [];
+              return [
+                {
+                  id: nextComposerAttachmentId(),
+                  name,
+                  path: null,
+                  link: composerAttachmentText(name),
+                  size: Number(part.payload.size ?? 0),
+                  status: "ready" as const,
+                  // A picture already on the server needs no object URL: the
+                  // session's own route is what the message's preview reads.
+                  previewUrl:
+                    fileId && isImageFile(name)
+                      ? `/api/sessions/${encodeURIComponent(msg.sessionId)}/attachments/${encodeURIComponent(fileId)}?inline=1`
+                      : undefined,
+                },
+              ];
+            }),
+          );
           window.requestAnimationFrame(() => {
             const el = textareaRef.current;
             if (!el) return;
@@ -8076,6 +8108,8 @@ function ChatThread() {
                     setEditingMessageId(null);
                     resetComposerHistory();
                     setText("");
+                    // The chips belonged to the message, not to the draft.
+                    setPendingFiles([]);
                     setComposerMultilineIfNeeded(false);
                   }}
                 >
@@ -8197,15 +8231,20 @@ function ChatThread() {
                         <span className={styles.pendingFileSize}>{status}</span>
                       ) : null}
                     </span>
-                    <button
-                      type="button"
-                      className={styles.pendingFileRemove}
-                      aria-label={t("chat.removeFile")}
-                      title={t("chat.removeFile")}
-                      onClick={() => removePendingFile(f)}
-                    >
-                      ×
-                    </button>
+                    {/* A chip an edit shows is the message's own file: it is
+                        there to be seen, not to be taken away — an edit
+                        rewrites words, and the files stay. */}
+                    {rewriting ? null : (
+                      <button
+                        type="button"
+                        className={styles.pendingFileRemove}
+                        aria-label={t("chat.removeFile")}
+                        title={t("chat.removeFile")}
+                        onClick={() => removePendingFile(f)}
+                      >
+                        ×
+                      </button>
+                    )}
                   </span>
                 );
               })}

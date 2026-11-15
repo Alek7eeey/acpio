@@ -4046,6 +4046,50 @@ describe("prompt delivery while the agent is busy", () => {
     expect(detail.messages.find((m) => m.role === "user")?.editedAt).toBeTruthy();
   });
 
+  // An edit rewrites the words of a message, and the files it carries are the
+  // message's own: the composer shows them beside the text while the reader
+  // types, so a rewrite that dropped them would take the bubble's attachments
+  // away behind its back.
+  it("keeps the files of the message it rewrites", async () => {
+    await connectAgent();
+    const created = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    expect(created.statusCode).toBe(200);
+    const session = created.json();
+    runtimeSessionIds.push(session.id);
+    await waitForAcpSessionId(session.id);
+    const dir = await newTempDir("acpio-edit-files-");
+    const file = path.join(dir, "план.txt");
+    await fsp.writeFile(file, "план");
+
+    await app.inject({
+      method: "POST",
+      url: `/api/sessions/${session.id}/prompt`,
+      payload: { text: "вопрос с файлом", attachments: [{ name: "план.txt", path: file }] },
+    });
+    const first = await waitForDetail(
+      session.id,
+      (d) => d.status === "idle" && textParts(d).some((t) => t.includes("echo: вопрос")),
+    );
+    const user = first.messages.find((m) => m.role === "user")!;
+    expect(user.parts.filter((p) => p.type === "file")).toHaveLength(1);
+
+    await app.inject({
+      method: "POST",
+      url: `/api/sessions/${session.id}/prompt`,
+      payload: { text: "переписанный вопрос", editMessageId: user.id },
+    });
+    const kept = await waitForDetail(
+      session.id,
+      (d) => d.status === "idle" && textParts(d).some((t) => t.includes("echo: переписанный")),
+    );
+    const keptMessage = kept.messages.find((m) => m.id === user.id)!;
+    // The words changed, the file did not.
+    expect(textParts(kept).some((t) => t.includes("echo: переписанный вопрос"))).toBe(true);
+    const files = keptMessage.parts.filter((p) => p.type === "file");
+    expect(files).toHaveLength(1);
+    expect(String(files[0]!.payload.name)).toBe("план.txt");
+  });
+
   it("queues an afterStep message for a harness that cannot fold it", async () => {
     await connectAgent();
     const created = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });

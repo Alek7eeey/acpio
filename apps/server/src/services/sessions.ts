@@ -1,6 +1,20 @@
 import path from "node:path";
 import { existsSync } from "node:fs";
-import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lte, max, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNotNull,
+  isNull,
+  lte,
+  max,
+  ne,
+  or,
+  sql,
+} from "drizzle-orm";
 import type {
   MessageDto,
   MessagePartDto,
@@ -757,6 +771,12 @@ export async function truncateMessagesAfter(
   return next;
 }
 
+/**
+ * Rewrite what a message says. Its `file` parts are not words: an edit changes
+ * the text and leaves the files exactly as they were — the composer shows them
+ * beside the text (see `UserMessage` in the chat page), so a rewrite that
+ * silently took them away would be the bubble losing its own attachments.
+ */
 export async function replaceUserMessageText(
   sessionId: string,
   messageId: string,
@@ -769,13 +789,16 @@ export async function replaceUserMessageText(
   // The stamp says what the bubble is: the text the reader sees now was written
   // over the one they sent, and the reply under it answers the rewrite.
   await db.update(messages).set({ editedAt: new Date() }).where(eq(messages.id, messageId));
-  await db.delete(messageParts).where(eq(messageParts.messageId, messageId));
+  await db
+    .delete(messageParts)
+    .where(and(eq(messageParts.messageId, messageId), ne(messageParts.type, "file")));
   const trimmed = text.trim();
   const slashMatch = trimmed.match(/^\/([a-z][\w-]*(?::[a-z][\w-]*)?)/i);
   await appendPart(sessionId, messageId, "text", {
     text,
     ...(slashMatch ? { isSlashCommand: true, commandName: slashMatch[1] } : {}),
   });
+
   const detail = await getSessionDetail(sessionId);
   const updated = detail?.messages.find((m) => m.id === messageId);
   if (!updated) throw Object.assign(new Error("User message not found"), { statusCode: 404 });
