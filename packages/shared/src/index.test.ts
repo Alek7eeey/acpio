@@ -539,6 +539,7 @@ describe("DEFAULT_SETTINGS", () => {
     chatHeaderHeight: 52,
     chatHeaderIcons: ["lang", "install", "theme"],
     chatEnterToSend: true,
+    chatArrowHistory: true,
     chatShowMessageTime: false,
     chatSplit: true,
     chatAutoTitle: true,

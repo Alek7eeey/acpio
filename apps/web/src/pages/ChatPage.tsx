@@ -4921,6 +4921,9 @@ function ChatThread() {
   const composerHistoryIndexRef = useRef(-1);
   const composerHistoryDraftRef = useRef("");
   const composerHistoryApplyingRef = useRef(false);
+  /** ↑ on the first line armed the recall: the next ↑ (no other key between)
+   *  is the one that puts the previous prompt in the field. */
+  const composerHistoryArmedRef = useRef(false);
   /** Composer states a history recall replaced, newest last — Ctrl+Z's stack. */
   const composerUndoRef = useRef<ComposerSnapshot[]>([]);
   const composerRedoRef = useRef<ComposerSnapshot[]>([]);
@@ -5390,6 +5393,7 @@ function ChatThread() {
   const resetComposerHistory = () => {
     composerHistoryIndexRef.current = -1;
     composerHistoryDraftRef.current = "";
+    composerHistoryArmedRef.current = false;
   };
 
   const clearComposerUndo = () => {
@@ -8435,6 +8439,9 @@ function ChatThread() {
                   e.preventDefault();
                   return;
                 }
+                // Recalling history takes two ↑ presses in a row: any other key
+                // between them means the reader was doing something else.
+                if (e.key !== "ArrowUp") composerHistoryArmedRef.current = false;
                 // Undo/redo over a recalled prompt. The browser's own undo is
                 // gone by then — React wrote the textarea's value — so Ctrl+Z
                 // on a fresh draft is left to it, and only a replaced composer
@@ -8490,16 +8497,29 @@ function ChatThread() {
                   (!slashMenuOpen || filteredSlashCommands.length <= 1)
                 ) {
                   const el = e.currentTarget;
-                  const onFirst = e.key === "ArrowUp" && composerCaretOnFirstLine(el);
-                  const onLast = e.key === "ArrowDown" && composerCaretOnLastLine(el);
-                  if (onFirst || onLast) {
-                    const moved = navigateComposerHistory(
-                      e.key === "ArrowUp" ? "prev" : "next",
-                    );
-                    if (moved) {
+                  const up = e.key === "ArrowUp";
+                  const onFirst = up && composerCaretOnFirstLine(el);
+                  const onLast = !up && composerCaretOnLastLine(el);
+                  // Off in Settings → Interface → Chat: the arrows are the
+                  // caret's alone, and nothing is ever recalled.
+                  const recalls = settings.chatArrowHistory !== false;
+                  if (onFirst) {
+                    // The first ↑ on the top row only arms the recall — the
+                    // caret reaches there while the reader walks up a draft,
+                    // and swapping that draft for an old prompt on one stray
+                    // press is what this guards. The second ↑ does it, and a
+                    // third goes further back as before.
+                    const armed = composerHistoryArmedRef.current;
+                    composerHistoryArmedRef.current = recalls;
+                    if (recalls && armed && navigateComposerHistory("prev")) {
                       e.preventDefault();
                       return;
                     }
+                  } else if (onLast && recalls && navigateComposerHistory("next")) {
+                    // ↓ only walks back to the draft a recall replaced, so one
+                    // press is enough.
+                    e.preventDefault();
+                    return;
                   }
                 }
                 if (slashMenuOpen && filteredSlashCommands.length === 1) {

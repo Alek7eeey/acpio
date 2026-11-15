@@ -731,6 +731,13 @@ function ChatBehaviorConfigRows({
           label={t("settings.chatEnterToSend")}
         />
       </SettingRow>
+      <SettingRow label={t("settings.chatArrowHistory")} hint={t("settings.chatArrowHistoryHint")}>
+        <Toggle
+          checked={form.chatArrowHistory !== false}
+          onChange={(v) => patch("chatArrowHistory", v)}
+          label={t("settings.chatArrowHistory")}
+        />
+      </SettingRow>
     </SettingTable>
   );
 }

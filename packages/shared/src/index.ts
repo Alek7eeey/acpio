@@ -2493,6 +2493,12 @@ export interface AppSettings {
   chatHeaderIcons: ChatHeaderIconId[];
   /** Enter sends the message; off → Enter inserts a newline, Ctrl+Enter sends. */
   chatEnterToSend: boolean;
+  /**
+   * ↑ on the composer's first line recalls a sent prompt — pressed twice, so a
+   * caret walked to the top while editing never swaps the draft for an old
+   * message by accident. Off: the arrows only move the caret.
+   */
+  chatArrowHistory: boolean;
   /** Show the send time next to each message. */
   chatShowMessageTime: boolean;
   /** Desktop: allow two chats side by side. */
@@ -2787,6 +2793,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   chatHeaderHeight: 52,
   chatHeaderIcons: ["lang", "install", "theme"],
   chatEnterToSend: true,
+  chatArrowHistory: true,
   chatShowMessageTime: false,
   chatSplit: true,
   chatAutoTitle: true,

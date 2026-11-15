@@ -332,6 +332,9 @@ function mergeSettings(raw: unknown): AppSettings {
   if (typeof merged.chatEnterToSend !== "boolean") {
     merged.chatEnterToSend = DEFAULT_SETTINGS.chatEnterToSend;
   }
+  if (typeof merged.chatArrowHistory !== "boolean") {
+    merged.chatArrowHistory = DEFAULT_SETTINGS.chatArrowHistory;
+  }
   if (typeof merged.chatShowMessageTime !== "boolean") {
     merged.chatShowMessageTime = DEFAULT_SETTINGS.chatShowMessageTime;
   }

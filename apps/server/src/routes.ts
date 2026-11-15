@@ -405,6 +405,7 @@ const settingsSchema = z.object({
   chatHeaderHeight: z.number().min(40).max(72).optional(),
   chatHeaderIcons: z.array(z.string()).optional(),
   chatEnterToSend: z.boolean().optional(),
+  chatArrowHistory: z.boolean().optional(),
   chatShowMessageTime: z.boolean().optional(),
   chatGitBranchPosition: z.enum(["below", "above"]).optional(),
   chatChipOptions: z

@@ -741,6 +741,9 @@ export const en = {
     chatMetaChipBgJobs: "Background tasks",
     chatEnterToSend: "Enter sends the message",
     chatEnterToSendHint: "Off: Enter inserts a newline, Ctrl+Enter sends.",
+    chatArrowHistory: "↑ recalls sent messages",
+    chatArrowHistoryHint:
+      "↑ on the first line is pressed twice: the first press only arms it, the second puts the previous prompt in the field, and ↓ walks back. Off: the arrows only move the caret.",
     chatShowMessageTime: "Message timestamps",
     chatShowMessageTimeHint: "Show the send time next to each message.",
     chatSplit: "Two chats side by side",

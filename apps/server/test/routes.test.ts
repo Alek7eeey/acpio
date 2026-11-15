@@ -201,6 +201,20 @@ describe("health & settings", () => {
     expect(get.json().displayName).toBe("Tester");
   });
 
+  // zod drops what its schema does not name, so a switch missing there is one
+  // the UI offers and the server silently forgets.
+  it("PUT /api/settings keeps the composer's arrow-history switch", async () => {
+    const put = await app.inject({
+      method: "PUT",
+      url: "/api/settings",
+      payload: { chatArrowHistory: false },
+    });
+    expect(put.statusCode).toBe(200);
+    expect(put.json().chatArrowHistory).toBe(false);
+    const get = await app.inject({ method: "GET", url: "/api/settings" });
+    expect(get.json().chatArrowHistory).toBe(false);
+  });
+
   // The Spend row hangs on `kind`, and zod drops what it does not know: a kind
   // missing from the schema would vanish on save without a word.
   it("PUT /api/settings keeps a provider's kind", async () => {
