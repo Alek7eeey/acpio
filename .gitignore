@@ -47,6 +47,9 @@ dist-npm/
 .playwright-mcp/
 apps/server/tmp/
 
+# Report folders a chat drops its screenshots into
+/apps/server/report-*/
+
 # Ad-hoc debugging scripts
 /explorer-open-watch.log
 /apps/server/tmp/
