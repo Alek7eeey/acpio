@@ -90,6 +90,12 @@ export interface BuiltinToolOptions {
    * Omitted it falls back to {@link DEFAULT_BASH_TIMEOUT_MS}.
    */
   bashTimeoutMs?: number;
+  /**
+   * A turn that may only answer: a read-only skill was invoked (`/ask`).
+   * `write` and `edit` stay out of the set, so the answer cannot leave a file
+   * behind — the prompt says the same thing, and this is what makes it true.
+   */
+  readOnly?: boolean;
 }
 
 /** File types `read` hands to the model as pixels instead of text. */
@@ -1096,5 +1102,16 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
     },
   });
 
-  return { read, glob, grep, write, edit, bash, ask: askUser, ...planTool, ...taskTool };
+  return {
+    read,
+    glob,
+    grep,
+    // A read-only turn keeps the two tools that change the project out of the
+    // set entirely: a model cannot call what it was never offered.
+    ...(opts.readOnly ? {} : { write, edit }),
+    bash,
+    ask: askUser,
+    ...planTool,
+    ...taskTool,
+  };
 }

@@ -1,6 +1,7 @@
 ---
 name: ask
 description: The user is asking the agent a question — investigate read-only and answer it, change nothing. Use for "/ask", "just answer", "explain", "why does X", "where is Y", or any request that ends in an answer rather than an edit.
+read-only: true
 ---
 
 # Ask
@@ -17,7 +18,7 @@ The question is the user's: the deliverable is the answer to it, not a questionn
 
 ## The turn
 
-Reading, searching and read-only commands are the work. `write`, `edit`, commits, migrations — anything that changes the project — are not, however obvious the fix looks.
+Reading, searching and read-only commands are the work. `write`, `edit`, commits, migrations — anything that changes the project — are not, however obvious the fix looks. On `/ask` the harness withholds `write` and `edit` for the turn, so a cheatsheet, a report or a patch has no file to land in: what the answer explains, it explains in the chat.
 
 ## Answering
 

@@ -64,6 +64,7 @@ import {
   builtinSlashCommands,
   discoverSettingsSkills,
   expandSkillInvocation,
+  matchSkillInvocation,
   renderSkillsSection,
   supersededRules,
   type BuiltinSkill,
@@ -277,6 +278,13 @@ export function systemPrompt(
   thinkingInstructions: string,
   /** The repository's own rules, already rendered (see `projectRules.ts`). */
   projectRules = "",
+  /**
+   * The turn may only answer: a `read-only` skill was invoked (`/ask`). The
+   * tools are withheld by the caller, and the prompt has to say the same — the
+   * `edit` rule and the plan rule would otherwise send the model after files it
+   * cannot write.
+   */
+  readOnly = false,
 ): string {
   // The prompt speaks the UI language: every fixed line below has its Russian
   // twin, so a reader flipping the language reads rules in their own.
@@ -302,6 +310,20 @@ export function systemPrompt(
             "Пути вне рабочей папки тоже работают: абсолютные пути, например к глобальной папке " +
               "скиллов, читаются, и `grep`/`glob` можно ограничить ею. Новые файлы держи внутри " +
               "рабочей папки, если пользователь не укажет другое.",
+          ),
+        ]
+      : []),
+    ...(readOnly
+      ? [
+          t(
+            "This turn only reads: the reader invoked a skill whose deliverable is an answer, so " +
+              "`write` and `edit` are not offered. The answer in this chat is the whole result — no " +
+              "file is created, no working-tree change is made, and a command is for reading, a " +
+              "test run or the history, not for writing something down.",
+            "Этот ход только читает: читатель вызвал скилл, результат которого — ответ, поэтому " +
+              "`write` и `edit` не предлагаются. Ответ в этом чате — это весь результат: ни один " +
+              "файл не создаётся, рабочее дерево не меняется, а команда — для чтения, теста или " +
+              "истории, а не для того, чтобы что-то записать.",
           ),
         ]
       : []),
@@ -343,7 +365,12 @@ export function systemPrompt(
     // plan rule leaves with the tool it names (Settings → Built-in agent).
     t("Rules:", "Правила:"),
     ...RULES.filter(
-      (rule) => !supersededRules.has(rule.id) && (planTool || rule.id !== "plan"),
+      (rule) =>
+        !supersededRules.has(rule.id) &&
+        (planTool || rule.id !== "plan") &&
+        // The rule that tells the model to change files with `edit`/`write`
+        // has no tool to name on a read-only turn.
+        (!readOnly || rule.id !== "edit"),
     ).map((rule) => `- ${t(rule.text, rule.ru)}`),
     // The repository's rules sit right below: more specific than the laws
     // above, less than a skill the user turned on.
@@ -2265,9 +2292,19 @@ export class BuiltinAgent implements InProcessAgentTransport {
     onImages: (toolCallId: string, images: ToolImagePart[]) => void;
     /** `bash`'s kill time when a call names none — live, and never in the schema. */
     bashTimeoutMs: number;
+    /**
+     * The turn only reads: a `read-only` skill was invoked (`/ask`). Its head
+     * declares no `write`, no `edit`, no plan and no subagent, and the prompt
+     * says the answer is the whole deliverable. The frozen head is untouched —
+     * the next turn sends it exactly as the provider cached it.
+     */
+    readOnly?: boolean;
   }): Promise<{ system: string; tools: ToolSet }> {
     const head = this.frozenHead;
     if (!head) throw new Error("prompt head не заморожен");
+    // A plan is a file, and the ask skill forbids one anyway: the tool leaves
+    // with write and edit, and its rule leaves the prompt with it.
+    const planTool = head.planTool && opts.readOnly !== true;
     const ask = (toolCall: { title: string; kind: string; input: Record<string, unknown> }) =>
       this.askPermission(toolCall);
     // The tools follow the head: a server connected mid-chat (or a switch
@@ -2285,10 +2322,12 @@ export class BuiltinAgent implements InProcessAgentTransport {
       head.markdownImages,
       // Its rule leaves the prompt with the tool, or the model would be told to
       // call a `plan` it does not have.
-      head.planTool,
+      planTool,
       head.extraInstructions,
       THINKING_INSTRUCTIONS[head.thinking],
       this.frozenRules ?? "",
+      // The edit rule goes out with the tools it names, and one line says why.
+      opts.readOnly === true,
     );
     const tools = {
       ...createBuiltinTools({
@@ -2297,10 +2336,15 @@ export class BuiltinAgent implements InProcessAgentTransport {
         ask,
         outsideCwd: head.outsideCwd,
         bashTimeoutMs: opts.bashTimeoutMs,
-        subagents: head.subagents.enabled
-          ? { settings: head.subagents, bridge: () => this.activeSubagents }
-          : undefined,
-        plan: head.planTool ? this.planBridge() : undefined,
+        // A read-only turn runs no child either: the child toolset writes, and
+        // a question answered by a subagent that left a file behind is the same
+        // hole one level down.
+        subagents:
+          head.subagents.enabled && opts.readOnly !== true
+            ? { settings: head.subagents, bridge: () => this.activeSubagents }
+            : undefined,
+        plan: planTool ? this.planBridge() : undefined,
+        readOnly: opts.readOnly === true,
         // Same channel as the MCP tools: `read` on a picture hands the bytes to
         // the turn, which puts them right after that call's result.
         onImages: opts.onImages,
@@ -2343,6 +2387,16 @@ export class BuiltinAgent implements InProcessAgentTransport {
     // request before it is recorded, so the stored history carries what the
     // model actually saw and a re-run expands identically.
     const promptParts = params.prompt;
+    // A skill that only reads makes its turn read-only: `/ask` is a question,
+    // and a question does not leave files behind. The name is matched before
+    // the body is inlined, because the expansion is what the model sees and
+    // this is what the harness does about it.
+    const readOnly =
+      matchSkillInvocation(
+        promptText(promptParts),
+        skills,
+        this.opts.settings.builtinSkillModes,
+      )?.skill.readOnly === true;
     const expanded = await expandSkillInvocation(
       promptText(promptParts),
       skills,
@@ -2462,6 +2516,9 @@ export class BuiltinAgent implements InProcessAgentTransport {
         // Read live and kept out of the declarations: a raised limit reaches the
         // very next call without moving the head (see the `bash` schema).
         bashTimeoutMs: normalizeBuiltinBashTimeoutSec(live.builtinBashTimeoutSec) * 1000,
+        // A read-only turn (`/ask`) declares no tool that writes: the head it
+        // sends is this turn's own, and the next turn restores the frozen one.
+        readOnly,
       });
       // A fresh turn: the warning about a moving head is its to earn again.
       this.driftWarned = false;

@@ -53,8 +53,20 @@ describe("parseSkillMarkdown", () => {
       name: "commit",
       description: "Выполнить git-коммит",
       disableModelInvocation: false,
+      readOnly: false,
       body: "Do the thing.",
     });
+  });
+
+  // A turn that invokes such a skill is given no `write`/`edit` (see
+  // `BuiltinToolOptions.readOnly`): the frontmatter is where the skill says so.
+  it("reads read-only off the frontmatter", () => {
+    expect(
+      parseSkillMarkdown("---\nname: ask\nread-only: true\n---\nBody.", "f").readOnly,
+    ).toBe(true);
+    expect(parseSkillMarkdown("---\nname: a\nread-only: yes\n---\nb", "f").readOnly).toBe(true);
+    expect(parseSkillMarkdown("---\nname: a\nread-only: false\n---\nb", "f").readOnly).toBe(false);
+    expect(parseSkillMarkdown("---\nname: a\n---\nb", "f").readOnly).toBe(false);
   });
 
   it("reads disable-model-invocation off the frontmatter", () => {

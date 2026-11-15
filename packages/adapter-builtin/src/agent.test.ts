@@ -130,6 +130,7 @@ describe("system prompt rules", () => {
     planTool = true,
     locale = "en",
     replyLanguage: "auto" | "ru" | "en" = "auto",
+    readOnly = false,
   ) =>
     systemPrompt(
       locale,
@@ -143,6 +144,8 @@ describe("system prompt rules", () => {
       planTool,
       "",
       "",
+      "",
+      readOnly,
     );
 
   it("carries every rule when no active skill claims one", () => {
@@ -183,6 +186,21 @@ describe("system prompt rules", () => {
 
   it("is untouched by an id no rule carries", () => {
     expect(build(["no-such-rule"])).toBe(build([]));
+  });
+
+  // `/ask` is a question: the turn gets no `write`/`edit`, and the prompt must
+  // not send the model after files with tools it was not given.
+  it("says a read-only turn answers and changes nothing", () => {
+    const prompt = build([], "", true, "en", "auto", true);
+    expect(prompt).toContain("This turn only reads");
+    expect(prompt).toContain("The answer in this chat is the whole result");
+    expect(prompt).not.toContain("Read a file before changing it,");
+    expect(prompt).toContain("Make the smallest change that fully solves the task.");
+    // The Russian twin, for the interface that speaks it.
+    expect(build([], "", true, "ru", "auto", true)).toContain("Этот ход только читает");
+    // An ordinary turn keeps the edit rule and says nothing about a limit.
+    expect(build([])).toContain("Read a file before changing it,");
+    expect(build([])).not.toContain("This turn only reads");
   });
 
   it("keeps the plan rule only while the plan tool is offered", () => {
@@ -470,6 +488,53 @@ describe("builtin provider routing", () => {
       await off.call("session/set_config_option", { configId: "model", value: "p1::m1" });
       await off.call("session/prompt", { prompt: [{ type: "text", text: "hi" }] });
       expect(system()).not.toContain("Project rules");
+    } finally {
+      await stub.close();
+    }
+  });
+
+  // `/ask` is the question skill, and its frontmatter says `read-only: true`:
+  // the turn answers in the chat and is given no tool that could leave a file
+  // behind. The model cannot call what it was never offered — that is the part
+  // a skill's own wording cannot guarantee.
+  it("gives an /ask turn no write or edit tool and says so in the prompt", async () => {
+    const stub = await startStub();
+    const dir = tempDir();
+    const provider = {
+      id: "p1",
+      name: "P",
+      url: stub.url,
+      apiKey: "sk",
+      models: [{ id: "m1", label: "M1", contextWindow: 8_000 }],
+    };
+    const toolNames = () =>
+      (((stub.bodies.at(-1)?.tools ?? []) as Array<{ function?: { name?: string } }>) ?? []).map(
+        (t) => t.function?.name ?? "",
+      );
+    const system = () =>
+      String(
+        ((stub.bodies.at(-1)?.messages ?? []) as Array<Record<string, unknown>>)[0]?.content,
+      );
+    try {
+      const harness = boot({ builtinProviders: [provider] }, dir);
+      await harness.call("session/new", { cwd: dir });
+      await harness.call("session/set_config_option", { configId: "model", value: "p1::m1" });
+      await harness.call("session/prompt", {
+        prompt: [{ type: "text", text: "/ask где лежит разбор промпта" }],
+      });
+      expect(toolNames()).toContain("read");
+      // Reading a test run and the history is still the work of a question.
+      expect(toolNames()).toContain("bash");
+      expect(toolNames()).not.toContain("write");
+      expect(toolNames()).not.toContain("edit");
+      expect(toolNames()).not.toContain("plan");
+      expect(system()).toContain("This turn only reads");
+
+      // The next turn is an ordinary one: the tools come back with it.
+      await harness.call("session/prompt", { prompt: [{ type: "text", text: "поправь" }] });
+      expect(toolNames()).toContain("write");
+      expect(toolNames()).toContain("edit");
+      expect(system()).not.toContain("This turn only reads");
     } finally {
       await stub.close();
     }

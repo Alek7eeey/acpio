@@ -29,6 +29,13 @@ export interface BuiltinSkill {
    */
   disableModelInvocation: boolean;
   /**
+   * Frontmatter `read-only: true`: what the skill delivers is an answer, not a
+   * change. A turn that invokes it is given no `write`/`edit` and no plan
+   * tools, and its prompt says the answer is the whole deliverable — so `/ask`
+   * cannot leave a file behind however the skill's own text is read.
+   */
+  readOnly?: boolean;
+  /**
    * Ids of the harness's base rules (see `agent.ts`'s `RULES`) this skill words
    * itself. Declared by whoever owns the folder — a plugin, in its `skillPath`
    * contribution — never by the SKILL.md, so a third-party skill ships exactly
@@ -98,20 +105,23 @@ export interface ParsedSkillMarkdown {
   name: string;
   description: string;
   disableModelInvocation: boolean;
+  /** Frontmatter `read-only: true` — see {@link BuiltinSkill.readOnly}. */
+  readOnly: boolean;
   body: string;
 }
 
 /**
  * `---`-fenced `key: value` frontmatter off a SKILL.md. Only `name`,
- * `description` and `disable-model-invocation` matter; an absent or malformed
- * block degrades to the folder name and an empty description instead of
- * rejecting the skill.
+ * `description`, `disable-model-invocation` and `read-only` matter; an absent
+ * or malformed block degrades to the folder name and an empty description
+ * instead of rejecting the skill.
  */
 export function parseSkillMarkdown(text: string, fallbackName: string): ParsedSkillMarkdown {
   const out: ParsedSkillMarkdown = {
     name: fallbackName,
     description: "",
     disableModelInvocation: false,
+    readOnly: false,
     body: text.trim(),
   };
   if (!text.startsWith("---")) return out;
@@ -122,7 +132,14 @@ export function parseSkillMarkdown(text: string, fallbackName: string): ParsedSk
     const at = line.indexOf(":");
     if (at === -1) continue;
     const key = line.slice(0, at).trim().toLowerCase();
-    if (key !== "name" && key !== "description" && key !== "disable-model-invocation") continue;
+    if (
+      key !== "name" &&
+      key !== "description" &&
+      key !== "disable-model-invocation" &&
+      key !== "read-only"
+    ) {
+      continue;
+    }
     const value = line
       .slice(at + 1)
       .trim()
@@ -130,6 +147,7 @@ export function parseSkillMarkdown(text: string, fallbackName: string): ParsedSk
     if (!value) continue;
     if (key === "name") out.name = value;
     else if (key === "description") out.description = value;
+    else if (key === "read-only") out.readOnly = /^(true|yes|1|on)$/i.test(value);
     else out.disableModelInvocation = /^(true|yes|1|on)$/i.test(value);
   }
   out.body = text.slice(end + 4).trim();
@@ -185,6 +203,7 @@ async function skillsInDir(
       disableModelInvocation: parsed.disableModelInvocation,
       supersedes: declared[name.toLowerCase()] ?? [],
       path: md,
+      ...(parsed.readOnly ? { readOnly: true } : {}),
       ...(Object.keys(translations).length ? { translations } : {}),
       ...(shipped.has(path.resolve(dir)) ? { builtin: true } : {}),
     });

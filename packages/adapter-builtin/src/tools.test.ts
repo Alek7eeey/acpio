@@ -38,6 +38,18 @@ describe("createBuiltinTools", () => {
     ]);
   });
 
+  // A read-only turn (a `/ask` invocation) must not be able to leave a file
+  // behind: the two tools that write are not in the set at all.
+  it("leaves write and edit out of a read-only turn", () => {
+    const readOnly = createBuiltinTools({
+      host: { request: vi.fn(async () => ({})) },
+      ask: vi.fn(async () => undefined),
+      sessionId: "S1",
+      readOnly: true,
+    });
+    expect(Object.keys(readOnly)).toEqual(["read", "glob", "grep", "bash", "ask"]);
+  });
+
   it("read passes the window through to the host", async () => {
     const { tools, host } = setup();
     host.request.mockResolvedValue({ content: "line" });
