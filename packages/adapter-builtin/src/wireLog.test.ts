@@ -261,6 +261,62 @@ describe("wire log", () => {
     expect(drifts).toEqual([]);
   });
 
+  it("keeps a subagent's own prompt off the chat's head", async () => {
+    process.env.ACPIO_WIRE_LOG = "0";
+    resetWireLogState();
+    // A child run is a prompt of its own — another system block, another tool
+    // list — and it goes through the chat's own endpoint. Sharing the chat's
+    // comparison, its first request read as a break of the parent's head (live:
+    // chat dcbbd5d9 drew “0 of 2” before the child had done anything), and its
+    // head then made the parent's real request read as one too, while the
+    // provider served 8 576 of its 8 970 input tokens from cache.
+    const drifts: ContextDrift[] = [];
+    const target = { sessionId: "sess-1", providerId: "legacy" };
+    const parent = withWireLog(
+      target,
+      (async () => jsonResponse({})) as typeof globalThis.fetch,
+      { onDrift: (drift) => drifts.push(drift), watch: () => true },
+    );
+    const child = withWireLog(
+      { ...target, lane: "subagent" },
+      (async () => jsonResponse({})) as typeof globalThis.fetch,
+      { watch: () => true },
+    );
+    const send = (call: typeof globalThis.fetch, messages: unknown[]) =>
+      call("https://relay.test/v1/chat/completions", {
+        method: "POST",
+        body: JSON.stringify({ model: "m", messages }),
+      });
+    const head = { role: "system", content: "HEAD" };
+    const childHead = { role: "system", content: "You are a codebase explorer." };
+
+    await send(parent, [head, { role: "user", content: "one" }]);
+    // The child's own head, on its own lane: not a thing the chat's next
+    // request may be compared against.
+    await send(child, [childHead, { role: "user", content: "list the files" }]);
+    await send(parent, [
+      head,
+      { role: "user", content: "one" },
+      { role: "assistant", content: "two" },
+    ]);
+    expect(drifts).toEqual([]);
+
+    // The chat's own break is still reported: a lane separates the two chains,
+    // it does not switch the comparison off.
+    await send(parent, [
+      head,
+      { role: "user", content: "ONE" },
+      { role: "assistant", content: "two" },
+    ]);
+    expect(drifts).toHaveLength(1);
+    expect(drifts[0]).toMatchObject({
+      prefixSame: 1,
+      prevMessages: 3,
+      systemChanged: false,
+      toolsChanged: false,
+    });
+  });
+
   it("holds the request while the reader decides, and drops it on “stop”", async () => {
     process.env.ACPIO_WIRE_LOG = "0";
     resetWireLogState();
@@ -298,6 +354,50 @@ describe("wire log", () => {
     decide(false);
     await expect(drifted).rejects.toBeInstanceOf(ContextDriftStop);
     expect(sent).toBe(1);
+  });
+
+  it("puts the held request itself into the archive the card offers", async () => {
+    process.env.ACPIO_WIRE_LOG = "full";
+    resetWireLogState();
+    let decide: (answer: boolean) => void = () => {};
+    const call = withWireLog(
+      { sessionId: "sess-1", providerId: "legacy" },
+      (async () => jsonResponse({})) as typeof globalThis.fetch,
+      {
+        onDrift: () =>
+          new Promise<boolean>((resolve) => {
+            decide = resolve;
+          }),
+      },
+    );
+    const send = (messages: unknown[]) =>
+      call("https://relay.test/v1/chat/completions", {
+        method: "POST",
+        body: JSON.stringify({ model: "m", messages }),
+      });
+    const one = { role: "user", content: "one" };
+
+    await send([one, { role: "assistant", content: "two" }]);
+    const drifted = send([
+      { role: "user", content: "ONE" },
+      { role: "assistant", content: "two" },
+    ]);
+    // The card is up and the request is unsent, but “download the chat's logs”
+    // has to carry that very body: the request whose head moved is the cause
+    // support is looking for, and an archive that stops before it answers
+    // nothing (chat 37f44166: “0 of 60”, the other 2 messages nowhere).
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const held = lines().filter((line) => line.kind === "request");
+    expect(held).toHaveLength(2);
+    expect(held[1].prefixSame).toBe(0);
+    expect(held[1].bodyFile).toBeTruthy();
+    const body = JSON.parse(fs.readFileSync(path.join(dir, held[1].bodyFile), "utf8"));
+    expect(body.messages[0].content).toBe("ONE");
+
+    decide(false);
+    await expect(drifted).rejects.toBeInstanceOf(ContextDriftStop);
+    // A line without a response reads as sent; the drop says otherwise.
+    expect(lines().at(-1)).toMatchObject({ kind: "dropped", seq: held[1].seq });
   });
 
   it("sends the request once the reader says continue", async () => {

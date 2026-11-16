@@ -3863,6 +3863,32 @@ describe("builtin subagents wiring", () => {
     }
   });
 
+  it("keeps a child's own prompt out of the chat's drift row", async () => {
+    // A child run is a prompt of its own — another system block, another tool
+    // list — sent through the chat's endpoint. Compared against the chat's head
+    // it read as a break (`0 of 2 messages`) on a turn that only delegated, and
+    // the row then claimed the cache was gone for a prefix it had served.
+    const stub = await startRecordingStub(SPAWN_SCRIPT);
+    try {
+      const { call, frames } = boot({
+        builtinProviders: providersWithTwoModels(stub.url),
+        builtinSubagents: { enabled: true, allowAdhoc: false, agents: [] },
+        diagnosticsContextDrift: true,
+      });
+      await call("session/new", { cwd: "/w" });
+      await call("session/prompt", { prompt: [{ type: "text", text: "go" }] });
+      expect(stub.hits).toHaveLength(3);
+      const drifts = frames.filter(
+        (frame) =>
+          (frame.params as { update?: { sessionUpdate?: string } } | undefined)?.update
+            ?.sessionUpdate === "context_drift",
+      );
+      expect(drifts).toEqual([]);
+    } finally {
+      await stub.close();
+    }
+  });
+
   it("inherits the session model for children when no subagent model is set", async () => {
     const stub = await startRecordingStub(SPAWN_SCRIPT);
     try {

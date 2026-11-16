@@ -498,6 +498,12 @@ function builtinEndpoint(
   thinking: () => boolean = () => false,
   /** Whether the head is compared, and who hears about it — see `withWireLog`. */
   hooks?: WireLogOptions,
+  /**
+   * The chain of requests this endpoint belongs to, when it is not the chat's
+   * own — a subagent's run, whose prompt is not the chat's head. See
+   * `WireLogTarget.lane`.
+   */
+  lane?: string,
 ) {
   // Provider body first, the per-turn override on top: the turn's pick (the
   // `thinking` the user chose in the ⋯ menu) is the more specific intent.
@@ -519,7 +525,7 @@ function builtinEndpoint(
     // that draws from a pool, which is exactly the chats a rotation costs.
     fetch: providerFetch(
       provider,
-      withWireLog({ sessionId, providerId: provider.id }, fetch, hooks),
+      withWireLog({ sessionId, providerId: provider.id, ...(lane ? { lane } : {}) }, fetch, hooks),
       undefined,
       sessionId,
     ),
@@ -554,6 +560,13 @@ type ThinkingMode = PromptThinkingMode;
  * rest ignore an unknown field.
  */
 const THINKING_DISABLED_BODY = { thinking: { type: "disabled" } };
+
+/**
+ * The chain a subagent's requests are filed under — see `WireLogTarget.lane`.
+ * One lane for every child: a child's own head moving between runs is not the
+ * chat's business, and nothing here draws the card (children pass no `onDrift`).
+ */
+const SUBAGENT_LANE = "subagent";
 
 /** `effort` values that mean "no thinking pass", as opposed to a level. */
 const EFFORT_OFF = new Set(["off", "none", "disabled"]);
@@ -2464,13 +2477,28 @@ export class BuiltinAgent implements InProcessAgentTransport {
           `[builtin] subagent model "${head.subagents.model}" is not configured — children run on the session model`,
         );
       }
+      // A child's requests are a prompt of their own (see `WireLogTarget.lane`),
+      // so they get a lane: unlaned, they took the chat's head for their own and
+      // the chat's next request drew a card over a prefix the provider had
+      // cached. The endpoint mirrors the chat's whenever the child runs on the
+      // same model, so the bytes stay the ones its own cache knows; the lane is
+      // all that differs, and children never draw the card themselves.
+      const childHooks = { watch: () => this.watching === true };
+      const sameModel = !childChoice || childChoice.selection.value === selection.value;
       const childModel =
-        !childChoice || childChoice.selection.value === selection.value
+        !childChoice
           ? endpoint.chatModel(selection.modelId)
           : builtinEndpoint(
               childChoice.selection.provider,
               this.sessionId,
-              this.thinkingOff ? THINKING_DISABLED_BODY : undefined,
+              sameModel
+                ? this.reasoningBody(selection)
+                : this.thinkingOff
+                  ? THINKING_DISABLED_BODY
+                  : undefined,
+              sameModel ? () => this.echoReasoning() : undefined,
+              childHooks,
+              SUBAGENT_LANE,
             ).chatModel(childChoice.selection.modelId);
       const subagents = subagentsEnabled
         ? createSubagentsBridge({

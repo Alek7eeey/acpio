@@ -24,6 +24,16 @@ export interface WireLogTarget {
   sessionId: string;
   /** The provider row the key came from. */
   providerId: string;
+  /**
+   * Which chain of requests this is, when one chat puts more than one on the
+   * wire. A subagent run is a prompt of its own — another system block,
+   * another tool list — that rides the chat's endpoint, so without a lane its
+   * head replaces the chat's and the chat's own next request reads as broken:
+   * chat dcbbd5d9 drew "0 of 2 messages" on the child's very first request,
+   * then again on the parent's, whose prefix the provider had served from
+   * cache (8 576 of 8 970 input tokens). Absent for the chat's own requests.
+   */
+  lane?: string;
 }
 
 /**
@@ -392,7 +402,7 @@ export function withWireLog(
     );
     const tools = shortHash(JSON.stringify(body.tools ?? ""));
     const key = logging ? keyFingerprint(init) : "";
-    const chatKey = `${target.providerId}\u0000${target.sessionId}`;
+    const chatKey = `${target.providerId}\u0000${target.sessionId}\u0000${target.lane ?? ""}`;
     // The head of the request before this one, from memory or from the file the
     // process before this one left: a reboot must not hide a moved head.
     loadHead(chatKey, target.sessionId);
@@ -413,6 +423,55 @@ export function withWireLog(
       before !== undefined &&
       prevMessagesOf(before) > 0 &&
       (prefixSame! < prevMessagesOf(before) || systemChanged || toolsChanged);
+    // The record of this request goes to disk before the reader is asked whether
+    // to send it. The card that asks offers the archive of this chat, and a body
+    // written after the answer was simply absent from it — the one body support
+    // needs is the request whose head moved (chat 37f44166: “0 of 60” and an
+    // archive that could not say what the 2 messages were).
+    const file = path.join(wireLogDir(), `${shortId(target.sessionId)}.jsonl`);
+    const bodyFile = logging && mode === "full" ? freeBodyName(target.sessionId, seq, started) : "";
+    if (logging) {
+      // A body is megabytes: it rides its own file, and the line carries the name
+      // so a reader never has to guess it. The line stays small enough to read
+      // whole, which is what makes `prefixSame` usable. The name carries the
+      // request's own start beside the counter: a lost head file resets the
+      // counter, and a reset counter must cost one line, not the bodies of every
+      // earlier request (chat c88a1a10 kept 5 of the 22 it recorded).
+      const entry: Record<string, unknown> = {
+        ts: new Date(started).toISOString(),
+        kind: "request",
+        seq,
+        sessionId: target.sessionId,
+        provider: target.providerId,
+        url,
+        model: typeof body.model === "string" ? body.model : "",
+        stream: body.stream === true,
+        headers: headerRecord(init),
+        key,
+        keyChanged: before ? before.key !== key : false,
+        messages: messages.length,
+        /** Messages whose bytes match the previous request, from the head up. */
+        prefixSame,
+        prevMessages: before ? prevMessagesOf(before) : null,
+        system,
+        tools,
+        systemChanged,
+        toolsChanged,
+        bodyBytes: rawBody.length,
+        ...(bodyFile ? { bodyFile } : {}),
+      };
+      appendLine(file, entry);
+      if (bodyFile) {
+        try {
+          const bodyPath = path.join(wireLogDir(), bodyFile);
+          fs.mkdirSync(path.dirname(bodyPath), { recursive: true });
+          fs.writeFileSync(bodyPath, rawBody, "utf8");
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+
     if (options.onDrift && drifted && (options.watch?.() ?? true)) {
       let proceed = true;
       try {
@@ -432,52 +491,22 @@ export function withWireLog(
         /* a warning must never fail the request it describes */
       }
       // The listener spoke for the reader: the call is dropped, and the turn
-      // ends where they stopped it instead of paying for a moved head.
-      if (!proceed) throw new ContextDriftStop();
-    }
-    if (!logging) return base(input, init);
-
-    // A body is megabytes: it rides its own file, and the line carries the name
-    // so a reader never has to guess it. The line stays small enough to read
-    // whole, which is what makes `prefixSame` usable. The name carries the
-    // request's own start beside the counter: a lost head file resets the
-    // counter, and a reset counter must cost one line, not the bodies of every
-    // earlier request (chat c88a1a10 kept 5 of the 22 it recorded).
-    const bodyFile = mode === "full" ? freeBodyName(target.sessionId, seq, started) : "";
-    const file = path.join(wireLogDir(), `${shortId(target.sessionId)}.jsonl`);
-    const entry: Record<string, unknown> = {
-      ts: new Date(started).toISOString(),
-      kind: "request",
-      seq,
-      sessionId: target.sessionId,
-      provider: target.providerId,
-      url,
-      model: typeof body.model === "string" ? body.model : "",
-      stream: body.stream === true,
-      headers: headerRecord(init),
-      key,
-      keyChanged: before ? before.key !== key : false,
-      messages: messages.length,
-      /** Messages whose bytes match the previous request, from the head up. */
-      prefixSame,
-      prevMessages: before ? prevMessagesOf(before) : null,
-      system,
-      tools,
-      systemChanged,
-      toolsChanged,
-      bodyBytes: rawBody.length,
-      ...(bodyFile ? { bodyFile } : {}),
-    };
-    appendLine(file, entry);
-    if (bodyFile) {
-      try {
-        const bodyPath = path.join(wireLogDir(), bodyFile);
-        fs.mkdirSync(path.dirname(bodyPath), { recursive: true });
-        fs.writeFileSync(bodyPath, rawBody, "utf8");
-      } catch {
-        /* ignore */
+      // ends where they stopped it instead of paying for a moved head. The line
+      // says so, or the archive reads as a request that was sent and never
+      // answered.
+      if (!proceed) {
+        if (logging) {
+          appendLine(file, {
+            ts: new Date().toISOString(),
+            kind: "dropped",
+            seq,
+            reason: "context_drift",
+          });
+        }
+        throw new ContextDriftStop();
       }
     }
+    if (!logging) return base(input, init);
 
     const response = await base(input, init);
     const ms = Date.now() - started;
