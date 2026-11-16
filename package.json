@@ -50,5 +50,12 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "npm",
+      "version": "10.x",
+      "onFail": "error"
+    }
   }
 }
