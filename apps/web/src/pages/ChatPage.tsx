@@ -7308,9 +7308,11 @@ function ChatThread() {
     const cacheTokens = cached ?? null;
     const uncached = input != null && cacheTokens != null ? Math.max(0, input - cacheTokens) : null;
     const total = input != null && output != null ? input + output : null;
+    // Tenths of a percent: a rounded integer turns 98.9 into a flat 99 and hides
+    // the drift the reader is watching for.
     const cachePercent =
       input != null && input > 0 && cacheTokens != null
-        ? Math.round((cacheTokens / input) * 100)
+        ? Math.round((cacheTokens / input) * 1000) / 10
         : null;
     // A field the harness never sent reads "—": a confident 0 would be a lie.
     const num = (value: number | null) => (value == null ? "—" : value.toLocaleString());
@@ -7340,7 +7342,13 @@ function ChatThread() {
       {
         id: "cache",
         label: t("chat.contextTokensCache"),
-        value: cachePercent == null ? "—" : `${cachePercent}%`,
+        value:
+          cachePercent == null
+            ? "—"
+            : `${cachePercent.toLocaleString(undefined, {
+                minimumFractionDigits: 1,
+                maximumFractionDigits: 1,
+              })}%`,
       },
       { id: "total", label: t("chat.contextTokensTotal"), value: num(total) },
       { id: "cached", label: t("chat.contextTokensCached"), value: num(cacheTokens) },
