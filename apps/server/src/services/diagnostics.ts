@@ -67,6 +67,15 @@ function idFromFileName(fileName: string) {
   return fileName.slice(DUMP_PREFIX.length, -DUMP_EXT.length);
 }
 
+/**
+ * Why a dump was taken, as its id carries it: `…T12-39-22-031Z_error`. The `Z`
+ * ends the stamp, so the reason starts after it — without the optional `Z` the
+ * match failed on every id and each dump read as "dump", hiding the crashes.
+ */
+function reasonFromId(id: string): string | null {
+  return id.match(/^\d{4}-\d{2}-\d{2}T[\d-]+Z?_(.+)$/)?.[1]?.replace(/-/g, " ") ?? null;
+}
+
 function fileNameFromId(id: string) {
   const clean = id.replace(/[^a-zA-Z0-9._-]/g, "");
   return `${DUMP_PREFIX}${clean}${DUMP_EXT}`;
@@ -158,11 +167,10 @@ export async function listDiagnosticsDumps(): Promise<{
       const stat = await fs.stat(filePath);
       if (!stat.isFile()) continue;
       const id = idFromFileName(name);
-      const reasonMatch = id.match(/^\d{4}-\d{2}-\d{2}T[\d-]+_(.+)$/);
       items.push({
         id,
         fileName: name,
-        reason: reasonMatch?.[1]?.replace(/-/g, " ") || "dump",
+        reason: reasonFromId(id) || "dump",
         createdAt: new Date(stat.mtimeMs).toISOString(),
         size: stat.size,
         path: filePath,
@@ -193,9 +201,7 @@ export async function readDiagnosticsDump(id: string): Promise<DiagnosticsDumpDt
       payload = { raw };
     }
     const reason =
-      typeof payload.reason === "string"
-        ? payload.reason
-        : id.match(/^\d{4}-\d{2}-\d{2}T[\d-]+_(.+)$/)?.[1] || "dump";
+      typeof payload.reason === "string" ? payload.reason : reasonFromId(id) || "dump";
     const createdAt =
       typeof payload.createdAt === "string" ? payload.createdAt : new Date(stat.mtimeMs).toISOString();
     return {
@@ -207,6 +213,25 @@ export async function readDiagnosticsDump(id: string): Promise<DiagnosticsDumpDt
       path: filePath,
       payload,
     };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A dump's bytes as they sit on disk, for the button that hands one dump over
+ * as a file: the same name the row shows, nothing re-serialized.
+ */
+export async function readDiagnosticsDumpFile(
+  id: string,
+): Promise<{ fileName: string; body: string } | null> {
+  const settings = await getSettings();
+  const dir = await resolveDiagnosticsDir(settings);
+  const fileName = fileNameFromId(id);
+  const filePath = path.join(dir, fileName);
+  if (!assertInsideDir(dir, filePath)) return null;
+  try {
+    return { fileName, body: await fs.readFile(filePath, "utf8") };
   } catch {
     return null;
   }

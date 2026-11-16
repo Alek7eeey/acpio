@@ -137,6 +137,23 @@ type ApiKeyField = "cursorApiKey" | "anthropicApiKey" | "openaiApiKey";
 const DIAG_DUMPS_PAGE = 30;
 
 /**
+ * Tone of a dump's reason chip: a crash reads red, a dump taken by hand blue,
+ * anything else stays neutral — the same grey for fifty rows is not a warning.
+ */
+function diagReasonTone(reason: string): string {
+  if (/error|crash|fail/i.test(reason)) return styles.diagReasonBad;
+  if (/manual|report|user/i.test(reason)) return styles.diagReasonAccent;
+  return "";
+}
+
+/** Row-sized size label: whole KB below a megabyte, one decimal of MB above it. */
+function diagSizeLabel(bytes: number): string {
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${Math.max(1, Math.round(kb))} KB`;
+  return `${Math.round(kb / 102.4) / 10} MB`;
+}
+
+/**
  * Fields the page's Save never sends: the agent is bound via Connect and the
  * theme/locale are toggled from the shell, so edits to them are not this Save's
  * to persist — counting them would keep the button lit on every page.
@@ -1826,6 +1843,8 @@ export function SettingsPage() {
     () => useAppStore.getState().activeSessionId,
   );
   const [diagCopyId, setDiagCopyId] = useState<string | null>(null);
+  /** Dump just copied: its button keeps the check for a moment. */
+  const [diagCopiedId, setDiagCopiedId] = useState<string | null>(null);
   const [chatsExportBusy, setChatsExportBusy] = useState(false);
   const [chatsExportMessage, setChatsExportMessage] = useState<string | null>(null);
   const paramsCacheRef = useRef(new Map<string, ModelParamDto[]>());
@@ -1921,12 +1940,19 @@ export function SettingsPage() {
     }
   };
 
-  // The folder can hold hundreds of dumps and every card is a row of controls:
+  // The folder can hold hundreds of dumps and every row is a set of controls:
   // only the pages above the current scroll are built. The sentinel under the
-  // last card asks for the next page as soon as it scrolls into the list, so a
+  // last row asks for the next page as soon as it scrolls into the list, so a
   // list opened on a tall window fills itself instead of stopping at one page.
   const diagShown = diagItems.slice(0, diagVisible);
   const diagHasMore = diagShown.length < diagItems.length;
+  const diagTotalBytes = diagItems.reduce((sum, item) => sum + item.size, 0);
+
+  useEffect(() => {
+    if (!diagCopiedId) return;
+    const timer = setTimeout(() => setDiagCopiedId(null), 1600);
+    return () => clearTimeout(timer);
+  }, [diagCopiedId]);
 
   useEffect(() => {
     if (!diagHasMore) return;
@@ -2617,12 +2643,8 @@ export function SettingsPage() {
     }
   };
 
-  // The diagnostics page holds the window's height instead of scrolling the
-  // page: its dumps list is the one scroller there (see .pageFit / .panelFit).
-  const diagLeafOpen = section === "agent" && leaf === "diagnostics";
-
   return (
-    <div className={`${styles.page}${diagLeafOpen ? ` ${styles.pageFit}` : ""}`}>
+    <div className={styles.page}>
       <div className={styles.mobileSearch}>
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
           <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.8" />
@@ -2647,7 +2669,7 @@ export function SettingsPage() {
         ) : null}
       </div>
       <form
-        className={`${styles.panel}${section === "interface" && leaf === "chat" ? ` ${styles.panelChat}` : ""}${diagLeafOpen ? ` ${styles.panelFit}` : ""}`}
+        className={`${styles.panel}${section === "interface" && leaf === "chat" ? ` ${styles.panelChat}` : ""}`}
         onSubmit={(e) => void onSubmit(e)}
       >
         <SettingsSearchProvider query={settingsQuery} filtering={viewingResults}>
@@ -5364,121 +5386,232 @@ export function SettingsPage() {
             </SettingTable>
 
             <div className={styles.sectionBlock}>
-            <SearchGate terms={[t("diagnostics.createNow"), t("diagnostics.saving"), t("common.refresh"), t("diagnostics.savedTo")]}>
-            <div className={styles.diagActions}>
-              <button
-                type="button"
-                className={styles.primaryBtn}
-                disabled={diagBusy}
-                onClick={() => {
-                  void (async () => {
-                    setDiagBusy(true);
-                    setDiagMessage(null);
-                    try {
-                      const dump = await submitDiagnosticsDump({
-                        reason: "manual",
-                        sessionId: diagSessionId ?? "",
-                      });
-                      setDiagMessage(t("diagnostics.savedTo", { path: dump.path }));
-                      await refreshDiagnostics();
-                    } catch (err) {
-                      setDiagMessage(err instanceof Error ? err.message : String(err));
-                    } finally {
-                      setDiagBusy(false);
-                    }
-                  })();
-                }}
+              <SearchGate
+                terms={[
+                  t("diagnostics.dumpsTitle"),
+                  t("diagnostics.dumpsHint"),
+                  t("diagnostics.empty"),
+                  t("diagnostics.copyJson"),
+                  t("diagnostics.createNow"),
+                  t("diagnostics.saving"),
+                  t("diagnostics.savedTo"),
+                  t("common.refresh"),
+                ]}
               >
-                {diagBusy ? t("diagnostics.saving") : t("diagnostics.createNow")}
-              </button>
-              <button
-                type="button"
-                className={styles.secondaryBtn}
-                disabled={diagLoading}
-                onClick={() => void refreshDiagnostics()}
-              >
-                {t("common.refresh")}
-              </button>
-              {diagMessage ? <span className={styles.hint}>{diagMessage}</span> : null}
-            </div>
-            </SearchGate>
-            </div>
-
-            <div className={`${styles.sectionBlock} ${styles.diagDumpsBlock}`}>
-            <SearchGate terms={[t("diagnostics.dumpsTitle"), t("diagnostics.dumpsHint"), t("diagnostics.empty"), t("diagnostics.copyJson")]}>
-              <h2 className={styles.sectionHeading}>{highlightText(t("diagnostics.dumpsTitle"), settingsQuery)}</h2>
-            <p className={styles.fieldHint}>{t("diagnostics.dumpsHint")}</p>
-            {diagLoading && !diagItems.length ? (
-              <p className={styles.hint}>{t("common.loading")}</p>
-            ) : null}
-            {!diagLoading && diagItems.length === 0 ? (
-              <p className={styles.hint}>{t("diagnostics.empty")}</p>
-            ) : null}
-            <ul className={styles.diagList} ref={diagScrollRef}>
-              {diagShown.map((item) => (
-                <li key={item.id} className={styles.diagCard}>
-                  <div className={styles.diagCardMain}>
-                    <div className={styles.diagCardTop}>
-                      <span className={styles.diagReason}>{item.reason}</span>
-                      <span className={styles.diagItemMeta}>
-                        {new Date(item.createdAt).toLocaleString()} ·{" "}
-                        {Math.max(1, Math.round(item.size / 1024))} KB
+                {/* Making a dump and the dumps already made are one thing: the
+                    buttons sit in the list's own header instead of an unnamed
+                    row of their own above it. */}
+                <div className={styles.diagDumpsHead}>
+                  <div className={styles.diagDumpsText}>
+                    <h2 className={styles.sectionHeading}>
+                      {highlightText(t("diagnostics.dumpsTitle"), settingsQuery)}
+                    </h2>
+                    <p className={styles.fieldHint}>{t("diagnostics.dumpsHint")}</p>
+                    {diagItems.length ? (
+                      <span className={styles.diagDumpsMeta}>
+                        {t("diagnostics.dumpsSummary", {
+                          count: diagItems.length,
+                          size: diagSizeLabel(diagTotalBytes),
+                        })}
                       </span>
-                    </div>
-                    <p className={styles.diagPath} title={item.path}>
-                      {item.fileName}
-                    </p>
+                    ) : null}
                   </div>
-                  <div className={styles.diagCardActions}>
+                  <div className={styles.diagActions}>
                     <button
                       type="button"
-                      className={styles.secondaryBtn}
-                      disabled={diagCopyId === item.id}
+                      className={styles.primaryBtn}
+                      disabled={diagBusy}
                       onClick={() => {
                         void (async () => {
-                          setDiagCopyId(item.id);
+                          setDiagBusy(true);
                           setDiagMessage(null);
                           try {
-                            const full = await getDiagnosticsDump(item.id);
-                            await navigator.clipboard.writeText(
-                              JSON.stringify(full.payload, null, 2),
-                            );
-                            setDiagMessage(t("diagnostics.copied"));
-                          } catch (err) {
-                            setDiagMessage(err instanceof Error ? err.message : String(err));
-                          } finally {
-                            setDiagCopyId(null);
-                          }
-                        })();
-                      }}
-                    >
-                      {diagCopyId === item.id ? t("diagnostics.copying") : t("diagnostics.copyJson")}
-                    </button>
-                    <button
-                      type="button"
-                      className={styles.diagDelete}
-                      aria-label={t("common.delete")}
-                      onClick={() => {
-                        void (async () => {
-                          try {
-                            await api.deleteDiagnosticsDump(item.id);
+                            const dump = await submitDiagnosticsDump({
+                              reason: "manual",
+                              sessionId: diagSessionId ?? "",
+                            });
+                            setDiagMessage(t("diagnostics.savedTo", { path: dump.path }));
                             await refreshDiagnostics();
                           } catch (err) {
                             setDiagMessage(err instanceof Error ? err.message : String(err));
+                          } finally {
+                            setDiagBusy(false);
                           }
                         })();
                       }}
                     >
-                      {t("common.delete")}
+                      {diagBusy ? t("diagnostics.saving") : t("diagnostics.createNow")}
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.secondaryBtn}
+                      disabled={diagLoading}
+                      onClick={() => void refreshDiagnostics()}
+                    >
+                      {t("common.refresh")}
                     </button>
                   </div>
-                </li>
-              ))}
-              {diagHasMore ? (
-                <li ref={diagMoreRef} className={styles.diagMore} aria-hidden />
-              ) : null}
-            </ul>
-            </SearchGate>
+                </div>
+                {diagMessage ? (
+                  <p className={styles.diagNote} role="status">
+                    {diagMessage}
+                  </p>
+                ) : null}
+                {diagLoading && !diagItems.length ? (
+                  <p className={styles.hint}>{t("common.loading")}</p>
+                ) : null}
+                {!diagLoading && diagItems.length === 0 ? (
+                  <p className={styles.diagEmpty}>{t("diagnostics.empty")}</p>
+                ) : null}
+                {diagShown.length ? (
+                  <ul className={styles.diagList} ref={diagScrollRef}>
+                    {diagShown.map((item) => {
+                      const created = new Date(item.createdAt);
+                      const copied = diagCopiedId === item.id;
+                      return (
+                        <li key={item.id} className={styles.diagRow}>
+                          <span
+                            className={`${styles.diagReason} ${diagReasonTone(item.reason)}`}
+                          >
+                            {item.reason}
+                          </span>
+                          <span className={styles.diagRowName} title={item.path}>
+                            {item.fileName}
+                          </span>
+                          <span className={styles.diagRowWhen}>
+                            {created.toLocaleDateString()}
+                            <span className={styles.diagRowTime}>
+                              {created.toLocaleTimeString([], {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </span>
+                          </span>
+                          <span className={styles.diagRowSize}>{diagSizeLabel(item.size)}</span>
+                          <span className={styles.diagRowActions}>
+                            <button
+                              type="button"
+                              className={`${styles.diagIconBtn}${copied ? ` ${styles.diagIconBtnDone}` : ""}`}
+                              title={t("diagnostics.copyJson")}
+                              aria-label={t("diagnostics.copyJson")}
+                              disabled={diagCopyId === item.id}
+                              onClick={() => {
+                                void (async () => {
+                                  setDiagCopyId(item.id);
+                                  setDiagMessage(null);
+                                  try {
+                                    const full = await getDiagnosticsDump(item.id);
+                                    await navigator.clipboard.writeText(
+                                      JSON.stringify(full.payload, null, 2),
+                                    );
+                                    setDiagCopiedId(item.id);
+                                    setDiagMessage(t("diagnostics.copied"));
+                                  } catch (err) {
+                                    setDiagMessage(
+                                      err instanceof Error ? err.message : String(err),
+                                    );
+                                  } finally {
+                                    setDiagCopyId(null);
+                                  }
+                                })();
+                              }}
+                            >
+                              {copied ? (
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                                  <path
+                                    d="M5 12.5 10 17.5 19 7"
+                                    stroke="currentColor"
+                                    strokeWidth="2"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                  />
+                                </svg>
+                              ) : (
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                                  <rect
+                                    x="9"
+                                    y="9"
+                                    width="11"
+                                    height="11"
+                                    rx="2.5"
+                                    stroke="currentColor"
+                                    strokeWidth="1.7"
+                                  />
+                                  <path
+                                    d="M15 6.5A2.5 2.5 0 0 0 12.5 4h-6A2.5 2.5 0 0 0 4 6.5v6A2.5 2.5 0 0 0 6.5 15"
+                                    stroke="currentColor"
+                                    strokeWidth="1.7"
+                                    strokeLinecap="round"
+                                  />
+                                </svg>
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              className={styles.diagIconBtn}
+                              title={t("diagnostics.downloadJson")}
+                              aria-label={t("diagnostics.downloadJson")}
+                              onClick={() => {
+                                void (async () => {
+                                  setDiagMessage(null);
+                                  try {
+                                    await api.downloadDiagnosticsDump(item.id);
+                                  } catch (err) {
+                                    setDiagMessage(
+                                      err instanceof Error ? err.message : String(err),
+                                    );
+                                  }
+                                })();
+                              }}
+                            >
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                                <path
+                                  d="M12 4v9.5m0 0 3.5-3.5M12 13.5 8.5 10M5 17.5V19a1.5 1.5 0 0 0 1.5 1.5h11A1.5 1.5 0 0 0 19 19v-1.5"
+                                  stroke="currentColor"
+                                  strokeWidth="1.7"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                />
+                              </svg>
+                            </button>
+                            <button
+                              type="button"
+                              className={`${styles.diagIconBtn} ${styles.diagIconBtnDanger}`}
+                              title={t("common.delete")}
+                              aria-label={t("common.delete")}
+                              onClick={() => {
+                                void (async () => {
+                                  try {
+                                    await api.deleteDiagnosticsDump(item.id);
+                                    await refreshDiagnostics();
+                                  } catch (err) {
+                                    setDiagMessage(
+                                      err instanceof Error ? err.message : String(err),
+                                    );
+                                  }
+                                })();
+                              }}
+                            >
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                                <path
+                                  d="M4 7h16M9.5 7V4.5h5V7M6.5 7l.7 12.1A1.9 1.9 0 0 0 9.1 21h5.8a1.9 1.9 0 0 0 1.9-1.9L17.5 7"
+                                  stroke="currentColor"
+                                  strokeWidth="1.7"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                />
+                              </svg>
+                            </button>
+                          </span>
+                        </li>
+                      );
+                    })}
+                    {diagHasMore ? (
+                      <li ref={diagMoreRef} className={styles.diagMore} aria-hidden />
+                    ) : null}
+                  </ul>
+                ) : null}
+              </SearchGate>
             </div>
 
             <div className={styles.sectionBlock}>

@@ -823,6 +823,37 @@ export const api = {
     }),
   getDiagnosticsDump: (id: string) =>
     request<DiagnosticsDumpDto>(`/api/diagnostics/${encodeURIComponent(id)}`),
+  /**
+   * One dump as a file, byte for byte what the folder holds: the alternative to
+   * the clipboard when a whole 5 MB dump has to travel to support.
+   */
+  downloadDiagnosticsDump: async (id: string) => {
+    const res = await fetch(`/api/diagnostics/${encodeURIComponent(id)}/download`, {
+      credentials: "include",
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      let message = text || res.statusText;
+      try {
+        const json = JSON.parse(text) as { error?: string };
+        if (json.error) message = json.error;
+      } catch {
+        // keep raw text
+      }
+      throw new Error(message);
+    }
+    const disposition = res.headers.get("Content-Disposition") ?? "";
+    const match = disposition.match(/filename\*=UTF-8''([^;]+)/);
+    const fileName = match ? decodeURIComponent(match[1]) : `acpio-dump-${id}.json`;
+    const url = URL.createObjectURL(await res.blob());
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  },
   deleteDiagnosticsDump: (id: string) =>
     request<{ ok: boolean }>(`/api/diagnostics/${encodeURIComponent(id)}`, {
       method: "DELETE",

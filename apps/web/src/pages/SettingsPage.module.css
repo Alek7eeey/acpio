@@ -1526,52 +1526,211 @@
   align-items: center;
 }
 
+/* Heading, hint and how much the folder holds on the left, the buttons that
+   make a dump on the right: one header over the list they act on. */
+.diagDumpsHead {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.diagDumpsText {
+  display: grid;
+  gap: 2px;
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.diagDumpsMeta {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The answer to «Create dump» — the saved path or the error — gets a line of
+   its own: as a chip beside the buttons a long path pushed them around. */
+.diagNote {
+  margin: 0;
+  padding: var(--settings-note-pad-y) var(--settings-note-pad-x);
+  border: 1px solid var(--border);
+  border-radius: var(--settings-control-radius);
+  background: color-mix(in srgb, var(--bg-secondary) 60%, transparent);
+  color: var(--text-secondary);
+  font-size: var(--settings-hint-size);
+  line-height: var(--settings-hint-line);
+  overflow-wrap: anywhere;
+}
+
+.diagEmpty {
+  margin: 0;
+  padding: 20px 14px;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: var(--settings-hint-size);
+}
+
 .diagList {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-secondary) 40%, transparent);
   /* The folder collects hundreds of dumps: the list scrolls itself instead of
-     stretching the settings page, and the cards past the fold are built on
+     stretching the settings page, and the rows past the fold are built on
      scroll (see the sentinel below). */
   max-height: min(60vh, 520px);
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding-right: 6px;
+  scrollbar-gutter: stable;
 }
 
-/* Diagnostics on a window tall enough to hold the rows above: the page keeps its
-   height instead of scrolling, so the dumps list is the one scroller — it takes
-   whatever the rows above leave and holds a floor below that. A shorter window
-   keeps the page scroll and the list's own cap above, rather than nesting two
-   scrollers. */
-@media (min-height: 700px) {
-  .pageFit {
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
+/* One dump per row, its columns fixed so the eye runs down the dates and the
+   sizes: a card per dump repeated the same chrome fifty times and buried the
+   list it was there to show. */
+.diagRow {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr) 104px 62px auto;
+  grid-template-areas: "reason name when size actions";
+  gap: 10px;
+  align-items: center;
+  padding: 6px 10px;
+  border-top: 1px solid var(--border-soft);
+}
 
-  .panelFit {
-    flex: 1 1 auto;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-  }
+.diagRow:first-child {
+  border-top: none;
+}
 
-  .diagDumpsBlock {
-    display: flex;
-    flex-direction: column;
-    flex: 1 1 auto;
-    min-height: 0;
-  }
+.diagRow:hover {
+  background: var(--bg-tertiary);
+}
 
-  .diagList {
-    flex: 1 1 auto;
-    min-height: 120px;
-    max-height: none;
-  }
+/* A dot carries the tone and the word stays muted: a filled pill on every row
+   of a folder that holds fifty crashes paints a red stripe over the names one
+   actually came to read. */
+.diagReason {
+  grid-area: reason;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.diagReason::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--text-secondary) 50%, transparent);
+}
+
+.diagReasonBad::before {
+  background: var(--danger);
+}
+
+.diagReasonAccent::before {
+  background: var(--accent);
+}
+
+.diagRowName {
+  grid-area: name;
+  min-width: 0;
+  color: var(--text);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
+  font-size: 0.78rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diagRowWhen {
+  grid-area: when;
+  display: inline-flex;
+  gap: 6px;
+  justify-content: flex-end;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.diagRowTime {
+  opacity: 0.7;
+}
+
+.diagRowSize {
+  grid-area: size;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.diagRowActions {
+  grid-area: actions;
+  display: inline-flex;
+  gap: 2px;
+  align-items: center;
+}
+
+/* Copy and delete as icons: the two words on fifty rows were the noise that hid
+   the list, and the title brings them back on hover. */
+.diagIconBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.diagIconBtn:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--border);
+  background: var(--surface);
+}
+
+.diagIconBtn:focus-visible {
+  outline: none;
+  box-shadow: var(--settings-focus-ring);
+}
+
+.diagIconBtn:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.diagIconBtnDone,
+.diagIconBtnDone:hover:not(:disabled) {
+  color: var(--success);
+}
+
+.diagIconBtnDanger:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--border));
+  background: var(--danger-soft);
 }
 
 /* Zero-height hook the observer watches; it carries no content. */
@@ -1579,87 +1738,33 @@
   min-height: 1px;
 }
 
-.diagCard {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  align-items: center;
-  justify-content: space-between;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 12px 14px;
-  background: color-mix(in srgb, var(--bg-secondary) 50%, transparent);
-}
+/* Phones: a row folds into two lines and the name gets the whole width — the
+   file name is the one thing that must not be cut here, its suffix is the
+   reason the dump was taken. */
+@media (max-width: 700px) {
+  .diagRow {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "name name actions"
+      "reason when size";
+    row-gap: 2px;
+    padding: 8px 10px;
+  }
 
-.diagCardMain {
-  min-width: 0;
-  flex: 1 1 200px;
-  display: grid;
-  gap: 4px;
-}
+  .diagRowWhen {
+    justify-content: flex-end;
+  }
 
-.diagCardTop {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 12px;
-  align-items: baseline;
+  /* A phone column is narrower than the file name: let it run to two lines
+     instead of cutting the suffix that says why the dump was taken. */
+  .diagRowName {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
 }
-
-.diagReason {
-  display: inline-flex;
-  align-items: center;
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  border-radius: 999px;
-  padding: 3px 9px;
-}
-
-.diagItemMeta {
-  color: var(--text-secondary);
-  font-size: 0.75rem;
-}
-
-.diagPath {
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: var(--settings-hint-size);
-  font-weight: var(--settings-hint-weight);
-  line-height: var(--settings-hint-line);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.diagCardActions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-}
-
-.diagDelete {
-  margin: 0;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--text-secondary);
-  border-radius: var(--settings-control-radius);
-  padding: var(--settings-btn-pad-y) var(--settings-btn-pad-x);
-  font-size: var(--settings-btn-size);
-  font-weight: var(--settings-btn-weight);
-  font-family: inherit;
-  cursor: pointer;
-}
-
-.diagDelete:hover {
-  color: var(--text);
-  border-color: color-mix(in srgb, var(--text) 25%, var(--border));
-  background: var(--bg-tertiary);
-}
-
 /* --- unified VS Code-style table helpers --- */
 .schemeGridInline {
   display: grid;

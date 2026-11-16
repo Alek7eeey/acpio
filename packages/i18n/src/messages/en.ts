@@ -1321,6 +1321,8 @@ export const en = {
     noChats: "No chats — dump will include app state only",
     dumpsTitle: "Saved dumps",
     dumpsHint: "Copy the JSON and send it to us if something broke.",
+    downloadJson: "Download JSON",
+    dumpsSummary: "{{count}} dumps · {{size}}",
     empty: "No dumps yet",
     copyJson: "Copy JSON",
     copied: "Copied",

@@ -134,6 +134,7 @@ import {
   deleteDiagnosticsDump,
   listDiagnosticsDumps,
   readDiagnosticsDump,
+  readDiagnosticsDumpFile,
   writeDiagnosticsDump,
 } from "./services/diagnostics.js";
 import { buildWireLogArchive, wireLogStatus, writeWireLogMode } from "./services/wireLogControl.js";
@@ -2611,6 +2612,21 @@ export async function registerRoutes(app: FastifyInstance) {
     const dump = await readDiagnosticsDump(id);
     if (!dump) return reply.code(404).send({ error: "Not found" });
     return dump;
+  });
+  // One dump as a file: the bytes the folder holds under the name the row
+  // shows, so a report can be attached instead of pasted.
+  app.get("/api/diagnostics/:id/download", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const file = await readDiagnosticsDumpFile(id);
+    if (!file) return reply.code(404).send({ error: "Not found" });
+    reply.header(
+      "Content-Disposition",
+      `attachment; filename*=UTF-8''${encodeURIComponent(file.fileName)}`,
+    );
+    return reply
+      .type("application/json; charset=utf-8")
+      .header("Cache-Control", "no-store")
+      .send(file.body);
   });
   app.delete("/api/diagnostics/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
