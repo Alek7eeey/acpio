@@ -156,6 +156,13 @@ import {
   splitSlashCommandHighlight,
 } from "../lib/slashCommands";
 import { slashListStillLoading } from "../lib/sessionSlashCommands";
+import {
+  COMPOSER_MODES,
+  COMPOSER_MODE_LABEL_KEY,
+  composerModeOf,
+  stripComposerMode,
+  type ComposerMode,
+} from "../lib/composerMode";
 import { shouldShowGitComposerUi } from "../lib/gitUi";
 import styles from "./ChatPage.module.css";
 
@@ -306,12 +313,15 @@ function MsgMenuItem({
   label,
   shortcut,
   disabled,
+  active,
   onClick,
   children,
 }: {
   label: string;
   shortcut?: string;
   disabled?: boolean;
+  /** The row is the state in force rather than an offer (a checked mode). */
+  active?: boolean;
   onClick: () => void;
   children?: ReactNode;
 }) {
@@ -319,12 +329,14 @@ function MsgMenuItem({
     <button
       type="button"
       role="menuitem"
+      aria-current={active ? "true" : undefined}
       className={styles.msgActionMenuItem}
       disabled={disabled}
       onClick={onClick}
     >
       {children}
       <span className={styles.msgActionMenuLabel}>{label}</span>
+      {active ? <IconCheck /> : null}
       {shortcut ? <span className={styles.msgActionMenuKbd}>{shortcut}</span> : null}
     </button>
   );
@@ -808,6 +820,10 @@ function UserMessage({
 }) {
   const t = useT();
   const text = messagePlainText(message);
+  // A prompt sent in a mode carries the skill that runs it as its first token.
+  // The token is not the reader's text: the bubble shows what they wrote and
+  // the badge above it says which mode did the work.
+  const mode = composerModeOf(text);
   const ctxRef = useRef<MessageCtxHandle | null>(null);
   const fileParts = message.parts.filter((p) => p.type === "file");
   const textParts = message.parts.filter((p) => p.type === "text");
@@ -852,11 +868,22 @@ function UserMessage({
   });
 
   const body = text ? (
-    <div className={styles.userBubble} contentEditable={false} suppressContentEditableWarning>
-      {textParts.map((part) => (
+    // A message a mode sent wears that mode's colour as its whole face — the
+    // tint is the indicator, and the name sits quietly inside it. Agent mode
+    // leaves the bubble exactly as it always was.
+    <div
+      className={styles.userBubble}
+      contentEditable={false}
+      suppressContentEditableWarning
+      data-composer-mode={mode === "agent" ? undefined : mode}
+    >
+      {mode === "agent" ? null : (
+        <span className={styles.userModeLabel}>{t(COMPOSER_MODE_LABEL_KEY[mode])}</span>
+      )}
+      {textParts.map((part, index) => (
         <div key={part.id}>
           {highlightUserText(
-            String(part.payload.text ?? ""),
+            index === 0 ? stripComposerMode(String(part.payload.text ?? "")) : String(part.payload.text ?? ""),
             undefined,
             onSlashCommandClick,
             t("common.insertSlashCommand"),
@@ -909,9 +936,11 @@ function UserMessage({
       ) : null}
       <UserMessageActions
         messageId={message.id}
-        text={text}
+        // The reader's own words, so a copy carries them and an edit reopens
+        // them; the mode is re-applied on the way out (`withComposerMode`).
+        text={stripComposerMode(text)}
         createdAt={message.createdAt}
-        onEdit={() => onEdit(message.id, text)}
+        onEdit={() => onEdit(message.id, stripComposerMode(text))}
         ctxRef={ctxRef}
       />
     </div>
@@ -1198,6 +1227,21 @@ function MsgIcon({ children }: { children: ReactNode }) {
     <svg className={styles.msgActionIcon} viewBox="0 0 24 24" fill="none" aria-hidden>
       {children}
     </svg>
+  );
+}
+
+/** The one checked row of the field's mode switcher. */
+function IconCheck() {
+  return (
+    <MsgIcon>
+      <path
+        d="M5 12.5l4.5 4.5L19 7"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </MsgIcon>
   );
 }
 
@@ -5719,6 +5763,13 @@ function ChatThread() {
     () => mergeSlashCommands(activeSession?.slashCommands, t),
     [activeSession?.slashCommands, t],
   );
+  // The chat's mode: the skill its prompts run as. It belongs to the chat, not
+  // to the message, so it stays until the reader switches it back.
+  const sessionId = bind?.sessionId ?? null;
+  const composerMode = useAppStore(
+    (s) => (sessionId ? s.composerModes[sessionId] : undefined) ?? "agent",
+  );
+  const setComposerMode = useAppStore((s) => s.setComposerMode);
   const slashCtx = useMemo(() => getSlashContext(text, cursorPos), [text, cursorPos]);
   const filteredSlashCommands = useMemo(() => {
     if (!slashCtx) return [];
@@ -6316,20 +6367,27 @@ function ChatThread() {
     }
   };
 
+  /** Switch the chat's mode. The menu row is the whole interaction: the skill
+   *  it stands for is added on the way out, never typed into the field. */
+  const chooseComposerMode = (mode: ComposerMode) => {
+    setComposerMenu(null);
+    if (sessionId) setComposerMode(sessionId, mode);
+  };
+
   /**
    * Every row of the input's right-click menu writes itself into the field and
-   * stops there: a right click is a way to turn the draft into a plan, into the
-   * questions about it, or into a commit of it, without retyping it — not a way
-   * to send anything. The draft becomes the command's argument, the reader's
-   * Enter sends it.
+   * stops there: a right click is a way to turn the draft into the argument of
+   * a skill or of a commit of it, without retyping it — not a way to send
+   * anything. The draft becomes the command's argument, the reader's Enter
+   * sends it. `command` is written as it is: `/name` for a skill, bare for the
+   * git rows.
    */
-  const insertComposerCommand = (command: "plan" | "ask" | GitChangesAgentCommand) => {
+  const insertComposerCommand = (command: string) => {
     setComposerMenu(null);
     const draft = text.trim();
     // The space belongs to the command, empty draft or not: the caret lands
     // after it, so what is typed next is the argument, not the name.
-    const name = command === "plan" || command === "ask" ? `/${command}` : command;
-    const next = `${name} ${draft}`;
+    const next = `${command} ${draft}`;
     setText(next);
     setCursorPos(next.length);
     setComposerMultilineIfNeeded(next.includes("\n"));
@@ -8289,19 +8347,34 @@ function ChatThread() {
                   role="menu"
                   aria-label={t("chat.composerMenu")}
                 >
-                  <MsgMenuItem label="/plan" onClick={() => insertComposerCommand("plan")} />
-                  <MsgMenuItem label="/ask" onClick={() => insertComposerCommand("ask")} />
+                  {COMPOSER_MODES.map((mode) => (
+                    <MsgMenuItem
+                      key={mode}
+                      label={t(COMPOSER_MODE_LABEL_KEY[mode])}
+                      active={composerMode === mode}
+                      onClick={() => chooseComposerMode(mode)}
+                    >
+                      <span
+                        className={styles.modeDot}
+                        data-composer-mode={mode}
+                        aria-hidden
+                      />
+                    </MsgMenuItem>
+                  ))}
                   {/* The git rows write into the field like the skill ones: the
                       chip's own menu is what sends a commit straight. They need a
                       repo, or there is nothing to commit. */}
                   {git.status?.repo
-                    ? (["commit", "commit+push"] as const).map((command) => (
-                        <MsgMenuItem
-                          key={command}
-                          label={command}
-                          onClick={() => insertComposerCommand(command)}
-                        />
-                      ))
+                    ? [
+                        <div key="sep" className={styles.msgActionMenuSep} />,
+                        ...(["commit", "commit+push"] as const).map((command) => (
+                          <MsgMenuItem
+                            key={command}
+                            label={command}
+                            onClick={() => insertComposerCommand(command)}
+                          />
+                        )),
+                      ]
                     : null}
                   {/* The basic rows come after the quick ones: an empty press
                       on the field is where a reader looks for paste. */}
@@ -8633,6 +8706,35 @@ function ChatThread() {
                 </svg>
               </button>
               )}
+              {/* The chat's mode, right of the paperclip: a pill in the mode's
+                  own colour, so the reader sees how the prompt will go out
+                  while typing. The mode is chosen by the right click; the pill
+                  carries the one way out of it. */}
+              {composerMode !== "agent" ? (
+                <span
+                  className={styles.modePill}
+                  data-composer-mode={composerMode}
+                  title={t(COMPOSER_MODE_LABEL_KEY[composerMode])}
+                >
+                  {t(COMPOSER_MODE_LABEL_KEY[composerMode])}
+                  <button
+                    type="button"
+                    className={styles.modePillExit}
+                    aria-label={t("chat.modeExit")}
+                    title={t("chat.modeExit")}
+                    onClick={() => chooseComposerMode("agent")}
+                  >
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" aria-hidden>
+                      <path
+                        d="M6 6l12 12M18 6 6 18"
+                        stroke="currentColor"
+                        strokeWidth="2.4"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  </button>
+                </span>
+              ) : null}
               <input
                 ref={deviceFileInputRef}
                 type="file"

@@ -50,6 +50,22 @@ describe("buildPromptRailItems", () => {
     expect(items.map((i) => i.prompt)).toEqual(["first prompt", "second prompt"]);
   });
 
+  // A prompt sent in a mode carries the skill that runs it; the rail is a list
+  // of what the reader wrote, so it reads like the bubble and not like the wire.
+  it("drops the mode's skill token from the prompt", () => {
+    const messages = [
+      message("u1", "user", ["/plan переписать парсер"]),
+      message("u2", "user", ["/investigate почему теряется значение"]),
+      message("u3", "user", ["обычный промпт"]),
+    ];
+
+    expect(buildPromptRailItems(messages).map((i) => i.prompt)).toEqual([
+      "переписать парсер",
+      "почему теряется значение",
+      "обычный промпт",
+    ]);
+  });
+
   it("shows the head of the answer that followed the prompt", () => {
     const messages = [
       message("u1", "user", ["prompt"]),

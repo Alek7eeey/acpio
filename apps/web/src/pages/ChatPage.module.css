@@ -1551,6 +1551,51 @@
   user-select: none;
 }
 
+/* One colour per prompt mode, worn by every surface that shows the mode: the
+   chip in the composer row, the dot in the switcher, and the message it sent.
+   Attribute selectors stay global, so the palette serves both modules. */
+[data-composer-mode="agent"] {
+  --mode-tint: var(--text-secondary);
+}
+
+[data-composer-mode="plan"] {
+  --mode-tint: #7c8cff;
+}
+
+[data-composer-mode="ask"] {
+  --mode-tint: #3fbf8f;
+}
+
+[data-composer-mode="investigate"] {
+  --mode-tint: #e0a03c;
+}
+
+/* A message a mode sent wears that mode as its whole face: the tint is the
+   indicator, and the name just inside it says which mode. The skill that ran
+   the prompt is not in the text at all (see `stripComposerMode`). */
+.userBubble[data-composer-mode] {
+  background: color-mix(in srgb, var(--mode-tint) 12%, var(--bg-secondary));
+  border: 1px solid color-mix(in srgb, var(--mode-tint) 30%, transparent);
+  padding-top: 7px;
+}
+
+:global(:root:not([data-theme="dark"])) .userBubble[data-composer-mode],
+:global([data-theme="light"]) .userBubble[data-composer-mode] {
+  background: color-mix(in srgb, var(--mode-tint) 13%, #ecf2ff);
+}
+
+.userModeLabel {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1.15;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--mode-tint);
+  user-select: none;
+}
+
 /* ── A settled background job ────────────────────────────────────────────────
    The runner's note travels as a prompt (that is how the agent is woken), so
    the transcript holds it as a user message — but it is machine output, not
@@ -2175,6 +2220,11 @@ button.userSlashCmd:focus-visible {
   width: 16px;
   height: 16px;
   flex-shrink: 0;
+}
+
+/* The checked row of the mode switcher: the mode in force, not an offer. */
+.msgActionMenuItem[aria-current="true"] svg {
+  color: var(--accent);
 }
 
 .msgActionMenuSep {
@@ -3410,6 +3460,67 @@ button.userSlashCmd:focus-visible {
 
 .attachBtn {
   order: 1;
+}
+
+/* The chat's mode, in the field right of the paperclip: the pill says how the
+   prompt will go out while the reader types. Read-only — the mode is chosen by
+   the right click, and a message carries the same colour (`data-composer-mode`
+   above). `order: 1` keeps it beside the attach button, before the chips. */
+.modePill {
+  order: 1;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--mode-tint) 34%, transparent);
+  background: color-mix(in srgb, var(--mode-tint) 15%, transparent);
+  color: var(--mode-tint);
+  font-size: 0.78rem;
+  font-weight: 650;
+  line-height: 1;
+  white-space: nowrap;
+  user-select: none;
+}
+
+/* The way back to agent, inside the pill — the same × the reference UI puts on
+   its mode chip. */
+.modePillExit {
+  display: inline-grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  margin: 0 -4px 0 1px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  opacity: 0.65;
+  cursor: pointer;
+  transition: opacity var(--motion), background var(--motion);
+}
+
+.modePillExit:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--mode-tint) 26%, transparent);
+}
+
+.modePillExit:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--mode-tint) 45%, transparent);
+  outline-offset: 1px;
+  opacity: 1;
+}
+
+/* The dot that leads each row of the field's mode switcher. */
+.modeDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--mode-tint);
+  flex: 0 0 auto;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--mode-tint) 18%, transparent);
 }
 
 /* Pending attachments above the pill (composer) and attached files inside a

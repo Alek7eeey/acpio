@@ -1,0 +1,125 @@
+// @vitest-environment jsdom
+//
+// The chat's mode is a skill in front of the reader's words, so the prefix has
+// to reach the wire — and only there: the field keeps what the reader typed,
+// the queue keeps its rows readable, and an explicit `/command` is the reader's
+// own instruction rather than a mode's.
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { SessionDetailDto, SessionDto } from "@acpio/shared";
+
+const apiMock = vi.hoisted(() => ({
+  listSessions: vi.fn(),
+  getSession: vi.fn(),
+  getLiveTurn: vi.fn(),
+  prompt: vi.fn(),
+  createSession: vi.fn(),
+}));
+vi.mock("./api", () => ({ api: apiMock }));
+
+import { useAppStore } from "./store";
+
+const SID = "t-mode";
+
+function detail(status: SessionDetailDto["status"] = "idle"): SessionDetailDto {
+  return {
+    id: SID,
+    title: "Mode chat",
+    provider: "builtin",
+    cwd: "C:/proj",
+    mode: "agent",
+    status,
+    acpSessionId: "a1",
+    themeId: null,
+    sortOrder: 0,
+    pinned: false,
+    archived: false,
+    mcpDisabledIds: [],
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    lastMessageAt: "2026-01-01T00:00:00.000Z",
+    messages: [],
+  };
+}
+
+function row(): SessionDto {
+  const { messages: _m, ...rest } = detail();
+  return rest;
+}
+
+function settle(mode: "agent" | "plan" | "ask" | "investigate") {
+  useAppStore.setState({
+    sessions: [row()],
+    activeSessionId: SID,
+    activeSession: detail(),
+    sessionDetails: { [SID]: detail() },
+    sessionLoading: false,
+    inflight: 0,
+    inflightBySession: { [SID]: 0 },
+    promptEpoch: 0,
+    cancelledPromptEpoch: 0,
+    promptEpochBySession: {},
+    cancelledPromptEpochBySession: {},
+    promptQueue: [],
+    error: null,
+    composerModes: { [SID]: mode },
+    settings: { ...useAppStore.getState().settings, multitask: false },
+  });
+}
+
+const sentText = () => apiMock.prompt.mock.calls[0]?.[1];
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  localStorage.clear();
+  apiMock.prompt.mockResolvedValue(undefined);
+});
+
+describe("the chat's mode on the way out", () => {
+  it("sends the reader's words with the mode's skill in front", async () => {
+    settle("plan");
+    await useAppStore.getState().sendPrompt("переписать парсер", { sessionId: SID });
+    expect(apiMock.prompt).toHaveBeenCalledWith(SID, "/plan переписать парсер", {});
+  });
+
+  it("leaves an agent-mode prompt exactly as typed", async () => {
+    settle("agent");
+    await useAppStore.getState().sendPrompt("переписать парсер", { sessionId: SID });
+    expect(sentText()).toBe("переписать парсер");
+  });
+
+  it("backs off a command the reader typed themselves", async () => {
+    settle("investigate");
+    await useAppStore.getState().sendPrompt("/compact", { sessionId: SID });
+    expect(sentText()).toBe("/compact");
+  });
+
+  it("never puts a mode in front of the harness's own prompt", async () => {
+    settle("ask");
+    await useAppStore.getState().sendPrompt("задача завершилась", {
+      sessionId: SID,
+      internal: true,
+    });
+    expect(sentText()).toBe("задача завершилась");
+  });
+
+  it("prepends the mode when a queued prompt is delivered", async () => {
+    settle("plan");
+    // The agent is mid-turn: the message waits in the queue, readable as typed.
+    useAppStore.setState({
+      activeSession: detail("running"),
+      sessionDetails: { [SID]: detail("running") },
+      sessions: [{ ...row(), status: "running" }],
+      inflight: 1,
+      inflightBySession: { [SID]: 1 },
+    });
+    await useAppStore.getState().sendPrompt("после шага", { sessionId: SID });
+    const item = useAppStore.getState().promptQueue[0]!;
+    expect(item.text).toBe("после шага");
+    expect(apiMock.prompt).not.toHaveBeenCalled();
+
+    await useAppStore.getState().deliverQueuedPrompt(item.id, "afterStep");
+    expect(apiMock.prompt).toHaveBeenCalledWith(SID, "/plan после шага", {
+      delivery: "afterStep",
+    });
+  });
+});

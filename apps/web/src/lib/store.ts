@@ -70,6 +70,12 @@ import {
   setComposerDraftPersistSink,
 } from "./composerDrafts";
 import { readStoredPromptQueue, writeStoredPromptQueue } from "./promptQueueStorage";
+import {
+  readComposerModes,
+  storeComposerMode,
+  withComposerMode,
+  type ComposerMode,
+} from "./composerMode";
 
 // Shell output is never persisted — drop legacy log key if present.
 if (typeof window !== "undefined") {
@@ -541,6 +547,13 @@ type AppState = {
    */
   deliverQueuedPrompt: (id: string, delivery: PromptDelivery) => Promise<void>;
   drainPromptQueue: () => Promise<void>;
+  /**
+   * The skill a chat's prompts run as — `agent` sends the reader's words alone.
+   * Kept per session and remembered in the browser, so the chat stays in the
+   * mode it was left in until the reader switches back.
+   */
+  composerModes: Record<string, ComposerMode>;
+  setComposerMode: (sessionId: string, mode: ComposerMode) => void;
   /** Optimistic local toggle; the save happens in the background. */
   setMultitask: (value: boolean) => Promise<void>;
   /** `keepQueue` leaves the queued requests alone (a promotion, not a halt). */
@@ -2449,6 +2462,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   cancelledPromptEpoch: -1,
   // A reload finds the requests the agent was never handed; the boot drain sends them.
   promptQueue: readStoredPromptQueue(),
+  composerModes: readComposerModes(),
   inflight: 0,
   inflightBySession: {},
   promptEpochBySession: {},
@@ -3644,15 +3658,21 @@ export const useAppStore = create<AppState>((set, get) => ({
       });
     }
     try {
-      await api.prompt(item.sessionId, item.text, {
-        delivery,
-        // An edited message keeps its edit: the server truncates and regenerates
-        // it, which is itself an interrupt for the live turn.
-        ...(item.editMessageId
-          ? { editMessageId: resolveServerMessageId(item.editMessageId, item.sessionId) }
-          : {}),
-        ...(item.attachments?.length ? { attachments: item.attachments } : {}),
-      });
+      await api.prompt(
+        item.sessionId,
+        item.sessionId
+          ? withComposerMode(item.text, get().composerModes[item.sessionId])
+          : item.text,
+        {
+          delivery,
+          // An edited message keeps its edit: the server truncates and
+          // regenerates it, which is itself an interrupt for the live turn.
+          ...(item.editMessageId
+            ? { editMessageId: resolveServerMessageId(item.editMessageId, item.sessionId) }
+            : {}),
+          ...(item.attachments?.length ? { attachments: item.attachments } : {}),
+        },
+      );
     } catch (err) {
       // Nothing reached the server: put the message back (at the head — it was
       // meant for now) and say why, rather than losing it silently. Undo the
@@ -3672,6 +3692,11 @@ export const useAppStore = create<AppState>((set, get) => ({
         error: err instanceof Error ? err.message : String(err),
       });
     }
+  },
+
+  setComposerMode(sessionId, mode) {
+    set((s) => ({ composerModes: { ...s.composerModes, [sessionId]: mode } }));
+    storeComposerMode(sessionId, mode);
   },
 
   async setMultitask(value) {
@@ -3735,10 +3760,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     void get().drainPromptQueue();
   },
 
-  async runSendPrompt(text, opts, { optimistic = true } = {}) {
+  async runSendPrompt(rawText, opts, { optimistic = true } = {}) {
     const id = opts?.sessionId ?? get().activeSessionId;
     // The harness's own prompt is not the reader's text: their draft stays.
     const internal = opts?.internal === true;
+    // The chat's mode is the skill in front of the reader's words, and this is
+    // the one place it lands — every path (queue drain, steer, edit) comes
+    // through here. The harness's own prompt carries no mode, and a message
+    // edited back out of the field already has its prefix.
+    const text =
+      internal || !id ? rawText : withComposerMode(rawText, get().composerModes[id]);
     set({ error: null });
     // The text is now a real message; its composer draft must not linger in the
     // persisted map (or resurrect after a reload). Drop it from the live

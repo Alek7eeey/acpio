@@ -1,5 +1,6 @@
 import { isBackgroundJobNote, type MessageDto } from "@acpio/shared";
 import { messagePlainText } from "./messageText";
+import { stripComposerMode } from "./composerMode";
 
 /** Prompt text kept for one rail row: a row is a reminder, and a pasted
  *  book-sized prompt must not build a page-tall tooltip. */
@@ -153,7 +154,9 @@ export function buildPromptRailItems(messages: MessageDto[]): PromptRailItem[] {
     }
     items.push({
       id: row.msg.id,
-      prompt: clip(row.text, RAIL_PROMPT_CHARS),
+      // A mode's skill is not the reader's words: the thread shows a badge for
+      // it, and a row reading `/plan …` would put the token back on screen.
+      prompt: clip(stripComposerMode(row.text), RAIL_PROMPT_CHARS),
       reply: clip(reply.join("\n\n"), RAIL_REPLY_CHARS),
     });
   }

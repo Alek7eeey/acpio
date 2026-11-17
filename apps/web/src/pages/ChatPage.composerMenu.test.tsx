@@ -1,21 +1,28 @@
 // @vitest-environment jsdom
 //
-// Right click in the composer offers the quick commands, and only writes them
-// into the field: the draft becomes the skill's own argument — a draft turned
-// into a plan without being retyped — and the reader's Enter is what sends it.
+// Right click in the composer switches the chat's mode: the modes are skills
+// (`plan`, `ask`, `investigate`) the reader never types — the prefix lands on
+// the way out, the bubble hides it again and shows the mode over the message.
 // The basic editing rows (paste, select all, undo, redo) come after them.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { DEFAULT_SETTINGS, type SessionDetailDto } from "@acpio/shared";
+import { DEFAULT_SETTINGS, type MessageDto, type SessionDetailDto } from "@acpio/shared";
 import { composerDraftSnapshot, forgetComposerDraft } from "../lib/composerDrafts";
 import { useAppStore } from "../lib/store";
 import { I18nProvider } from "../lib/i18n";
 import { ChatPage } from "./ChatPage";
 
 vi.mock("../lib/api", () => {
-  const target: Record<string, unknown> = {};
+  // Settings are the whole snapshot, never a bare patch: the store replaces its
+  // copy with what a save answers, and an empty answer would take the composer's
+  // own chips with it (see `ComposerMetaChips`).
+  const echo = async (patch?: Record<string, unknown>) => ({ ...DEFAULT_SETTINGS, ...patch });
+  const target: Record<string, unknown> = {
+    getSettings: vi.fn(echo),
+    updateSettings: vi.fn(echo),
+  };
   return {
     api: new Proxy(target, {
       get: (t, prop: string) => {
@@ -97,6 +104,26 @@ function emptyChat(): SessionDetailDto {
   };
 }
 
+/** A prompt the reader sent in plan mode: the skill rides in the message text. */
+function planMessage(): MessageDto {
+  return {
+    id: "m-plan",
+    sessionId: "s1",
+    role: "user",
+    createdAt: "2026-01-01T00:00:01.000Z",
+    parts: [
+      {
+        id: "m-plan-text",
+        messageId: "m-plan",
+        type: "text",
+        order: 0,
+        payload: { text: "/plan переписать парсер" },
+        createdAt: "2026-01-01T00:00:01.000Z",
+      },
+    ],
+  };
+}
+
 const sendPrompt = vi.fn(async () => {});
 
 beforeEach(() => {
@@ -122,9 +149,14 @@ beforeEach(() => {
     cancelledPromptEpochBySession: {},
     pendingQuestion: null,
     promptQueue: [],
+    // The mode is the browser's, so a case that switched must not hand it on.
+    composerModes: {},
     sendPrompt,
     // The gate belongs to the harness settings, not to what this test checks.
     warnIfHarnessNotConfigured: () => false,
+    // Nor does the agent probe: its mocked answer (`{}`) replaces the whole
+    // settings snapshot when it lands, and a longer case would render into it.
+    probeAllAgents: async () => {},
   } as never);
 });
 
@@ -152,48 +184,82 @@ describe("right click in the composer", () => {
     return document.querySelector('[role="menu"]')!;
   };
 
-  it("writes the draft into the field as the plan skill's argument", async () => {
-    const { container } = renderChat();
-    const input = container.querySelector("textarea")!;
-    await userEvent.type(input, "переписать парсер");
-
-    const menu = menuOf(input);
-    expect(menu.textContent).toContain("/plan");
-    expect(menu.textContent).toContain("/ask");
-
-    await userEvent.click(screen.getByRole("menuitem", { name: "/plan" }));
-    // Nothing left the input: the draft is now the command's argument, and the
-    // reader decides when it goes out.
-    expect(sendPrompt).not.toHaveBeenCalled();
-    expect(input.value).toBe("/plan переписать парсер");
-    expect(document.querySelector('[role="menu"]')).toBeNull();
-  }, 20_000);
-
-  it("writes the bare command with the space its argument follows", async () => {
-    const { container } = renderChat();
-    const input = container.querySelector("textarea")!;
-
-    menuOf(input);
-    await userEvent.click(screen.getByRole("menuitem", { name: "/ask" }));
-    expect(sendPrompt).not.toHaveBeenCalled();
-    // The caret sits after the space: typing continues the argument instead of
-    // growing the command's name.
-    expect(input.value).toBe("/ask ");
-  }, 20_000);
-
-  it("offers the quick commands, then the basic editing rows", async () => {
+  it("offers the chat's modes, then the basic editing rows", async () => {
     const { container } = renderChat();
     menuOf(container.querySelector("textarea")!);
     // No repo in this case: the git rows are absent, and the field's own
-    // editing rows follow the quick commands.
+    // editing rows follow the modes.
     expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
-      "/plan",
-      "/ask",
+      "Агент",
+      "План",
+      "Вопрос",
+      "Разбор",
       "Вставить",
       "Выделить всё",
       "Отменить",
       "Повторить",
     ]);
+    // A default chat is in agent mode, and the row says so.
+    expect(
+      screen.getByRole("menuitem", { name: "Агент" }).getAttribute("aria-current"),
+    ).toBe("true");
+  }, 20_000);
+
+  it("switches the chat's mode without touching the draft", async () => {
+    const { container } = renderChat();
+    const input = container.querySelector("textarea")!;
+    await userEvent.type(input, "переписать парсер");
+
+    menuOf(input);
+    await userEvent.click(screen.getByRole("menuitem", { name: "План" }));
+
+    // The mode is the chat's, not the message's: nothing is sent, and the
+    // reader's words stay exactly as typed.
+    expect(sendPrompt).not.toHaveBeenCalled();
+    expect(input.value).toBe("переписать парсер");
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    // No second control appears for it: the mode marks the model chip in the
+    // field (a dot in the mode's colour) and outlives the page — the mode is
+    // the chat's until it is switched back.
+    expect(container.querySelector('[data-composer-mode="plan"]')).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "План" })).toBeNull();
+    expect(localStorage.getItem("acpio.composerModes.v1")).toContain('"s1":"plan"');
+
+    // The right click still opens the switcher, with the check on the mode in
+    // force.
+    menuOf(input);
+    expect(
+      screen.getByRole("menuitem", { name: "План" }).getAttribute("aria-current"),
+    ).toBe("true");
+  }, 20_000);
+
+  it("leaves the mode from the cross in the field's pill", async () => {
+    const { container } = renderChat();
+    const input = container.querySelector("textarea")!;
+    menuOf(input);
+    await userEvent.click(screen.getByRole("menuitem", { name: "План" }));
+    expect(container.querySelector('[data-composer-mode="plan"]')).toBeTruthy();
+
+    // The pill carries the way back to agent: the mode is the chat's, so one
+    // press ends it for everything sent from here on.
+    await userEvent.click(screen.getByRole("button", { name: "Вернуться к агенту" }));
+    expect(container.querySelector('[data-composer-mode]')).toBeNull();
+    expect(localStorage.getItem("acpio.composerModes.v1")).not.toContain('"s1"');
+  }, 20_000);
+
+  it("shows a sent message in its mode: the badge, not the skill token", async () => {
+    const detail = { ...emptyChat(), messages: [planMessage()] };
+    useAppStore.setState({
+      sessions: [detail],
+      activeSession: detail,
+      sessionDetails: { s1: detail },
+    } as never);
+    renderChat();
+
+    // The prefix is what the agent runs; the reader sees their own words.
+    expect(screen.getByText("переписать парсер")).toBeTruthy();
+    expect(screen.queryByText(/\/plan/)).toBeNull();
+    expect(screen.getAllByText("План").length).toBeGreaterThan(0);
   }, 20_000);
 
   it("writes the git command into the field instead of sending it", async () => {
@@ -213,7 +279,8 @@ describe("right click in the composer", () => {
     expect(menu.textContent).toContain("commit+push");
 
     await userEvent.click(screen.getByRole("menuitem", { name: "commit+push" }));
-    // Same as the skill rows: the command waits in the field for Enter.
+    // The git rows are the ones that still write into the field: the command
+    // waits there for Enter.
     expect(sendPrompt).not.toHaveBeenCalled();
     expect(input.value).toBe("commit+push переписать парсер");
     expect(document.querySelector('[role="menu"]')).toBeNull();
