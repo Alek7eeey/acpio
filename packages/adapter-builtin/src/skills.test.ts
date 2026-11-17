@@ -225,6 +225,12 @@ describe("discoverAgentSkills", () => {
     expect(found.find((s) => s.name === "verify-bugfix")?.path.startsWith(BUILTIN_SKILLS_DIR)).toBe(
       true,
     );
+    // `investigate` delivers an answer, not a change: the flag lives in its own
+    // frontmatter, and the harness withholds `write`/`edit` on it.
+    expect(found.find((s) => s.name === "investigate")).toMatchObject({
+      builtin: true,
+      readOnly: true,
+    });
   });
 
   it("keeps a folder's own skills and lets a shipped name win the clash", async () => {
