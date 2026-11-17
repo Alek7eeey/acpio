@@ -19,6 +19,27 @@ import path from "node:path";
  * is why the line alone carries the hashes that spot a moving head, and why the
  * bodies are opt-in.
  */
+/** What the wrapper saw of one request's head, before the request is sent. */
+export interface WireHeadInfo {
+  /** 1-based number of this request within the chat (and lane). */
+  seq: number;
+  /** Messages this request carries. */
+  messages: number;
+  /** Messages the previous request carried, 0 when there was no previous one. */
+  prevMessages: number;
+  /** Leading messages whose bytes still match the previous request. */
+  prefixSame: number;
+  systemChanged: boolean;
+  toolsChanged: boolean;
+  /**
+   * True when nothing ahead of the new tail moved: same system prompt, same
+   * tools, and every previous message byte-for-byte in place. The provider's
+   * cache stops only on a moved head, so a cold miss under an intact head is
+   * the provider's own doing.
+   */
+  intact: boolean;
+}
+
 export interface WireLogTarget {
   /** The chat these requests belong to — one log file per chat. */
   sessionId: string;
@@ -99,6 +120,15 @@ export function isContextDriftStop(err: unknown): boolean {
 export interface WireLogOptions {
   /** Told when a request's head no longer matches the one before it. */
   onDrift?: ContextDriftListener;
+  /**
+   * Told about every request's head, whether it moved or not: the answer is the
+   * one thing a cache miss cannot be blamed on without, and the chat's own
+   * endpoint asks for it on every call — a bill split into "the head moved" and
+   * "the provider's cache was cold" is what the tokens panel shows.
+   * `intact` means the bytes went out exactly as they went out last time, so a
+   * zero `cached` on such a request is the provider's own, not ours.
+   */
+  onHead?: (head: WireHeadInfo) => void;
   /**
    * Whether the head is compared at all — the Diagnostics switch. Asked per
    * request, so flipping it reaches the very next call. Defaults to “on when
@@ -379,7 +409,11 @@ export function withWireLog(
     // A switch the reader turns must reach the next call, not the next session:
     // the endpoint outlives the turn, so the answer is asked per request.
     const watching = (options.watch?.() ?? options.onDrift !== undefined) || logging;
-    if (!watching) return base(input, init);
+    // A head verdict that only prices a request is not the diagnostic switch's
+    // business: the chat's own endpoint asks for it on every call so the tokens
+    // panel can say how much of the bill was the provider's cold cache. The
+    // switch still gates the warning card alone.
+    if (!watching && !options.onHead) return base(input, init);
     const started = Date.now();
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : String(input?.url ?? "");
     const rawBody = typeof init?.body === "string" ? init.body : "";
@@ -423,6 +457,15 @@ export function withWireLog(
       before !== undefined &&
       prevMessagesOf(before) > 0 &&
       (prefixSame! < prevMessagesOf(before) || systemChanged || toolsChanged);
+    options.onHead?.({
+      seq,
+      messages: messages.length,
+      prevMessages: before ? prevMessagesOf(before) : 0,
+      prefixSame: prefixSame ?? 0,
+      systemChanged,
+      toolsChanged,
+      intact: before !== undefined && !drifted,
+    });
     // The record of this request goes to disk before the reader is asked whether
     // to send it. The card that asks offers the archive of this chat, and a body
     // written after the answer was simply absent from it — the one body support

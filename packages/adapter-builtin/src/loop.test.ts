@@ -944,6 +944,42 @@ describe("runTurn failure handling", () => {
     expect(outcome.stopReason).toBe("end_turn");
   });
 
+  it("hands back a cancelled turn's finished steps instead of throwing them away", async () => {
+    // The step the provider already answered is the head of the next request:
+    // chat 8294560b cancelled mid-turn and read "совпало 3 из 6 сообщений,
+    // сейчас 4" on its next prompt, paying the whole history again.
+    const controller = new AbortController();
+    const step = [
+      { role: "assistant", content: [{ type: "tool-call", toolCallId: "t1", toolName: "bash", input: {} }] },
+      { role: "tool", content: [{ type: "tool-result", toolCallId: "t1", toolName: "bash", output: { type: "text", value: "ok" } }] },
+    ] as unknown as ModelMessage[];
+    // The reader cancels while a tool runs: the SDK finishes the step behind it,
+    // then tears the stream down, and none of its result promises settle.
+    async function* cancelledAtTheTool(): AsyncGenerator<unknown> {
+      yield { type: "tool-call", toolCallId: "t2", toolName: "bash", input: {} };
+      onStep?.({ response: { messages: step } });
+      controller.abort();
+      throw new Error("This operation was aborted");
+    }
+    let onStep: ((step: { response: { messages: ModelMessage[] } }) => void) | undefined;
+    vi.mocked(streamText).mockImplementation(((
+      options: { onStepFinish?: (step: { response: { messages: ModelMessage[] } }) => void },
+    ) => {
+      onStep = options.onStepFinish;
+      return {
+        fullStream: cancelledAtTheTool(),
+        responseMessages: Promise.reject(new Error("This operation was aborted")),
+        finishReason: Promise.reject(new Error("This operation was aborted")),
+        usage: Promise.reject(new Error("This operation was aborted")),
+        steps: Promise.reject(new Error("This operation was aborted")),
+      };
+    }) as never);
+
+    const outcome = await runTurn(turnOpts({ abortSignal: controller.signal }));
+    expect(outcome.cancelled).toBe(true);
+    expect(outcome.response).toEqual(step);
+  });
+
   // A tool can hold the wire quiet for minutes; the host's idle ceiling reads
   // silence as a hang (the 2026-10-08 "агент останавливается" incident).
   it("heartbeats while a tool runs, and only while a tool runs", async () => {

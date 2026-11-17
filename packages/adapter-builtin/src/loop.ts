@@ -60,6 +60,20 @@ export interface TurnOptions {
    * render) and for the response the caller stores.
    */
   toolImages?: Map<string, ToolImagePart[]>;
+  /**
+   * Store this much of the turn, now. Called after every step with the messages
+   * that step produced (folded with the steers that landed in front of it), so a
+   * turn that has already acted is on disk before it ends.
+   *
+   * A turn settles its history only at the end — and the end may never come: the
+   * process dies, the server restarts, or the agent parks on a question for
+   * minutes and the transport is rebuilt under it. Everything the turn did then
+   * leaves the history it resumes from, and the work is gone from the model's
+   * memory while its files sit on disk (chat 0be3205c: a 484-message request
+   * followed by a 479-message one built from a transcript that never saw the
+   * three tool calls, the file it wrote or the job it started).
+   */
+  storeStep?: (messages: ModelMessage[]) => void;
 }
 
 export interface TurnOutcome {
@@ -90,6 +104,14 @@ export interface TurnOutcome {
   /** Mid-turn messages folded into the stream, each with the history index it
    * belongs at — splice them into `response` to keep a truthful transcript. */
   injected?: Array<{ at: number; message: ModelMessage }>;
+  /** How many of the turn's messages `storeStep` already took, counted from the
+   * head of the folded response. The caller appends only what is left — a turn
+   * stored as it ran must not be stored again at the end. */
+  stored?: number;
+  /** The caller cancelled the turn. `response` still carries every step the
+   * provider already answered — those messages are the head of the next
+   * request, so the caller must store them before ending the turn. */
+  cancelled?: boolean;
 }
 
 /**
@@ -214,6 +236,20 @@ export interface ToolImagePart {
 
 /** What the user message carrying tool pictures says above them. */
 export const TOOL_IMAGES_NOTE = "Attached image(s) from the tool result(s) above:";
+
+/**
+ * True for the picture note {@link attachToolImages} puts into the view.
+ *
+ * It is the one message of a request that is not in the stored transcript, so a
+ * count taken over a view that carries one is not a count over the history — the
+ * caller that reads a view index as a stored index has to check this first
+ * (see the mid-turn digest in `agent.ts`).
+ */
+export function isToolImagesNote(message: ModelMessage | undefined): boolean {
+  if (!message || message.role !== "user" || !Array.isArray(message.content)) return false;
+  const [note] = message.content as unknown as Array<Record<string, unknown>>;
+  return note?.type === "text" && note.text === TOOL_IMAGES_NOTE;
+}
 
 /**
  * Tool pictures → one user message per tool result that carried them.
@@ -424,6 +460,20 @@ export function digestMessage(summary: string): ModelMessage {
 }
 
 /**
+ * The summary a digest message carries, or `undefined` for any other message.
+ *
+ * A view that starts with a digest is not indexed like the stored transcript:
+ * its head stands for many messages at once, so a pass that folds it has to
+ * count its `covered` from the digest — otherwise it declares the prefix
+ * unfolded, folds it a second time and rewrites bytes the provider has cached.
+ */
+export function digestSummaryOf(message: ModelMessage | undefined): string | undefined {
+  const text = typeof message?.content === "string" ? message.content : undefined;
+  if (!text?.startsWith(COMPACT_MARKER)) return undefined;
+  return text.slice(COMPACT_MARKER.length).trim();
+}
+
+/**
  * The view the model actually gets: the digest standing in for the covered
  * prefix, then the verbatim tail. The covered prefix is spoken for — storage
  * promises it is never sent verbatim again — so every size judgement (the
@@ -460,6 +510,15 @@ export interface CompactHistoryOptions {
   keepRecentPercent?: number;
   /** Digest of the prefix covered by an earlier pass, if any. */
   state?: CompactionState;
+  /**
+   * What the provider itself counted for the request these messages went out
+   * in — the truth the trigger is judged by when there is one.
+   * `estimateTokens` reads JSON chars / 4 and ran 20% low on a Russian,
+   * tool-heavy history (chat 9590a5eb: billed 258 133 against an estimate of
+   * 200 135), so a 20% line fired at 26% of the window and the reader saw a
+   * context far past the percent they set.
+   */
+  measuredTokens?: number;
   /** First-time digest of the dropped turns. */
   summarize: (dropped: ModelMessage[]) => Promise<string>;
   /**
@@ -492,7 +551,10 @@ export async function compactHistory(
   // The line is read on the view the pass would leave behind: the digest
   // already stands in for the covered prefix, which no request sees again.
   const entered = promptView(messages, state);
-  if (!(contextWindow > 0) || estimateTokens(entered) <= line) {
+  // The estimate is a floor, not a verdict: the provider's own count outvotes
+  // it whenever a request carrying this history has been billed.
+  const filled = Math.max(estimateTokens(entered), opts.measuredTokens ?? 0);
+  if (!(contextWindow > 0) || filled <= line) {
     return { messages: entered, ...keepState };
   }
 
@@ -742,6 +804,14 @@ export async function runTurn(opts: TurnOptions): Promise<TurnOutcome> {
   // Reasoning streamed by the step being cut — kept so the aborted step's
   // thinking reaches the history instead of vanishing with the call.
   let stepReasoning = "";
+  /** Steps the SDK has finished so far, in the message shape it sends back. */
+  const finished: ModelMessage[] = [];
+  /** Step messages already handed to `storeStep` — the ones `at` is measured against. */
+  let stepsStored = 0;
+  /** Everything handed over so far, the steers in front of the steps included. */
+  let stored = 0;
+  /** Steers already handed over: `injected` is ordered by `at`. */
+  let injectedStored = 0;
   // Once the step starts acting (text or a tool call) the fuse stands down:
   // a half-streamed answer or call is never torn apart by a thinking cap.
   let stepActed = false;
@@ -752,7 +822,36 @@ export async function runTurn(opts: TurnOptions): Promise<TurnOutcome> {
     messages: opts.messages,
     tools: opts.tools,
     abortSignal: cut.signal,
-    stopWhen: isStepCount(maxSteps),
+    // A stopped turn must not open another model call. The tool it was waiting
+    // for still finishes on its own — the bash child is killed through the same
+    // signal, but the step lands either way — and the SDK's step loop would take
+    // that result and ask the model again. That request belongs to a turn the
+    // reader already stopped, and it lands after the next prompt's first one:
+    // chat 8294560b ran two such histories under one session for 90 minutes,
+    // each evicting the other's cached prefix (24 %, 19 %, 0 % of the prompt
+    // read from cache). Refusing here is what keeps one loop per session.
+    stopWhen: (step) => opts.abortSignal.aborted || isStepCount(maxSteps)(step),
+    // Each step as it lands, in the SDK's own message shape. A cancelled turn
+    // resolves none of the result promises below — not even the steps it
+    // already finished — and those messages are the head of the next request:
+    // dropping them made chat 8294560b read "совпало 3 из 6 сообщений, сейчас 4"
+    // and pay for its own history again. This is the one record of them.
+    onStepFinish: (step) => {
+      finished.push(...step.response.messages);
+      if (!opts.storeStep) return;
+      // A steer lands exactly on a step boundary (`at` = messages produced so
+      // far), so it rides out in front of the step that follows it — the same
+      // place `foldInjected` would put it in the finished response.
+      const delta: ModelMessage[] = [];
+      while (injectedStored < injected.length && injected[injectedStored].at <= stepsStored) {
+        delta.push(injected[injectedStored].message);
+        injectedStored += 1;
+      }
+      delta.push(...attachToolImages(step.response.messages, opts.toolImages));
+      stepsStored += step.response.messages.length;
+      stored += delta.length;
+      opts.storeStep(delta);
+    },
     // 0 = the provider's own ceiling: the key must not go out at all.
     ...(outputCap > 0 ? { maxOutputTokens: outputCap } : {}),
     maxRetries: 2,
@@ -941,7 +1040,13 @@ export async function runTurn(opts: TurnOptions): Promise<TurnOutcome> {
     // reason) — that is the cut, not a provider failure: the partial thinking
     // is folded below and the turn carries on through the continuation. Any
     // other stream error keeps the old shape and propagates.
-    if (!reasoningCut) throw err;
+    //
+    // A turn the reader cancelled is no dead stream either: the steps the
+    // provider already answered are the head of the next request, and dropping
+    // them rewrote that head — chat 8294560b typed its next prompt into
+    // "совпало 3 из 6 сообщений, сейчас 4" and paid the whole history again.
+    // The promises below keep what the SDK recorded.
+    if (!reasoningCut && !opts.abortSignal.aborted) throw err;
   } finally {
     // Turn over (or stream died): no heartbeat may outlive it.
     stopHeartbeat();
@@ -956,37 +1061,47 @@ export async function runTurn(opts: TurnOptions): Promise<TurnOutcome> {
   let outputTokens = 0;
   let cachedInputTokens = 0;
   let contextTokens = 0;
-  try {
-    const [produced, reason, usage, steps] = await Promise.all([
-      result.responseMessages,
-      result.finishReason,
-      result.usage,
-      result.steps,
-    ]);
-    response = produced;
-    finishReason = String(reason ?? "stop");
-    // Older SDK shapes (and mocks) may not carry the steps array.
-    stepCount = Array.isArray(steps) ? steps.length : 0;
-    // Since ai@7 `usage` is the sum over every step of the turn (`totalUsage`
-    // is its deprecated alias) — the right shape for the billing fields.
-    totalTokens = Number(usage?.totalTokens ?? 0) || 0;
-    inputTokens = Number(usage?.inputTokens ?? 0) || 0;
-    outputTokens = Number(usage?.outputTokens ?? 0) || 0;
-    // Prompt-cache hits are the cheap part of the input: reported separately so
-    // the chip and the bench can show what the provider actually had to read.
-    cachedInputTokens = Number(usage?.inputTokenDetails?.cacheReadTokens ?? 0) || 0;
-    // The context chip is about the live window, so it takes the last call's
-    // prompt + output — the sum in `usage` would grow by a whole context
-    // re-read with every tool step of the turn.
-    const lastStep = Array.isArray(steps) ? steps[steps.length - 1] : undefined;
-    contextTokens = Number(lastStep?.usage?.totalTokens ?? 0) || 0;
-  } catch (err) {
-    // A cancelled turn resolves nothing — the client already knows it cancelled.
-    // The reasoning fuse's own abort is not a cancellation: the step's partial
-    // thinking is kept below and the turn carries on through the continuation.
-    // Otherwise the SDK's generic "No output generated" rejection hides the
-    // real cause: the streamed error part captured above reaches the user.
-    if (!opts.abortSignal.aborted && !reasoningCut) throw failure ?? err;
+  if (opts.abortSignal.aborted) {
+    // A cancelled turn resolves nothing — the client already knows it cancelled,
+    // and the result promises may stay pending for good (a tool still in
+    // flight). What the SDK did finish is in `finished`, and the caller stores
+    // it so the next request keeps the head the provider already has. The
+    // promises are drained anyway: they reject with the abort, and an unread
+    // rejection is a process-level fault the turn must not leave behind.
+    void Promise.allSettled([result.responseMessages, result.finishReason, result.usage, result.steps]);
+    response = finished;
+  } else {
+    try {
+      const [produced, reason, usage, steps] = await Promise.all([
+        result.responseMessages,
+        result.finishReason,
+        result.usage,
+        result.steps,
+      ]);
+      response = produced;
+      finishReason = String(reason ?? "stop");
+      // Older SDK shapes (and mocks) may not carry the steps array.
+      stepCount = Array.isArray(steps) ? steps.length : 0;
+      // Since ai@7 `usage` is the sum over every step of the turn (`totalUsage`
+      // is its deprecated alias) — the right shape for the billing fields.
+      totalTokens = Number(usage?.totalTokens ?? 0) || 0;
+      inputTokens = Number(usage?.inputTokens ?? 0) || 0;
+      outputTokens = Number(usage?.outputTokens ?? 0) || 0;
+      // Prompt-cache hits are the cheap part of the input: reported separately so
+      // the chip and the bench can show what the provider actually had to read.
+      cachedInputTokens = Number(usage?.inputTokenDetails?.cacheReadTokens ?? 0) || 0;
+      // The context chip is about the live window, so it takes the last call's
+      // prompt + output — the sum in `usage` would grow by a whole context
+      // re-read with every tool step of the turn.
+      const lastStep = Array.isArray(steps) ? steps[steps.length - 1] : undefined;
+      contextTokens = Number(lastStep?.usage?.totalTokens ?? 0) || 0;
+    } catch (err) {
+      // The reasoning fuse's own abort is not a cancellation: the step's partial
+      // thinking is kept below and the turn carries on through the continuation.
+      // Otherwise the SDK's generic "No output generated" rejection hides the
+      // real cause: the streamed error part captured above reaches the user.
+      if (!reasoningCut) throw failure ?? err;
+    }
   }
 
   // A tool that returned pictures: each rides as its own user message after the
@@ -1034,6 +1149,10 @@ export async function runTurn(opts: TurnOptions): Promise<TurnOutcome> {
       : {}),
     ...(failure && !opts.abortSignal.aborted ? { failure } : {}),
     ...(injected.length ? { injected } : {}),
+    // What `storeStep` already took: the caller appends the rest of the turn
+    // instead of storing it a second time.
+    ...(stored ? { stored } : {}),
+    ...(opts.abortSignal.aborted ? { cancelled: true } : {}),
   };
 }
 

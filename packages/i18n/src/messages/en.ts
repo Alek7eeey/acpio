@@ -436,6 +436,11 @@ export const en = {
     compactionHint: "Older turns were folded into a digest to fit the context window",
     compactionTurns: "turns {{from}}–{{to}}",
     compactionTokens: "{{from}} → {{to}} tokens",
+    compactionTokensPending: "{{from}} → * tokens",
+    compactionTokensPendingHint:
+      "The provider names the size after the squeeze on the next request — until then the row holds a star, not an estimate",
+    compactionTokensHint:
+      "Counted by the provider: the tokens that went into the prompt before the squeeze and after it",
     compactionShow: "show digest",
     compactionHide: "hide digest",
     modelNoticeModel: "Model",

@@ -11,6 +11,7 @@ import {
   withWireLog,
   wireLogDir,
   type ContextDrift,
+  type WireHeadInfo,
 } from "./wireLog.js";
 
 /** A response shape the SDK/most relays answer with: JSON plus usage. */
@@ -227,6 +228,40 @@ describe("wire log", () => {
     });
     // Nothing was written: the report does not depend on the log.
     expect(fs.existsSync(path.join(wireLogDir(), "sess-1.jsonl"))).toBe(false);
+  });
+
+  // The tokens panel splits a chat's bill into "the head moved" and "the provider's
+  // cache was cold" — and the second half is only knowable from the request that
+  // just went out. A verdict that depends on the diagnostics switch would leave
+  // the panel with half a split on every chat that never turned it on.
+  it("tells the endpoint about every head, whether it moved or not", async () => {
+    process.env.ACPIO_WIRE_LOG = "0";
+    resetWireLogState();
+    const heads: WireHeadInfo[] = [];
+    const call = withWireLog(
+      { sessionId: "sess-1", providerId: "legacy" },
+      (async () => jsonResponse({})) as typeof globalThis.fetch,
+      { onHead: (head) => heads.push(head) },
+    );
+    const send = (messages: unknown[]) =>
+      call("https://relay.test/v1/chat/completions", {
+        method: "POST",
+        body: JSON.stringify({ model: "m", messages }),
+      });
+    const one = { role: "user", content: "one" };
+    const two = { role: "assistant", content: "two" };
+
+    await send([one, two]);
+    await send([one, two, { role: "user", content: "three" }]);
+    await send([one, { role: "assistant", content: "TWO" }, { role: "user", content: "three" }]);
+
+    // The first request has nothing to compare with: no verdict to give.
+    expect(heads[0]).toMatchObject({ seq: 1, messages: 2, prevMessages: 0, intact: false });
+    // A pure append: the bytes the provider saw last time are still all there.
+    expect(heads[1]).toMatchObject({ seq: 2, messages: 3, prevMessages: 2, intact: true });
+    // The middle rewritten: the head is not intact, and the panel must not
+    // blame the provider for what the chat itself did.
+    expect(heads[2]).toMatchObject({ prevMessages: 3, prefixSame: 1, intact: false });
   });
 
   it("does not look at the head at all while the diagnostics switch is off", async () => {

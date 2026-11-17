@@ -456,6 +456,11 @@ export const ru = {
     compactionHint: "Старые ходы свёрнуты в конспект, чтобы уложиться в окно контекста",
     compactionTurns: "ходы {{from}}–{{to}}",
     compactionTokens: "{{from}} → {{to}} токенов",
+    compactionTokensPending: "{{from}} → * токенов",
+    compactionTokensPendingHint:
+      "Размер после сжатия провайдер назовёт на следующем запросе — до тех пор стоит звёздочка, а не оценка",
+    compactionTokensHint:
+      "Считает провайдер: сколько токенов ушло в промпт до сжатия и сколько ушло после",
     compactionShow: "показать конспект",
     compactionHide: "скрыть конспект",
     modelNoticeModel: "Модель",

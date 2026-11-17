@@ -23,6 +23,7 @@ import {
   textFromUnknown,
   toolDisplayTitle,
   type AdapterExtensionKind,
+  type AcpSpendTotals,
   type AcpUsage,
   type AgentMode,
   type AgentProvider,
@@ -733,6 +734,13 @@ class SessionRuntime {
   elicitationThisTurn = false;
   /** Latest ACP-reported token/context usage (null until/if the harness sends it). */
   usage: AcpUsage | null = null;
+  /**
+   * A compaction row whose "after" size is still a `*`: the harness names the
+   * pass and lets the provider's count of the next request fill it in. Kept in
+   * memory on purpose — a map lost to a restart leaves the `*` standing, it
+   * never puts a made-up number on the row.
+   */
+  compactionParts = new Map<number, string>();
   /** True while we intentionally tear down ACP (e.g. edit/regenerate). */
   disposing = false;
   /** This turn received an answer text chunk (vs. only thinking so far). */
@@ -778,6 +786,16 @@ function getRuntime(sessionId: string) {
     runtimes.set(sessionId, rt);
   }
   return rt;
+}
+
+/**
+ * The live runtime a session's updates are filed into — the object that carries
+ * the state the funnel reads (a turn accepting the stream, the rows it wrote).
+ * Exported for tests: a runtime of their own would not be the one the transport
+ * uses, and the row they check would be a row no chat ever had.
+ */
+export function sessionRuntime(sessionId: string) {
+  return getRuntime(sessionId);
 }
 
 export function requestIdFor(sessionId: string, rpcId: string | number) {
@@ -900,6 +918,30 @@ function resolveRestoreMode(
     : { mode, storedSessionId: detail!.acpSessionId! };
 }
 
+/**
+ * What this chat has already spent, to hand to the agent it boots with.
+ * The panel's in/cached/out rows are the chat's bill, not the bill of whichever
+ * agent session happens to be alive: an edit or a regenerate boots a fresh one
+ * (`preferResume: false`), and a counter starting at zero there made the panel
+ * hand the reader back money the chat had already paid — chat 74dadea4 spent
+ * 54.7M input tokens across four sessions in one day and the panel showed the
+ * 3.8M of the last one. Rows only ever grow, so the agent takes the larger of
+ * this and what its own file remembers.
+ */
+function carriedSpend(usage: AcpUsage | null | undefined): AcpSpendTotals | undefined {
+  if (!usage) return undefined;
+  const count = (value: unknown) =>
+    typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
+  const totals = {
+    inputTokens: count(usage.inputTokens),
+    outputTokens: count(usage.outputTokens),
+    cachedInputTokens: count(usage.cachedInputTokens),
+    coldMisses: count(usage.coldMisses),
+    coldMissTokens: count(usage.coldMissTokens),
+  };
+  return totals.inputTokens || totals.outputTokens || totals.cachedInputTokens ? totals : undefined;
+}
+
 export async function ensureAcp(
   sessionId: string,
   opts: { provider: AgentProvider; cwd: string; mode: AgentMode },
@@ -959,6 +1001,7 @@ async function bootAcp(
 ): Promise<AcpClient> {
   const settings = await getSettings();
   const detail = await getSessionDetail(sessionId);
+  const spend = carriedSpend(detail?.usage);
   const bootModel =
     boot?.model ??
     (detail ? modelForSession(settings, detail) : modelForProvider(settings, opts.provider));
@@ -1169,12 +1212,13 @@ async function bootAcp(
           await client.start(
             mode === "new" ? 45_000 : 120_000,
             mode === "new"
-              ? { ...bootModelOpts, mcpServers }
+              ? { ...bootModelOpts, mcpServers, spend }
               : {
                   resume: { sessionId: storedSessionId!, mode },
                   ingestReplay,
                   ...bootModelOpts,
                   mcpServers,
+                  spend,
                 },
           );
         } finally {
@@ -1510,7 +1554,13 @@ async function ensureAssistantMessage(rt: SessionRuntime) {
   return msg.id;
 }
 
-async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js").AcpUpdate) {
+/**
+ * The funnel every ACP update goes through. Exported for the tests that drive it
+ * with a hand-made update: the row a compaction pass writes and the follow-up
+ * that prices it are two halves of one contract, and nothing in the transport
+ * can produce the gap between them on demand.
+ */
+export async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js").AcpUpdate) {
   if (update.kind === "usage") {
     rt.usage = update.usage;
     await saveSessionUsage(rt.sessionId, update.usage);
@@ -1575,6 +1625,17 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
     const raw = update.raw;
     const count = (value: unknown) =>
       typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.round(value)) : null;
+    const passId = count(raw.passId);
+    // The follow-up: the provider priced the view the pass left behind, so the
+    // row's `*` becomes its real size. A row this process never wrote (a chat
+    // resumed elsewhere) is left alone rather than duplicated.
+    if (raw.sessionUpdate === "compaction_update") {
+      const tokensAfter = count(raw.tokensAfter);
+      const partId = passId === null ? undefined : rt.compactionParts.get(passId);
+      if (partId === undefined || tokensAfter === null) return;
+      await updatePart(rt.sessionId, partId, { tokensAfter, tokensAfterPending: false });
+      return;
+    }
     const summary = typeof raw.summary === "string" ? raw.summary.trim() : "";
     const coveredBefore = count(raw.coveredBefore);
     const coveredAfter = count(raw.coveredAfter);
@@ -1582,15 +1643,17 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
     const tokensAfter = count(raw.tokensAfter);
     const summaryOutputTokens = count(raw.summaryOutputTokens);
     const messageId = await ensureAssistantMessage(rt);
-    await appendPart(rt.sessionId, messageId, "compaction", {
+    const part = await appendPart(rt.sessionId, messageId, "compaction", {
       manual: raw.manual === true,
       ...(coveredBefore !== null ? { coveredBefore } : {}),
       ...(coveredAfter !== null ? { coveredAfter } : {}),
       ...(tokensBefore !== null ? { tokensBefore } : {}),
       ...(tokensAfter !== null ? { tokensAfter } : {}),
+      ...(raw.tokensAfterPending === true ? { tokensAfterPending: true } : {}),
       ...(summaryOutputTokens !== null ? { summaryOutputTokens } : {}),
       ...(summary ? { summary } : {}),
     });
+    if (passId !== null && raw.tokensAfterPending === true) rt.compactionParts.set(passId, part.id);
     return;
   }
 
@@ -2868,7 +2931,8 @@ export async function runPrompt(
     // Stop itself keeps the queued prompts only until the runtime is disposed
     // below, which is the same full replacement this path has always made.
     try {
-      await cancelPrompt(sessionId);
+      // The reader is replacing this answer, not abandoning it: no halt note.
+      await cancelPrompt(sessionId, { interruptNote: false });
       await waitTurnSettled(rt);
     } catch {
       // ignore
@@ -2894,7 +2958,13 @@ export async function runPrompt(
   // A deferred restart (mid-turn MCP/model edit) must land BEFORE the next
   // turn: a direct prompt would otherwise run on the stale agent with the old
   // MCP list/model (the same race dequeueTurn already guards for queued turns).
-  if (rt.restartOnIdle) {
+  // Not while a turn is still generating, though: this prompt is then merely
+  // queued behind it, and disposing the live agent threw the running turn away
+  // — the fresh agent resumed a stored session that never got its assistant
+  // message, so the chat came back as "system + the user prompts — совпало 3 из N"
+  // (chat 73192fc8 lost the turn it was waiting on and re-ran its bash call).
+  // `dequeueTurn` applies the same restart once the live turn has settled.
+  if (rt.restartOnIdle && !rt.running) {
     rt.restartOnIdle = false;
     await applyDeferredRestart(rt);
   }
@@ -3159,15 +3229,23 @@ async function appendInterruptNote(rt: SessionRuntime, halted: number): Promise<
       ? ` — остановлено вызовов: ${halted}`
       : ` — tool calls halted: ${halted}`
     : "";
+  // Pinned to the message the halt was seen on: between the check above and the
+  // write below the turn can be replaced (an edit truncates the thread and
+  // disposes the runtime), and a note that then manufactured a message of its
+  // own put «Ход прерван пользователем» where the new answer belonged — chat
+  // 74dadea4 read exactly that, twice, in place of the answer it asked for.
   await appendNotePart(
     rt,
     ru ? `Ход прерван пользователем${haltedText}` : `Turn stopped by the user${haltedText}`,
+    messageId,
   );
 }
 
-async function appendNotePart(rt: SessionRuntime, text: string): Promise<void> {
+async function appendNotePart(rt: SessionRuntime, text: string, into?: string): Promise<void> {
   try {
-    const messageId = rt.assistantMessageId ?? (await ensureAssistantMessage(rt));
+    // `into` names the one message this note belongs to; a caller that has no
+    // message to name (a settled job's result) gets a bubble for its card.
+    const messageId = into ?? rt.assistantMessageId ?? (await ensureAssistantMessage(rt));
     await appendPart(rt.sessionId, messageId, "note", { text });
   } catch (err) {
     // The turn already took the text and is acting on it; the part is the
@@ -3262,8 +3340,14 @@ const TERMINAL_TOOL_STATUSES = new Set(["completed", "failed", "cancelled"]);
  * two callers — Stop drops the queued prompts (the user asked to halt work) but
  * keeps the settled jobs' notes, which are a result to read, not work to stop,
  * while a steer keeps everything: it only borrows the runtime for its own turn.
+ * `interruptNote` is off for the halt an edit or a regenerate makes: that answer
+ * is being replaced, not abandoned, so there is no silence for a note to explain.
  */
-async function stopLiveTurn(rt: SessionRuntime, keepTurnQueue: boolean) {
+async function stopLiveTurn(
+  rt: SessionRuntime,
+  keepTurnQueue: boolean,
+  opts?: { interruptNote?: boolean },
+) {
   const sessionId = rt.sessionId;
   rt.acceptingStream = false;
   rt.running = false;
@@ -3292,7 +3376,7 @@ async function stopLiveTurn(rt: SessionRuntime, keepTurnQueue: boolean) {
   }
   // A stopped turn ends on a tool call and no words. Without this line the
   // transcript cannot tell "the reader pressed Stop" from "the agent died".
-  if (!keepTurnQueue) await appendInterruptNote(rt, halted);
+  if (!keepTurnQueue && opts?.interruptNote !== false) await appendInterruptNote(rt, halted);
   for (const [reqKey, p] of rt.pending) {
     const id = p.rpcId ?? parseRpcId(reqKey, sessionId);
     try {
@@ -4119,12 +4203,16 @@ async function dequeueTurn(rt: SessionRuntime) {
   }
 }
 
-export async function cancelPrompt(sessionId: string) {
+export async function cancelPrompt(
+  sessionId: string,
+  /** `false` when the halt belongs to an edit: the thread keeps no trace of it. */
+  opts?: { interruptNote?: boolean },
+) {
   // Recorded before anything else: a prompt still on its way in has no runtime
   // to cancel and must find this mark instead (see `stopRacedPrompt`).
   stoppedBeforeTurn.set(sessionId, Date.now());
   const rt = runtimes.get(sessionId);
-  if (rt) await stopLiveTurn(rt, false);
+  if (rt) await stopLiveTurn(rt, false, opts);
   await updateSession(sessionId, { status: "idle" });
 }
 

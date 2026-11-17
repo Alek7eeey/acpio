@@ -43,10 +43,12 @@ import {
 import {
   compactHistory,
   digestMessage,
+  digestSummaryOf,
   estimateTokens,
   foldInjected,
   hasReasoning,
   MAX_TURN_ATTEMPTS,
+  isToolImagesNote,
   maskToolResults,
   pruneMessages,
   promptView,
@@ -69,7 +71,9 @@ import {
   supersededRules,
   type BuiltinSkill,
 } from "./skills.js";
+import { existsSync } from "node:fs";
 import {
+  builtinSessionFile,
   isValidSessionId,
   loadBuiltinSession,
   PROMPT_THINKING_MODES,
@@ -99,7 +103,68 @@ import {
 } from "./subagents.js";
 
 const AGENT_INFO = { name: "acpio-builtin", title: "Built-in agent", version: "0.1.0" };
+
+/** The bill a chat carries from session to session — see `sessionUsage`. */
+type SpendTotals = {
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens: number;
+  coldMisses?: number | undefined;
+  coldMissTokens?: number | undefined;
+};
+
+/** Whatever of a spend the wire carried, as totals; nothing usable reads as absent. */
+function spendTotals(raw: unknown): SpendTotals | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const field = (name: keyof SpendTotals): number => {
+    const value = (raw as Record<string, unknown>)[name];
+    return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
+  };
+  const totals = {
+    inputTokens: field("inputTokens"),
+    outputTokens: field("outputTokens"),
+    cachedInputTokens: field("cachedInputTokens"),
+    coldMisses: field("coldMisses"),
+    coldMissTokens: field("coldMissTokens"),
+  };
+  return totals.inputTokens || totals.outputTokens || totals.cachedInputTokens ? totals : undefined;
+}
+
+/** The chat's spend, as the harness handed it over on `session/new`|`session/load`. */
+function carriedSpend(params: Record<string, unknown>): SpendTotals | undefined {
+  const meta = params._meta;
+  return meta && typeof meta === "object" ? spendTotals((meta as Record<string, unknown>).spend) : undefined;
+}
+
+/**
+ * The session's spend rows as an opened session must report them: the file it
+ * restored and the totals the harness carried are two memories of one chat, and
+ * a row that falls makes the panel hand back money already spent, so the larger
+ * of the two wins per row.
+ */
+function mergedSpend(
+  stored: SpendTotals | undefined,
+  carried: SpendTotals | undefined,
+): { inputTokens: number; outputTokens: number; cachedInputTokens: number; coldMisses: number; coldMissTokens: number } {
+  const pick = (key: keyof SpendTotals) => Math.max(stored?.[key] ?? 0, carried?.[key] ?? 0);
+  return {
+    inputTokens: pick("inputTokens"),
+    outputTokens: pick("outputTokens"),
+    cachedInputTokens: pick("cachedInputTokens"),
+    coldMisses: pick("coldMisses"),
+    coldMissTokens: pick("coldMissTokens"),
+  };
+}
 /** First text part of a prompt's content blocks — what `/skill` matching sees. */
+/** The session file, or null when the id could not name one. */
+function safeSessionFile(stateDir: string, sessionId: string): string | null {
+  try {
+    return builtinSessionFile(stateDir, sessionId);
+  } catch {
+    return null;
+  }
+}
+
 function promptText(parts: unknown): string {
   if (!Array.isArray(parts)) return "";
   for (const part of parts) {
@@ -568,6 +633,18 @@ const THINKING_DISABLED_BODY = { thinking: { type: "disabled" } };
  */
 const SUBAGENT_LANE = "subagent";
 
+/**
+ * The chain the summariser's own asks are filed under — see `WireLogTarget.lane`.
+ *
+ * A digest ask re-sends a *shortened* head on purpose: the covered prefix plus
+ * one instruction message. Compared with the turn's requests it reads as a head
+ * that moved — chat 62eba797 drew "совпало 245 из 416" over a request the
+ * provider answered from its cache in full (162 688 of 162 857 tokens), and the
+ * card it drew stopped nobody from paying anything. Its own lane keeps that
+ * comparison inside the pass, where a moved head is the pass's own business.
+ */
+const COMPACTION_LANE = "compaction";
+
 /** `effort` values that mean "no thinking pass", as opposed to a level. */
 const EFFORT_OFF = new Set(["off", "none", "disabled"]);
 
@@ -786,6 +863,23 @@ export class BuiltinAgent implements InProcessAgentTransport {
    */
   private driftWarned = false;
   /**
+   * A compaction pass rewrote this prompt on purpose, so the break that follows
+   * it is not the reader's to decide: the digest moves every byte behind it by
+   * design, and stopping the turn there only means stopping (chat 62eba797
+   * parked a turn at "1 из 183" for exactly that). The row the pass already
+   * reported is the whole story; the next break that is nobody's plan warns
+   * again. Set by `emitCompaction`, cleared by the request it explains.
+   */
+  private passRewroteView = false;
+  /**
+   * This turn's view carries one message per stored message, so an index a pass
+   * computed on the view is also an index into `this.messages` — the one thing
+   * that lets a digest written between steps outlive the turn (see
+   * `compactView`). False when the view is a pruned fallback or already starts
+   * with a digest.
+   */
+  private viewIndexed = false;
+  /**
    * The reader answered the drift card with “stop”: the turn ends there, and the
    * request it was asked about is never sent. Reset at the start of a turn.
    */
@@ -885,6 +979,12 @@ export class BuiltinAgent implements InProcessAgentTransport {
   /** Archive of bulky tool results for this session, when offloading is on. */
   private offload: OffloadStore | undefined;
   private abort: AbortController | null = null;
+  /**
+   * The turn this session is running, if any — resolved when it has settled.
+   * A prompt that arrives in the meantime stops it and waits here, because two
+   * turns over one history is what rewrote the head mid-chat (see `prompt`).
+   */
+  private turnInFlight: Promise<void> | null = null;
   /** Set for the duration of one prompt: the subagent bridge, if enabled. */
   private activeSubagents: SubagentsBridge | null = null;
   /**
@@ -897,7 +997,29 @@ export class BuiltinAgent implements InProcessAgentTransport {
    * mid-run; a session-scoped snapshot can only grow, and each report only ever
    * adds what it is the first to report.
    */
-  private sessionUsage = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 };
+  private sessionUsage = {
+    inputTokens: 0,
+    outputTokens: 0,
+    cachedInputTokens: 0,
+    /**
+     * Requests whose head went out unchanged and whose prefix the provider still
+     * billed in full. Nothing in this code can make them cheaper — the gateway
+     * in front of the provider routes to whichever upstream answers, and the
+     * prompt cache lives on that upstream, not on our side (chat b4e9586d paid
+     * 72 260 tokens at 0 % ninety-seven seconds after the same bytes were served
+     * from cache). The panel needs them apart from a moved head, or every one of
+     * them reads as our defect.
+     */
+    coldMisses: 0,
+    coldMissTokens: 0,
+  };
+  /**
+   * Verdict of the last request the wire saw, from `onHead` (see `wireLog`).
+   * Consumed by the next usage report: the call it belongs to is the one whose
+   * usage arrives right after it, and a flag that outlived two requests would
+   * charge a cold start to the turn that came later.
+   */
+  private headIntact: boolean | null = null;
   /**
    * Subagent spend already folded into `sessionUsage`. The bridge's own counter
    * is a running total for the prompt, so only its growth is new money — the
@@ -920,6 +1042,30 @@ export class BuiltinAgent implements InProcessAgentTransport {
    * call — so its usage update keeps the chip on the size that was measured.
    */
   private lastMeasuredUsed = 0;
+  /**
+   * What the provider counted for the view the last request carried — the
+   * number the compaction trigger is judged by. `estimateTokens` is only a
+   * floor: it reads JSON chars / 4 and ran 20% low on a Russian, tool-heavy
+   * history (chat 9590a5eb: billed 258 133 against an estimate of 200 135), so
+   * a line set at 20% fired at 26% of the window. Zeroed when a pass rewrites
+   * the view: no request carried those bytes, and the count they were billed
+   * at may not fire the next pass.
+   */
+  private lastBilledView = 0;
+  /**
+   * The input half of that count, which is what the compaction row reports as
+   * "before": the row says how much prompt went out, and the output of the
+   * answer was never part of it.
+   */
+  private lastBilledInput = 0;
+  /**
+   * The pass whose row is still waiting for the provider's count of the view it
+   * left behind (`tokensAfter`), keyed by the `passId` it went out with. Only
+   * the next request can price that view, so the row shows `*` until it lands.
+   */
+  private compactionAwaiting: number | undefined;
+  /** Passes this session ran, as the row's own name — survives nothing but the process. */
+  private compactionPass = 0;
   /**
    * Mid-turn messages the host asked for (`session/steer`): each one resolves
    * when the model loop really folds it into a prompt, or with `false` when the
@@ -1011,6 +1157,7 @@ export class BuiltinAgent implements InProcessAgentTransport {
           String(params.cwd ?? this.opts.cwd),
           false,
           params.mcpServers,
+          carriedSpend(params),
         );
       case "session/load": {
         const requested = String(params.sessionId ?? "");
@@ -1024,6 +1171,7 @@ export class BuiltinAgent implements InProcessAgentTransport {
           String(params.cwd ?? this.opts.cwd),
           true,
           params.mcpServers,
+          carriedSpend(params),
         );
       }
       case "session/prompt":
@@ -1080,6 +1228,8 @@ export class BuiltinAgent implements InProcessAgentTransport {
     cwd: string,
     restore = false,
     mcpServers?: unknown,
+    /** The chat's spend to date, as the harness remembers it (see `sessionUsage`). */
+    carried?: SpendTotals | undefined,
   ) {
     const stored = restore ? loadBuiltinSession(this.opts.stateDir, sessionId) : undefined;
     this.mcp.close();
@@ -1103,20 +1253,38 @@ export class BuiltinAgent implements InProcessAgentTransport {
       this.modelId = resolveBuiltinModel(this.opts.settings, storedModel)?.value ?? storedModel;
     }
     this.messages = repairToolPairs(stored?.messages ?? []);
+    // A restore that came back empty is indistinguishable from a brand-new chat
+    // in every artifact the host has — the wire log shows a short request, the
+    // chat shows its own transcript. Chat 8294560b resumed by `load` and sent
+    // "system + one note" while the stored history was intact on disk, and the
+    // second, empty agent then lived beside the first one. Say what the boot
+    // found: the file it read, whether it was there, and how much history it gave.
+    if (restore) {
+      const file = safeSessionFile(this.opts.stateDir, sessionId);
+      this.opts.onDiagnostic?.({
+        kind: "session-load",
+        data: {
+          agentSessionId: sessionId,
+          file,
+          filePresent: file ? existsSync(file) : null,
+          stored: stored?.messages.length ?? 0,
+          messages: this.messages.length,
+          repaired: (stored?.messages.length ?? 0) - this.messages.length,
+          modelId: stored?.modelId ?? null,
+        },
+      });
+    }
     this.compaction = stored?.compaction;
     // A fresh conversation has no measured window and no unreported pass.
     this.pendingUsage = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 };
     this.lastMeasuredUsed = 0;
     // The spend rows count from where this conversation left off: a restored
     // session keeps the totals it had, or the panel would open the next turn by
-    // handing back everything the session had already spent.
-    this.sessionUsage = stored?.usage
-      ? {
-          inputTokens: stored.usage.inputTokens,
-          outputTokens: stored.usage.outputTokens,
-          cachedInputTokens: stored.usage.cachedInputTokens,
-        }
-      : { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 };
+    // handing back everything the session had already spent. A *new* session is
+    // not a new chat, though (an edit or a regenerate boots one), so the totals
+    // the harness carries in count too — and rows only ever grow: whichever of
+    // the two remembers more is the bill.
+    this.sessionUsage = mergedSpend(stored?.usage, carried);
     this.bridgeReported = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 };
     this.thinkingOff = stored?.thinkingOff === true;
     this.effort = stored?.effort ?? "default";
@@ -1259,7 +1427,8 @@ export class BuiltinAgent implements InProcessAgentTransport {
       // reboot hand back what the session had already spent.
       ...(this.sessionUsage.inputTokens ||
       this.sessionUsage.outputTokens ||
-      this.sessionUsage.cachedInputTokens
+      this.sessionUsage.cachedInputTokens ||
+      this.sessionUsage.coldMisses
         ? { usage: { ...this.sessionUsage } }
         : {}),
     });
@@ -1286,6 +1455,25 @@ export class BuiltinAgent implements InProcessAgentTransport {
    */
   private applyThinkingLimit(global: number): void {
     this.thinkingLimit = this.thinkingLimitOverride ?? normalizeBuiltinThinkingLimit(global);
+  }
+
+  /**
+   * Seal the archive boundary at the end of a turn.
+   *
+   * Everything a turn appended has crossed the wire by the time the turn is
+   * over, and a prompt is not ours to rewrite after that (see
+   * `offloadToolResults`). The boundary may not wait for the next
+   * `promptHistory`: that call reads it *before* its pass runs, so a turn's own
+   * tool results stood undecided for a whole turn, and the next turn archived
+   * them in the middle of a prompt the provider had already cached — chat
+   * 304f9398 matched 3 of 87 messages and paid 62 718 tokens again for a
+   * `gitea_get_pull` answer it had sent in full, chat c051bfac did the same at
+   * message 3 of 27 (cached 0 of 43 360).
+   */
+  private sealOffloadBoundary(): void {
+    if (!this.offload || this.offloadUpTo === this.messages.length) return;
+    this.offloadUpTo = this.messages.length;
+    this.persist();
   }
 
   /**
@@ -1451,7 +1639,18 @@ export class BuiltinAgent implements InProcessAgentTransport {
   private decorateUpdate(update: Record<string, unknown>): void {
     if (update.sessionUpdate === "usage_update") {
       const used = Number(update.used ?? 0) || 0;
-      if (used > 0) this.lastMeasuredUsed = used;
+      if (used > 0) {
+        this.lastMeasuredUsed = used;
+        // A report that names no fresh input is this agent repeating the chip's
+        // last figure (the `/compact` path), not the provider counting again.
+        if (Number(update.inputTokens ?? 0) > 0) {
+          this.lastBilledView = used;
+          this.lastBilledInput = Number(update.inputTokens) || 0;
+          // The first request after a pass is the only thing that can price the
+          // view it left; its row is still holding a `*` for that number.
+          this.fillCompaction(this.lastBilledInput);
+        }
+      }
       // The billing fields ride an increment: what THIS report adds — the call
       // a step just measured, the part of a turn's bill its steps did not
       // already report, a compaction pass. Fold it in and put the session's
@@ -1459,9 +1658,19 @@ export class BuiltinAgent implements InProcessAgentTransport {
       // snapshot scoped to whatever happened last is what made the panel's
       // in/out rows jump backwards mid-run — a session-scoped one only grows.
       const usage = this.sessionUsage;
-      usage.inputTokens += Number(update.inputTokens ?? 0) || 0;
+      const addedIn = Number(update.inputTokens ?? 0) || 0;
+      const addedCached = Number(update.cachedInputTokens ?? 0) || 0;
+      usage.inputTokens += addedIn;
       usage.outputTokens += Number(update.outputTokens ?? 0) || 0;
-      usage.cachedInputTokens += Number(update.cachedInputTokens ?? 0) || 0;
+      usage.cachedInputTokens += addedCached;
+      // The verdict of the request this report prices, once: an unchanged head
+      // that the provider still billed in full is a cache miss nobody here can
+      // fix, and the panel counts it separately from the ones a moved head cost.
+      if (this.headIntact === true && addedIn > 0 && addedCached === 0) {
+        usage.coldMisses += 1;
+        usage.coldMissTokens += addedIn;
+      }
+      this.headIntact = null;
       const bridge = this.activeSubagents;
       if (bridge) {
         const keys = ["inputTokens", "outputTokens", "cachedInputTokens"] as const;
@@ -1475,6 +1684,8 @@ export class BuiltinAgent implements InProcessAgentTransport {
       update.inputTokens = usage.inputTokens;
       update.outputTokens = usage.outputTokens;
       update.cachedInputTokens = usage.cachedInputTokens;
+      update.coldMisses = usage.coldMisses;
+      update.coldMissTokens = usage.coldMissTokens;
       return;
     }
     const bridge = this.activeSubagents;
@@ -1569,10 +1780,40 @@ export class BuiltinAgent implements InProcessAgentTransport {
       () => this.echoReasoning(),
       {
         onDrift: (drift) => this.warnDrift(drift),
+        // The head verdict rides every request, whatever the Diagnostics switch
+        // says: it is what splits the bill in the tokens panel into "wrong head"
+        // and "cold provider cache", and the switch only decides whether the
+        // warning card is drawn.
+        onHead: (head) => {
+          this.headIntact = head.intact;
+          // A request whose head went out unchanged is no longer the pass's
+          // rewritten view: a flag left over from a `/compact` must not swallow
+          // the first break that comes after it.
+          if (head.intact) this.passRewroteView = false;
+        },
         // Settings → Diagnostics: off means the head is not even hashed. Read
         // per request, so the switch reaches the very next call.
         watch: () => this.watching === true,
       },
+    );
+  }
+
+  /**
+   * The endpoint the summariser's asks go through: the chat's own bytes (body
+   * overrides, reasoning echo — a digest ask is a prefix of the turn's request
+   * exactly because nothing else differs), on a lane of its own, which is what
+   * keeps its deliberately shortened head off the chat's drift comparison.
+   */
+  private digestEndpoint(selection: BuiltinModelSelection) {
+    return builtinEndpoint(
+      selection.provider,
+      this.sessionId,
+      this.reasoningBody(selection),
+      () => this.echoReasoning(),
+      // No `onDrift`: a head that moved inside the pass is the pass's own
+      // doing, and nothing here draws a card (the same rule children follow).
+      { watch: () => this.watching === true },
+      COMPACTION_LANE,
     );
   }
 
@@ -1629,6 +1870,13 @@ export class BuiltinAgent implements InProcessAgentTransport {
    * every step after it, and a chat that kept repeating it would bury itself.
    */
   private async warnDrift(drift: ContextDrift): Promise<boolean> {
+    // The pass that just ran is the cause of this break (see `passRewroteView`):
+    // nothing is sent until the reader answers, so the only answers are "pay it"
+    // and "end the turn" — a question with no choice behind it.
+    if (this.passRewroteView) {
+      this.passRewroteView = false;
+      return true;
+    }
     if (this.driftWarned) return true;
     this.driftWarned = true;
     this.emitUpdate({
@@ -1729,7 +1977,7 @@ export class BuiltinAgent implements InProcessAgentTransport {
     // again here, where nothing of the old bytes survives anyway.
     this.echoThinking = undefined;
     const live = await this.settings();
-    const endpoint = this.endpointFor(selection);
+    const digestModel = this.digestEndpoint(selection).chatModel(selection.modelId);
     const abort = new AbortController();
     this.abort = abort;
     try {
@@ -1750,7 +1998,8 @@ export class BuiltinAgent implements InProcessAgentTransport {
       });
       await this.promptHistory({
         contextWindow: selection.contextWindow,
-        model: endpoint.chatModel(selection.modelId),
+        model: digestModel,
+        digestModel,
         abortSignal: abort.signal,
         system,
         tools,
@@ -1924,7 +2173,10 @@ export class BuiltinAgent implements InProcessAgentTransport {
    */
   private async promptHistory(opts: {
     contextWindow: number;
+    /** The summariser's model: the turn's own bytes, on the pass's own lane. */
     model: TurnModel;
+    /** The same model again, named for what it is here — the digest's asks. */
+    digestModel: TurnModel;
     abortSignal: AbortSignal;
     /** The system prompt this turn sends; empty for a session opened on `/compact`. */
     system: string;
@@ -2008,7 +2260,7 @@ export class BuiltinAgent implements InProcessAgentTransport {
     let summaryOutputTokens = 0;
     const ask = async (delta: ModelMessage[], previousSummary?: string, focus?: string) => {
       const answered = await this.askDigest(delta, {
-        model: opts.model,
+        model: opts.digestModel,
         system: opts.system,
         tools: opts.tools,
         abortSignal: opts.abortSignal,
@@ -2023,7 +2275,12 @@ export class BuiltinAgent implements InProcessAgentTransport {
     // The "before" the row reports is the view this pass started from — digest
     // plus tail — not the stored transcript: the covered prefix has been out
     // of every request since the pass that wrote the digest.
-    const tokensBefore = estimateTokens(promptView(view, this.compaction));
+    const tokensBefore = Math.max(
+      estimateTokens(promptView(view, this.compaction)),
+      // What the provider counted for the last request over this view: the same
+      // bytes, priced by the tokenizer that bills them.
+      this.lastBilledInput,
+    );
     const result = await compactHistory({
       messages: view,
       contextWindow: opts.contextWindow,
@@ -2033,6 +2290,7 @@ export class BuiltinAgent implements InProcessAgentTransport {
       fitPercent: settings.builtinCompactionThresholdPercent,
       keepRecentPercent: settings.builtinKeepRecentPercent,
       state: this.compaction,
+      measuredTokens: this.lastBilledView,
       summarize: (dropped) => ask(dropped, undefined, opts.force),
       update: (delta, previous) => ask(delta, previous, opts.force),
     });
@@ -2044,13 +2302,15 @@ export class BuiltinAgent implements InProcessAgentTransport {
       );
       this.compaction = result.state;
       this.advanceMaskBoundary(keepLastConfigured);
+      this.lastBilledView = 0;
+      // The view it priced is gone; the pass's own request is the next count.
+      this.lastBilledInput = 0;
       this.persist();
       this.emitCompaction({
         manual: opts.manual === true,
         coveredBefore: before,
         coveredAfter: result.state.covered,
         tokensBefore,
-        tokensAfter: estimateTokens(result.messages),
         summary: result.state.summary,
         summaryOutputTokens,
       });
@@ -2145,27 +2405,43 @@ export class BuiltinAgent implements InProcessAgentTransport {
    * runs, digest and all, over the view the next step is about to send.
    *
    * A turn is one `promptHistory` call, so a turn's own growth was the one place
-   * the threshold never looked. The digest written here stands in for this
-   * turn's own head only: the stored transcript is untouched, and the next
-   * turn's pass writes the digest that outlives it.
+   * the threshold never looked.
+   *
+   * The digest this pass writes outlives the turn when the view it folded is one
+   * message per stored message (`viewIndexed`), which is every view built by
+   * `promptHistory` outside the pruned fallback and without a picture note: the
+   * cut is then an index into `this.messages` as well, so the next turn's pass
+   * can start from it instead of folding the same prefix again. It used to be
+   * this turn's alone, and the second pass paid for the tail a second time at
+   * full price — chat 62eba797 read 99 471 and then 106 173 tokens with `cached`
+   * 0 while the bytes under the new digest were the ones it had just sent.
    */
   private async compactView(
     view: ModelMessage[],
     opts: {
       model: TurnModel;
+      /** The summariser's model — the same one, on the compaction lane. */
+      digestModel: TurnModel;
       system?: string | undefined;
       tools?: ToolSet | undefined;
       abortSignal: AbortSignal;
       contextWindow: number;
       settings: AppSettings;
       state?: CompactionState | undefined;
+      /**
+       * Stored-message index the digest at the head of a folded `view` stands
+       * for. Absent when the view is one message per stored message.
+       */
+      foldedBase?: number | undefined;
+      /** The provider's count of the request this view is measured against. */
+      measuredTokens?: number | undefined;
     },
   ): Promise<{ messages: ModelMessage[]; state?: CompactionState }> {
     const settings = opts.settings;
     let summaryOutputTokens = 0;
     const ask = async (delta: ModelMessage[], previousSummary?: string) => {
       const answered = await this.askDigest(delta, {
-        model: opts.model,
+        model: opts.digestModel,
         system: opts.system,
         tools: opts.tools,
         abortSignal: opts.abortSignal,
@@ -2175,7 +2451,12 @@ export class BuiltinAgent implements InProcessAgentTransport {
       summaryOutputTokens += answered.outputTokens;
       return answered.text;
     };
-    const tokensBefore = estimateTokens(promptView(view, opts.state));
+    // The provider's own count of the request this view is measured against
+    // outvotes the estimate — that is the number the reader's bill carries.
+    const tokensBefore = Math.max(
+      estimateTokens(promptView(view, opts.state)),
+      opts.measuredTokens ?? 0,
+    );
     const result = await compactHistory({
       messages: view,
       contextWindow: opts.contextWindow,
@@ -2183,19 +2464,43 @@ export class BuiltinAgent implements InProcessAgentTransport {
       fitPercent: settings.builtinCompactionThresholdPercent,
       keepRecentPercent: settings.builtinKeepRecentPercent,
       ...(opts.state ? { state: opts.state } : {}),
+      measuredTokens: opts.measuredTokens,
       summarize: (dropped) => ask(dropped, undefined),
       update: (delta, previous) => ask(delta, previous),
     });
-    if (result.state) {
+    // A pass that folded nothing (the view did not fit under the line, so the
+    // fallback pruned instead) is not a squeeze: a row for it would claim a
+    // digest nobody wrote and a cut nobody made.
+    if (result.state && result.state.covered > (opts.state?.covered ?? 0)) {
+      // The cut counts view messages, and the view is the stored transcript plus
+      // the turn's own steps — one entry each, unless a picture note was wedged
+      // between them. A view that starts with a digest is one entry for its head
+      // and many for the prefix that head stands for, so the cut is moved back
+      // into stored indices through `foldedBase`. Either way the state this turn
+      // really sent is what the next turn has to start from: dropping it made a
+      // folded turn look unfolded to the turn-boundary pass, which then folded
+      // the same bytes again and rewrote the digest — one full-price prefix per
+      // turn (chat 9590a5eb: 10 passes, 7 of them from a `covered` of 0).
+      const stored = opts.foldedBase !== undefined ? opts.foldedBase + result.state.covered - 1 : result.state.covered;
+      const before = opts.foldedBase ?? opts.state?.covered ?? 0;
+      // Same reason as the turn-boundary pass: the count that fired this one
+      // priced a view that no longer exists.
+      this.lastBilledView = 0;
+      this.lastBilledInput = 0;
       this.emitCompaction({
         manual: false,
-        coveredBefore: opts.state?.covered ?? 0,
-        coveredAfter: result.state.covered,
+        coveredBefore: before,
+        coveredAfter: stored,
         tokensBefore,
-        tokensAfter: estimateTokens(result.messages),
         summary: result.state.summary,
         summaryOutputTokens,
       });
+      const mappable = opts.foldedBase !== undefined || this.viewIndexed;
+      if (mappable && !view.some(isToolImagesNote)) {
+        this.compaction = { summary: result.state.summary, covered: stored };
+        this.advanceMaskBoundary(settings.builtinPruneToolResultsKeepLast);
+        this.persist();
+      }
     }
     return result;
   }
@@ -2209,23 +2514,50 @@ export class BuiltinAgent implements InProcessAgentTransport {
     manual: boolean;
     coveredBefore: number;
     coveredAfter: number;
+    /** The provider's count of the last request over this view, or the estimate when there is none. */
     tokensBefore: number;
-    tokensAfter: number;
     summary: string;
     /** Output tokens spent writing the digest; absent when the provider reports none. */
     summaryOutputTokens: number;
   }): void {
+    // The next request carries the rewritten view: its break is this pass's
+    // doing, not something the reader can decide (see `passRewroteView`).
+    this.passRewroteView = true;
+    const passId = (this.compactionPass += 1);
+    // "After" is not measurable yet, and the estimate is exactly the number that
+    // lied before (chat 9590a5eb: 200 135 estimated where the provider billed
+    // 258 133). The row goes out with a `*` and `fillCompaction` puts the real
+    // count on it as soon as the next request is billed.
+    this.compactionAwaiting = passId;
     this.emitUpdate({
       sessionUpdate: "compaction",
+      passId,
       manual: info.manual,
       coveredBefore: info.coveredBefore,
       coveredAfter: info.coveredAfter,
       tokensBefore: info.tokensBefore,
-      tokensAfter: info.tokensAfter,
+      tokensAfterPending: true,
       summary: info.summary,
       // 0 means "the provider did not say", not "free": the row omits it and
       // the chat shows an unknown instead of a confident zero.
       ...(info.summaryOutputTokens > 0 ? { summaryOutputTokens: info.summaryOutputTokens } : {}),
+    });
+  }
+
+  /**
+   * The provider counted the request a pass left behind: that count is the
+   * row's "after". One fill per pass — the flag is cleared on the first report
+   * with a fresh input count, so a later step of the same turn cannot overwrite
+   * the number that belongs to the row.
+   */
+  private fillCompaction(tokens: number): void {
+    const passId = this.compactionAwaiting;
+    if (passId === undefined || !(tokens > 0)) return;
+    this.compactionAwaiting = undefined;
+    this.emitUpdate({
+      sessionUpdate: "compaction_update",
+      passId,
+      tokensAfter: tokens,
     });
   }
 
@@ -2369,7 +2701,38 @@ export class BuiltinAgent implements InProcessAgentTransport {
 
   // ── The turn ──────────────────────────────────────────────────────────────
 
+  /**
+   * One turn at a time per session.
+   *
+   * The host cannot know when a stopped turn is really over: `session/cancel`
+   * is a notification, and ACP answers nothing on "the turn has ended", so the
+   * next `session/prompt` lands while the cancelled one is still waiting for its
+   * tool. Two loops then share one history — the stopped turn appends its step
+   * after the new user message, and each request rewrites the head the other
+   * one just sent. Chat 8294560b lived that way for 90 minutes: two message
+   * chains under one session id, one provider cache between them, and 24 %, 19 %
+   * and 0 % of the prompt read from cache on the requests that crossed. Stopping
+   * the live turn and letting it settle here is the whole fix; the step that was
+   * still open lands before this prompt is recorded, never after.
+   */
   private async prompt(params: Record<string, unknown>): Promise<{ stopReason: string }> {
+    if (this.turnInFlight) {
+      this.abort?.abort();
+      await this.turnInFlight.catch(() => undefined);
+    }
+    const run = this.runPrompt(params);
+    this.turnInFlight = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    try {
+      return await run;
+    } finally {
+      this.turnInFlight = null;
+    }
+  }
+
+  private async runPrompt(params: Record<string, unknown>): Promise<{ stopReason: string }> {
     if (!this.sessionId) throw new Error("session/new не был вызван");
     // Fail before the message is recorded: a retry after fixing Settings must
     // not stack duplicate user turns in the stored history.
@@ -2464,6 +2827,9 @@ export class BuiltinAgent implements InProcessAgentTransport {
     }) => this.askPermission(toolCall);
     try {
       const endpoint = this.endpointFor(selection);
+      // The summariser's endpoint: the same bytes on its own lane, so its
+      // deliberately shortened head never reads as the chat's head moving.
+      const digestModel = this.digestEndpoint(selection).chatModel(selection.modelId);
       // One bridge per prompt: slots and the usage accumulator must span the
       // turn and its wrap-up continuation.
       // Children run on their own model when one is configured — a fresh
@@ -2560,36 +2926,73 @@ export class BuiltinAgent implements InProcessAgentTransport {
       // A turn is one `promptHistory` call, so a turn's own growth is the one
       // place the threshold never looked: chat c24d5224 rode its line for twenty
       // minutes. This hands the loop the same pass a turn boundary runs — digest
-      // and all — at the step where the view crosses the line. The digest lives
-      // for the rest of the turn, so a second crossing only folds the delta.
-      let liveCompaction: CompactionState | undefined;
+      // and all — at the step where the view crosses the line.
+      //
+      // One pass per turn. The pass hands the loop a rewritten chain — the digest
+      // plus the verbatim tail, not one entry per stored message — and a second
+      // pass over that chain would have to count its cut against the digest, not
+      // against the transcript. One per turn is also all the bill justifies.
+      let passedInTurn = false;
       const compactBetweenSteps = async (view: ModelMessage[], billed: number) => {
-        if (live.builtinContextMode !== "summary") return undefined;
+        if (live.builtinContextMode !== "summary" || passedInTurn) return undefined;
         const line = contextWindow * (live.builtinCompactionThresholdPercent / 100);
         if (!(line > 0) || !(billed > line)) return undefined;
+        // The view this step sends is the turn's own: a boundary pass that folded
+        // the transcript put its digest at the head, and the covered count then
+        // means view messages (the digest is one of them), not stored ones. Hand
+        // the pass a `covered` of 0 here and it declares the prefix unfolded,
+        // asks the summariser to re-read the digest it already wrote, and falls
+        // back to a bare prune that sends the whole tail at full price — chat
+        // 0be3205c lost its head this way on the third step of every long turn.
+        const headSummary = digestSummaryOf(view[0]);
+        const folded = headSummary !== undefined;
+        const state = folded
+          ? ({ summary: headSummary, covered: 1 } as CompactionState)
+          : // An unfolded view is one entry per stored message, which is the only
+            // shape `covered` may be counted against. A pruned view is neither,
+            // so the pass starts from nothing and rewrites what it must.
+            this.viewIndexed
+            ? this.compaction
+            : undefined;
+        const foldedBase = folded && headSummary === this.compaction?.summary ? this.compaction?.covered : undefined;
         const passed = await this.compactView(view, {
           model: endpoint.chatModel(selection.modelId),
+          digestModel,
           system,
           tools,
           abortSignal: abort.signal,
           contextWindow,
           settings: live,
-          state: liveCompaction,
+          state,
+          ...(foldedBase !== undefined ? { foldedBase } : {}),
+          measuredTokens: billed,
         });
-        liveCompaction = passed.state;
+        // One pass per turn, whether or not it squeezed: a second attempt over a
+        // chain the first one rewrote would have to count its cut against the
+        // digest instead of the transcript, and the bill has no room for it.
+        passedInTurn = true;
         return passed.messages;
       };
-      const turnOnce = async () =>
-        runTurn({
+      const turnOnce = async () => {
+        const history = await this.promptHistory({
+          contextWindow,
+          // The turn asks nothing of the summariser: a pass inside a turn asks
+          // on `digestModel` (see `promptHistory`).
+          model: endpoint.chatModel(selection.modelId),
+          digestModel,
+          abortSignal: abort.signal,
+          system,
+          tools,
+        });
+        // One view message per stored message: an index a pass computes here is
+        // also an index into `this.messages`, which is what lets its digest
+        // outlive the turn (see `compactView`). A folded or pruned view is not
+        // that, and the next turn's pass stays the one that writes the digest.
+        this.viewIndexed = history.length === this.messages.length;
+        return runTurn({
           model: endpoint.chatModel(selection.modelId),
           system,
-          messages: await this.promptHistory({
-            contextWindow,
-            model: endpoint.chatModel(selection.modelId),
-            abortSignal: abort.signal,
-            system,
-            tools,
-          }),
+          messages: history,
           tools,
           abortSignal: abort.signal,
           contextWindow,
@@ -2603,7 +3006,20 @@ export class BuiltinAgent implements InProcessAgentTransport {
           takeSteer: () => this.takeSteers(),
           compactBetweenSteps,
           toolImages,
+          // A step that already ran is part of the history from that moment on.
+          // The turn's own fold (`keepResponse`) only lands if the turn ends, and
+          // the interesting deaths are the ones where it does not: the process
+          // restarts under a chat parked on a question, and the resumed session
+          // starts from a transcript that never learned what the turn did — its
+          // files, its background job, its tool results. The next request then
+          // rebuilds a shorter head than the provider has cached (chat 0be3205c:
+          // 479 messages after 484).
+          storeStep: (messages) => {
+            this.messages = [...this.messages, ...messages];
+            this.persist();
+          },
         });
+      };
       // One attempt. A failed one may decide the echo again on the rerun: the
       // request it lost never became a cached prefix, while a message that
       // crossed the wire and was accepted keeps its bytes.
@@ -2620,7 +3036,10 @@ export class BuiltinAgent implements InProcessAgentTransport {
       // attempt is folded the same way: the retry then continues from what the
       // dead call had already produced instead of repeating that work.
       const keepResponse = (partial: TurnOutcome) => {
-        this.messages = [...this.messages, ...foldInjected(partial.response, partial.injected)];
+        // What `storeStep` already took is in `this.messages` — fold only the
+        // rest, or the turn would store its own first steps twice.
+        const folded = foldInjected(partial.response, partial.injected);
+        this.messages = [...this.messages, ...folded.slice(partial.stored ?? 0)];
         this.persist();
       };
       // A stream that dies mid-flight throws before any response message
@@ -2758,6 +3177,11 @@ export class BuiltinAgent implements InProcessAgentTransport {
       }
       if (folded !== outcome) keepResponse(outcome);
       if (outcome.failure) throw outcome.failure;
+      // The reader stopped the turn: it ends where they stopped it, and the
+      // steps already answered above stay in the history — a transcript that
+      // forgets them drops them from the next request's head, and the chat
+      // pays for its own history again (chat 8294560b: "совпало 3 из 6").
+      if (outcome.cancelled) return { stopReason: "cancelled" };
       // The reader stopped the turn at the drift card: the request never left,
       // so the turn is over where they stopped it.
       if (this.driftStopped) return { stopReason: "cancelled" };
@@ -2770,6 +3194,9 @@ export class BuiltinAgent implements InProcessAgentTransport {
     } finally {
       this.abort = null;
       this.activeSubagents = null;
+      // The turn's own messages are on the wire: what the archive may still
+      // touch from here on is the next turn's tail (see `sealOffloadBoundary`).
+      this.sealOffloadBoundary();
       // Whatever a steer was still waiting on belongs to a turn that is over.
       this.settleSteers(false);
     }

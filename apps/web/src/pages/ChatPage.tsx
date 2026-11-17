@@ -2224,6 +2224,7 @@ function CompactionRow({ part, sessionId }: { part: MessagePartDto; sessionId?: 
   const coveredAfter = Number(part.payload.coveredAfter ?? 0);
   const tokensBefore = Number(part.payload.tokensBefore ?? 0);
   const tokensAfter = Number(part.payload.tokensAfter ?? 0);
+  const tokensAfterPending = part.payload.tokensAfterPending === true;
   const meta = [
     coveredAfter > coveredBefore
       ? t("chat.compactionTurns", { from: coveredBefore + 1, to: coveredAfter })
@@ -2233,7 +2234,13 @@ function CompactionRow({ part, sessionId }: { part: MessagePartDto; sessionId?: 
           from: formatCompact(tokensBefore),
           to: formatCompact(tokensAfter),
         })
-      : "",
+      : // The pass just rewrote the view and no request has carried it yet. An
+        // estimate here is the one number on the row known to lie (billed
+        // 258 133 against 200 135 estimated in chat 9590a5eb), so the provider's
+        // count replaces this `*` as soon as the next request is billed.
+        tokensBefore > 0 && tokensAfterPending
+        ? t("chat.compactionTokensPending", { from: formatCompact(tokensBefore) })
+        : "",
   ].filter(Boolean);
   return (
     <div className={styles.compactionRow} data-compaction-id={part.id}>
@@ -2245,7 +2252,20 @@ function CompactionRow({ part, sessionId }: { part: MessagePartDto; sessionId?: 
           {manual ? t("chat.compactionManualTitle") : t("chat.compactionTitle")}
         </span>
         {meta.length > 0 ? (
-          <span className={styles.compactionMeta}>{meta.join(" · ")}</span>
+          <span
+            className={styles.compactionMeta}
+            title={
+              tokensBefore > 0
+                ? tokensAfter > 0
+                  ? t("chat.compactionTokensHint")
+                  : tokensAfterPending
+                    ? t("chat.compactionTokensPendingHint")
+                    : undefined
+                : undefined
+            }
+          >
+            {meta.join(" · ")}
+          </span>
         ) : null}
         {summary ? (
           <button
@@ -3396,10 +3416,26 @@ function AgentTimelineItems({
    *  (`.stepsBody .stepsToggleSticky`). */
   stickyRuns?: boolean;
 }) {
+  // A live turn says "Работаю…" on its trailing run, and only there. When the
+  // last thing in the timeline is not a run — the drift row the reader just
+  // answered "Продолжить", a settled note, a compaction — nothing carried the
+  // sign: the run above kept the frozen "Работал" it ended with while the loop
+  // was already working on (Stop button and all). The waiting block goes after
+  // it, exactly as it does before a turn's first part. A card still waiting for
+  // the reader is the exception: the agent is parked, the row says "Ход
+  // приостановлен", and nothing may pulse over it.
+  const tail = items[items.length - 1];
+  const tailHolds =
+    (tail?.kind === "question" || tail?.kind === "context_drift") &&
+    Boolean(tail.part.payload.pending);
+  const shown =
+    streaming && tail && !tailHolds && tail.kind !== "run" && tail.kind !== "text"
+      ? [...items, EMPTY_LIVE_RUN]
+      : items;
   return (
     <>
-      {items.map((item, idx) => {
-        const isLast = idx === items.length - 1;
+      {shown.map((item, idx) => {
+        const isLast = idx === shown.length - 1;
         if (item.kind === "run") {
           // Keyed by position, not by the run's first part: the empty live block
           // that waits for the first token has no part to name it after, so a
@@ -3617,6 +3653,7 @@ function MessageActions({
           y: Math.min(Math.max(8, y), window.innerHeight - 280),
         });
         setMessageHotkeyHover(message.id);
+        armMessageHotkey(message.id);
       },
     }),
     [message.id],
@@ -7437,7 +7474,32 @@ function ChatThread() {
           ]
         : []),
     ];
-    return { label, title, rows };
+    // Behind the panel's "Advanced" switch: the split of the uncached input that
+    // says whether the bill is our fault. A provider's own miss is a request
+    // whose head went out unchanged and was billed in full anyway — the same
+    // bytes it served from cache a minute earlier (see the agent's `onHead`).
+    const coldMisses = acp?.coldMisses;
+    const coldTokens = acp?.coldMissTokens;
+    const movedHead =
+      uncached != null && coldTokens != null ? Math.max(0, uncached - coldTokens) : null;
+    const advancedRows = [
+      {
+        id: "provider-cold",
+        label: t("chat.contextTokensColdMisses"),
+        value: num(coldMisses ?? null),
+      },
+      {
+        id: "provider-cold-tokens",
+        label: t("chat.contextTokensColdMissTokens"),
+        value: num(coldTokens ?? null),
+      },
+      {
+        id: "moved-head",
+        label: t("chat.contextTokensMovedHead"),
+        value: num(movedHead),
+      },
+    ];
+    return { label, title, rows, advancedRows };
   }, [activeSession?.usage, activeSession?.messages, settings.chatChipOptions.context.format, t]);
 
   const prevSessionIdRef = useRef<string | null>(null);

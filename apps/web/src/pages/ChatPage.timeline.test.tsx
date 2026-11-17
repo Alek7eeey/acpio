@@ -608,6 +608,41 @@ describe("compaction row", () => {
     expect(container.textContent).toContain("починить парсер");
     expect(screen.getByRole("button", { name: "скрыть конспект" })).toBeTruthy();
   });
+
+  it("holds a star where the squeezed size goes until the provider names it", async () => {
+    // Only the request after the pass can price the view it left, and the
+    // estimate that stood here before read 200 135 where the provider billed
+    // 258 133 (chat 9590a5eb). The follow-up fills this row; a `*` is honest,
+    // a second wrong number is not.
+    const pending: SessionDetailDto = {
+      ...compacted,
+      messages: compacted.messages.map((message) =>
+        message.id !== "m1"
+          ? message
+          : {
+              ...message,
+              parts: message.parts.map((item) =>
+                item.type !== "compaction"
+                  ? item
+                  : { ...item, payload: { ...item.payload, tokensAfterPending: true, tokensAfter: undefined } },
+              ),
+            },
+      ),
+    };
+    useAppStore.setState({
+      sessions: [pending],
+      activeSession: pending,
+      sessionDetails: { s1: pending },
+    });
+
+    const { container } = renderThread();
+    await expandSteps(container);
+    await screen.findByText("Контекст сжат");
+
+    const row = container.querySelector<HTMLElement>("[data-compaction-id]");
+    expect(row?.textContent).toContain("9k → * токенов");
+    expect(row?.textContent).not.toContain("2.5k");
+  });
 });
 
 describe("context drift row", () => {
@@ -705,6 +740,47 @@ describe("context drift row", () => {
     // asking the reader a question.
     expect(container.textContent).not.toContain("Вопрос агента");
     expect(screen.getByRole("button", { name: "Остановить ход" })).toBeTruthy();
+  });
+
+  /** The same turn, still live, with its drift row answered (or still holding). */
+  const liveDrift = (pending: boolean): SessionDetailDto => {
+    // A live turn reads the git chip and the provider patch through the api the
+    // blanket mock answers with `{}`.
+    (api as unknown as Record<string, unknown>).updateSettings = vi.fn(
+      async () => DEFAULT_SETTINGS as AppSettings,
+    );
+    (api as unknown as Record<string, unknown>).gitStatus = vi.fn(async () => null);
+    const session = drifted("off");
+    session.status = "running";
+    const driftPart = session.messages[1]!.parts[1]!;
+    driftPart.payload = {
+      ...driftPart.payload,
+      requestId: "r1",
+      pending,
+      ...(pending ? {} : { answerSummary: "Продолжить" }),
+      questions: [{ id: "drift", prompt: "Запрос ещё не отправлен.", options: [] }],
+    };
+    return session;
+  };
+
+  // The card is answered with "Продолжить" and the loop works on: the run above
+  // it keeps the frozen "Работал" it ended with, and the row is not a run — with
+  // nothing trailing the timeline, the turn claimed to be over while the agent
+  // was busy again (Stop button and all).
+  it("keeps saying the agent works after the drift card is answered", async () => {
+    const { container } = mount(liveDrift(false));
+    await screen.findByText("Контекст изменился в середине");
+
+    expect(container.textContent).toContain("Работаю");
+  });
+
+  // The other side of the same row: while it still waits for the reader the
+  // agent is parked, so the resumed-work block must not appear under it.
+  it("does not claim work over a card still waiting for its answer", async () => {
+    const { container } = mount(liveDrift(true));
+    await screen.findByText("Ход приостановлен");
+
+    expect(container.textContent).not.toContain("Работаю");
   });
 
   it("asks for logging instead of offering a download that would be empty", async () => {

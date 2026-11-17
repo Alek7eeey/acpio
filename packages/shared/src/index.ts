@@ -3284,11 +3284,39 @@ export interface AcpUsage {
    * is what actually costs time (and often money).
    */
   cachedInputTokens?: number;
+  /**
+   * Requests whose head went out byte-for-byte unchanged and whose prefix the
+   * provider still billed in full. Kept apart from the rest of the uncached
+   * input because nothing on our side can make them cheaper: the prompt cache
+   * belongs to the upstream node the request happened to reach. Chat b4e9586d
+   * paid 72 260 tokens at 0 % ninety-seven seconds after the same bytes were
+   * served from cache.
+   */
+  coldMisses?: number;
+  /** Input tokens those requests were billed for. */
+  coldMissTokens?: number;
   /** Cumulative cost (currency units) if the harness reports it. */
   cost?: number;
   /** Original harness payload, kept for fields we don't normalize. */
-  raw?: Record<string, unknown>;
+  raw?: unknown;
 }
+
+/**
+ * A chat's model spend to date — what the token panel's in/cached/out rows count.
+ * It belongs to the chat, not to the agent session that happened to bill it: an
+ * edit or a regenerate opens a fresh session (`preferResume: false`), and a
+ * counter starting at zero there made the panel hand back money the chat had
+ * already spent (chat 74dadea4: 54.7M input tokens across four sessions on one
+ * day, 3.8M of them on the panel). So the harness hands these totals to the
+ * agent at boot, and a session only ever adds to them.
+ */
+export type AcpSpendTotals = {
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens: number;
+  coldMisses?: number;
+  coldMissTokens?: number;
+};
 
 /** File attached to a board task when it was created (absolute server path). */
 export interface TaskAttachmentDto {

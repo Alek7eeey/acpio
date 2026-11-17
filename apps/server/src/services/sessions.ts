@@ -831,7 +831,13 @@ export async function mostRecentChatCwd(): Promise<string> {
   return "";
 }
 
-const STUCK_TOOL_STATUSES = new Set(["pending", "in_progress", "running"]);
+const STUCK_TOOL_STATUSES = ["pending", "in_progress", "running"] as const;
+
+/** `$.status` of a part payload, as SQL — the boot sweep filters in the query. */
+const STUCK_TOOL_STATUS_SQL = sql`json_extract(${messageParts.payload}, '$.status') in (${sql.join(
+  STUCK_TOOL_STATUSES.map((status) => sql`${status}`),
+  sql`, `,
+)})`;
 
 const INTERRUPT_NOTE =
   "Сервер был перезапущен — этот ход прерван. Отправьте сообщение ещё раз.";
@@ -922,11 +928,22 @@ export async function reconcileStaleSessions(): Promise<{
   // Only a turn that would spin forever without its runtime is reset.
   const parkedOnQuestion = new Set<string>();
   if (stale.length) {
+    // Only the chats the sweep can reset are asked about: the note-and-question
+    // pass used to read every question part of every chat, and this runs before
+    // the first page is served.
     const questionParts = await db
       .select({ sessionId: messages.sessionId, payload: messageParts.payload })
       .from(messageParts)
       .innerJoin(messages, eq(messageParts.messageId, messages.id))
-      .where(eq(messageParts.type, "question"));
+      .where(
+        and(
+          eq(messageParts.type, "question"),
+          inArray(
+            messages.sessionId,
+            stale.map((row) => row.id),
+          ),
+        ),
+      );
     for (const row of questionParts) {
       const payload = row.payload as { pending?: unknown } | null;
       if (payload?.pending === true) parkedOnQuestion.add(row.sessionId);
@@ -945,20 +962,20 @@ export async function reconcileStaleSessions(): Promise<{
   }
 
   // Flip stuck tool parts in every session (idle ones included — warm-up can
-  // mask the session status while the part keeps spinning).
+  // mask the session status while the part keeps spinning). The filter is in
+  // the query: on a large history this pass read all 271k parts into JS with
+  // their payloads — several seconds of a blocked event loop, during which the
+  // port was open and answered nothing.
   const allParts = await db
-    .select({ part: messageParts, sessionId: messages.sessionId })
+    .select({ id: messageParts.id, sessionId: messages.sessionId })
     .from(messageParts)
-    .innerJoin(messages, eq(messageParts.messageId, messages.id));
+    .innerJoin(messages, eq(messageParts.messageId, messages.id))
+    .where(and(eq(messageParts.type, "tool_call"), STUCK_TOOL_STATUS_SQL));
   const touchedSessions = new Set<string>();
-  for (const { part: p, sessionId } of allParts) {
-    const payload = p.payload as { status?: unknown } | null;
-    const status = payload ? String(payload.status ?? "") : "";
-    if (p.type === "tool_call" && STUCK_TOOL_STATUSES.has(status)) {
-      await updatePart(sessionId, p.id, { status: "error", interrupted: true });
-      fixedParts++;
-      touchedSessions.add(sessionId);
-    }
+  for (const { id, sessionId } of allParts) {
+    await updatePart(sessionId, id, { status: "error", interrupted: true });
+    fixedParts++;
+    touchedSessions.add(sessionId);
   }
 
   // One explanatory note per touched session (idempotent across restarts).

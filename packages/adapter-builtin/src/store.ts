@@ -79,7 +79,15 @@ export interface BuiltinStoredSession {
    * report. Stored so a restart resumes the totals instead of handing the panel
    * a smaller number than the session has already spent.
    */
-  usage?: { inputTokens: number; outputTokens: number; cachedInputTokens: number };
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    cachedInputTokens: number;
+    /** Requests an unchanged head paid for in full — the provider's own miss. */
+    coldMisses?: number;
+    /** Input tokens those requests were billed for. */
+    coldMissTokens?: number;
+  };
   /**
    * The skills half of the system prompt as this chat's first turn fixed it: the
    * inlined bodies of the active skills and the rules they stand in for. Stored
@@ -141,14 +149,18 @@ export function isValidSessionId(id: string): boolean {
   return SESSION_ID_RE.test(id);
 }
 
-function fileFor(stateDir: string, sessionId: string): string {
+/**
+ * The file a session lives in. Exported for the boot's own diagnostic: a restore
+ * that came back empty has to say whether the file was missing or unreadable.
+ */
+export function builtinSessionFile(stateDir: string, sessionId: string): string {
   if (!SESSION_ID_RE.test(sessionId)) throw new Error(`Некорректный id сессии: ${sessionId}`);
   return join(stateDir, `${sessionId}.json`);
 }
 
 export function loadBuiltinSession(stateDir: string, sessionId: string): BuiltinStoredSession | undefined {
   try {
-    const parsed = JSON.parse(readFileSync(fileFor(stateDir, sessionId), "utf8")) as Partial<BuiltinStoredSession>;
+    const parsed = JSON.parse(readFileSync(builtinSessionFile(stateDir, sessionId), "utf8")) as Partial<BuiltinStoredSession>;
     if (parsed?.version !== 1 || !Array.isArray(parsed.messages)) return undefined;
     const compaction = parsed.compaction;
     const startedAt = (value: unknown, length: number) =>
@@ -228,11 +240,16 @@ export function loadBuiltinSession(stateDir: string, sessionId: string): Builtin
     const usageInput = count(stored?.inputTokens);
     const usageOutput = count(stored?.outputTokens);
     const usageCached = count(stored?.cachedInputTokens);
+    const coldMisses = count(stored?.coldMisses);
+    const coldMissTokens = count(stored?.coldMissTokens);
     return {
       version: 1,
       cwd: String(parsed.cwd ?? ""),
       modelId: String(parsed.modelId ?? ""),
-      messages: parsed.messages as ModelMessage[],
+      // Pictures this file keeps beside itself come back as bytes: a chat that
+      // resumes on a text placeholder rewrites messages the provider already
+      // cached (see `spillImages`).
+      messages: restoreImages(stateDir, parsed.messages as ModelMessage[]),
       ...(thinkingOff ? { thinkingOff: true } : {}),
       ...(effort && effort !== "default" ? { effort } : {}),
       ...(thinkingLimit !== undefined ? { thinkingLimit } : {}),
@@ -253,7 +270,15 @@ export function loadBuiltinSession(stateDir: string, sessionId: string): Builtin
       // A half-written or hand-edited total reads as "unknown": the session
       // starts its spend rows over rather than trusting a broken figure.
       ...(usageInput !== undefined && usageOutput !== undefined && usageCached !== undefined
-        ? { usage: { inputTokens: usageInput, outputTokens: usageOutput, cachedInputTokens: usageCached } }
+        ? {
+            usage: {
+              inputTokens: usageInput,
+              outputTokens: usageOutput,
+              cachedInputTokens: usageCached,
+              ...(coldMisses !== undefined ? { coldMisses } : {}),
+              ...(coldMissTokens !== undefined ? { coldMissTokens } : {}),
+            },
+          }
         : {}),
       ...(promptSkills ? { promptSkills } : {}),
       ...(promptRules ? { promptRules } : {}),
@@ -265,40 +290,90 @@ export function loadBuiltinSession(stateDir: string, sessionId: string): Builtin
   }
 }
 
+/** Folder of a chat's picture bytes, beside the session files they belong to. */
+const IMAGE_DIR = "session-images";
+
+/** Where one stored picture lives, relative to the state directory. */
+function imageRelPath(sessionId: string, message: number, part: number, mediaType: string): string {
+  const ext = (mediaType.split("/")[1] ?? "bin").replace(/[^a-z0-9]/gi, "") || "bin";
+  return `${IMAGE_DIR}/${sessionId}-${message}-${part}.${ext}`;
+}
+
 /**
- * Copy of the history safe to store: image bytes survive only in the newest
- * user turn. The live history in memory is untouched, so the current turn keeps
- * every picture — this only stops one chat's JSON from growing by megabytes per
- * attached screenshot, forever. Older images were already in front of the model
- * when their turn ran; on restore they read as a text placeholder.
+ * Copy of the history safe to store: a picture's bytes move out of the JSON and
+ * beside it, and the message keeps a reference to the file.
+ *
+ * The JSON used to grow by megabytes per attached screenshot, so older pictures
+ * were replaced by a text placeholder — and that placeholder is a rewrite of a
+ * message the provider had already cached: on the next turn the prefix ended at
+ * the first old picture and the rest of the history was billed again (chat
+ * 8294560b: `messages[3]` became "[изображение…]" at 11:12, the request body
+ * fell from 443 KB to 148 KB, and the same picture read `[image]` from then on).
+ * Writing the bytes to their own file keeps the session file small and the head
+ * byte-identical: `restoreImages` inlines them again when the chat is reloaded.
  */
-function withoutOldImages(messages: ModelMessage[]): ModelMessage[] {
-  let newestUser = -1;
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    if (messages[i].role === "user") {
-      newestUser = i;
-      break;
-    }
-  }
-  return messages.map((m, i) => {
-    if (m.role !== "user" || i === newestUser || !Array.isArray(m.content)) return m;
-    const content = m.content.map((part) =>
-      part.type === "file"
-        ? { type: "text" as const, text: "[изображение из предыдущего сообщения — не сохранено]" }
-        : part,
-    );
-    return content.some((part, n) => part !== m.content[n]) ? { ...m, content } : m;
+function spillImages(
+  stateDir: string,
+  sessionId: string,
+  messages: ModelMessage[],
+): ModelMessage[] {
+  return messages.map((message, index) => {
+    if (message.role !== "user" || !Array.isArray(message.content)) return message;
+    let changed = false;
+    const content = message.content.map((part, partIndex) => {
+      if (part.type !== "file" || typeof part.data !== "string" || !part.data) return part;
+      const path = imageRelPath(sessionId, index, partIndex, String(part.mediaType ?? ""));
+      try {
+        mkdirSync(join(stateDir, IMAGE_DIR), { recursive: true });
+        writeFileSync(join(stateDir, path), Buffer.from(part.data, "base64"));
+      } catch {
+        // A picture that could not be spilled stays inline: the history is
+        // worth more than the size of the session file.
+        return part;
+      }
+      changed = true;
+      return { type: "file" as const, mediaType: part.mediaType, data: "", path };
+    });
+    return changed ? { ...message, content } : message;
+  });
+}
+
+/**
+ * The other half of `spillImages`: a stored reference becomes the bytes again, so
+ * a reloaded chat sends the picture the earlier turns were answered with — the
+ * same bytes the provider has cached. A file somebody deleted falls back to the
+ * placeholder older sessions already carry.
+ */
+function restoreImages(stateDir: string, messages: ModelMessage[]): ModelMessage[] {
+  return messages.map((message) => {
+    if (!Array.isArray(message.content)) return message;
+    let changed = false;
+    const content = message.content.map((part) => {
+      const stored = part as unknown as { type?: string; path?: unknown; data?: unknown };
+      if (stored.type !== "file" || typeof stored.path !== "string" || stored.data) return part;
+      changed = true;
+      try {
+        const data = readFileSync(join(stateDir, stored.path)).toString("base64");
+        return { ...(part as object), data } as unknown as (typeof message.content)[number];
+      } catch {
+        return {
+          type: "text",
+          text: "[изображение из предыдущего сообщения — не сохранено]",
+        } as unknown as (typeof message.content)[number];
+      }
+    });
+    return (changed ? { ...message, content } : message) as unknown as ModelMessage;
   });
 }
 
 /** Atomic replace — a crash mid-write must not leave a half-parsed history. */
 export function saveBuiltinSession(stateDir: string, sessionId: string, data: BuiltinStoredSession): void {
-  const file = fileFor(stateDir, sessionId);
+  const file = builtinSessionFile(stateDir, sessionId);
   mkdirSync(stateDir, { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
   writeFileSync(
     tmp,
-    JSON.stringify({ ...data, messages: withoutOldImages(data.messages) }),
+    JSON.stringify({ ...data, messages: spillImages(stateDir, sessionId, data.messages) }),
     "utf8",
   );
   renameSync(tmp, file);

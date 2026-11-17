@@ -3077,6 +3077,10 @@ button.userSlashCmd:focus-visible {
 }
 
 .contextTokenHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
   margin-bottom: 7px;
   font-size: 0.7rem;
   font-weight: 700;
@@ -3110,6 +3114,27 @@ button.userSlashCmd:focus-visible {
   font-size: 0.85rem;
   font-weight: 650;
   font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+/* The tokens panel's "Advanced" switch: it sits in the panel's top-right corner
+   and opens more of the same bill rather than an action on it. */
+.contextTokenMore {
+  flex: none;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+  cursor: pointer;
+}
+
+.contextTokenMore:hover {
   color: var(--text);
 }
 

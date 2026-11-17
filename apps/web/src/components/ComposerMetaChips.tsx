@@ -160,12 +160,19 @@ export function ComposerMetaChips({
   chatMcp: Array<{ id: string; name: string }>;
   /** Servers this chat can attach (folder list), even if all are disabled here. */
   availableMcpCount: number;
-  /** ACP-reported context usage; null hides the chip (no estimate fallback). */
+  /**
+   * A field the harness never sent reads "—": a confident 0 would be a lie.
+   */
   contextDisplay: {
     label: string;
     title: string;
     /** Token rows the click opens: cache %, totals, cached/uncached/output… */
-    rows: Array<{ id: string; label: string; value: string }>;
+    rows: Array<{ id: string; label: string; value: string; hint?: string }>;
+    /**
+     * Rows behind the panel's "Advanced" switch: the split the plain rows cannot
+     * carry, and the ones that only mean something to somebody chasing a bill.
+     */
+    advancedRows: Array<{ id: string; label: string; value: string; hint?: string }>;
   } | null;
   consoleOpen: boolean;
   onToggleConsole: () => void;
@@ -223,6 +230,10 @@ export function ComposerMetaChips({
   const contextPanelRef = useRef<HTMLDivElement | null>(null);
   const [contextOpen, setContextOpen] = useState(false);
   const [contextPanelReady, setContextPanelReady] = useState(false);
+  // The panel opens on the rows a chat is read by; the extra ones stay behind a
+  // switch, so a bill that reads "Без кэша 576 307" can be taken apart without
+  // putting six numbers nobody asked for in front of every reader.
+  const [contextAdvanced, setContextAdvanced] = useState(false);
   const bgChipRef = useRef<HTMLButtonElement | null>(null);
   const bgPanelRef = useRef<HTMLDivElement | null>(null);
   const [bgOpen, setBgOpen] = useState(false);
@@ -1052,11 +1063,30 @@ export function ComposerMetaChips({
               role="dialog"
               aria-label={t("chat.contextTokensTitle")}
             >
-              <div className={styles.contextTokenHead}>{t("chat.contextTokensTitle")}</div>
+              <div className={styles.contextTokenHead}>
+                <span>{t("chat.contextTokensTitle")}</span>
+                {contextDisplay.advancedRows.length ? (
+                  <button
+                    type="button"
+                    className={styles.contextTokenMore}
+                    aria-expanded={contextAdvanced}
+                    onClick={() => setContextAdvanced((open) => !open)}
+                  >
+                    {contextAdvanced
+                      ? t("chat.contextTokensAdvancedHide")
+                      : t("chat.contextTokensAdvanced")}
+                  </button>
+                ) : null}
+              </div>
               <dl className={styles.contextTokenList}>
-                {contextDisplay.rows.map((row) => (
+                {(contextAdvanced
+                  ? [...contextDisplay.rows, ...contextDisplay.advancedRows]
+                  : contextDisplay.rows
+                ).map((row) => (
                   <div className={styles.contextTokenRow} key={row.id}>
-                    <dt className={styles.contextTokenKey}>{row.label}</dt>
+                    <dt className={styles.contextTokenKey} title={row.hint}>
+                      {row.label}
+                    </dt>
                     <dd className={styles.contextTokenVal}>{row.value}</dd>
                   </div>
                 ))}

@@ -2553,6 +2553,64 @@ describe("durable questions", () => {
     setAgentAvailable("omp", false);
   });
 
+  // The halt an edit makes is the host's own and stays silent — the answer it
+  // ends is being replaced. The reader's Stop is a different thing and keeps its
+  // line even when it lands on the turn an edit just started: that is how the
+  // reader of chat 74dadea4 knew what they had done.
+  it("keeps the reader's own Stop in the transcript after an edit", async () => {
+    await connectAgent();
+    const created = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    expect(created.statusCode).toBe(200);
+    const session = created.json();
+    runtimeSessionIds.push(session.id);
+    await waitForAcpSessionId(session.id);
+
+    await app.inject({
+      method: "POST",
+      url: `/api/sessions/${session.id}/prompt`,
+      payload: { text: "SLOW-HANG черновой вопрос" },
+    });
+    const hung = await waitForDetail(session.id, (d) =>
+      allPartTexts(d).some((t) => t.includes("hang tick")),
+    );
+    const edited = hung.messages.find((m) => m.role === "user")!;
+    await app.inject({
+      method: "POST",
+      url: `/api/sessions/${session.id}/prompt`,
+      payload: { text: "переписанный вопрос", editMessageId: edited.id },
+    });
+    await waitForDetail(
+      session.id,
+      (d) => d.status === "idle" && textParts(d).some((t) => t.includes("echo: переписанный")),
+    );
+
+    // A turn the reader now stops by hand, in the thread the edit left behind.
+    await app.inject({
+      method: "POST",
+      url: `/api/sessions/${session.id}/prompt`,
+      payload: { text: "SLOW-HANG второй" },
+    });
+    await waitForDetail(session.id, (d) =>
+      d.messages.filter((m) => m.role === "assistant").some((m) =>
+        m.parts.some(
+          (p) => p.type === "thought" && String(p.payload.text ?? "").includes("hang tick"),
+        ),
+      ),
+    );
+    await app.inject({ method: "POST", url: `/api/sessions/${session.id}/cancel` });
+
+    const stopped = await waitForDetail(session.id, (d) =>
+      d.messages.some((m) => m.parts.some((p) => p.type === "note")),
+    );
+    const note = stopped.messages.flatMap((m) => m.parts).find((p) => p.type === "note");
+    expect(String(note?.payload.text)).toMatch(/^Turn stopped by the user/);
+    // And it sits in the turn it halted, which still carries what the reader saw.
+    const holder = stopped.messages.find((m) => m.parts.includes(note!))!;
+    expect(holder.role).toBe("assistant");
+    expect(holder.parts.length).toBeGreaterThan(1);
+    setAgentAvailable("omp", false);
+  });
+
   it("Stop says in the transcript that the reader stopped it", async () => {
     await connectAgent();
     const created = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
@@ -3998,6 +4056,48 @@ describe("prompt delivery while the agent is busy", () => {
     ).rejects.toThrow(/condition not met/);
   });
 
+  // The composer sends Stop itself before it sends the edit (the answer must
+  // stop at once, not behind a round trip) — so the two requests overlap, and
+  // the halt's note could still be in flight when the edit has already replaced
+  // the thread it belonged to. A note has no message of its own to create: chat
+  // 74dadea4 got a fresh bubble holding nothing but «Ход прерван пользователем»
+  // where the answer to its edited message should have been.
+  it("leaves no halted-turn note behind when the edit and the Stop overlap", async () => {
+    await connectAgent();
+    const created = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    expect(created.statusCode).toBe(200);
+    const session = created.json();
+    runtimeSessionIds.push(session.id);
+    await waitForAcpSessionId(session.id);
+
+    await app.inject({
+      method: "POST",
+      url: `/api/sessions/${session.id}/prompt`,
+      payload: { text: "SLOW-HANG черновой вопрос" },
+    });
+    const hung = await waitForDetail(session.id, (d) =>
+      allPartTexts(d).some((t) => t.includes("hang tick")),
+    );
+    const edited = hung.messages.find((m) => m.role === "user")!;
+
+    // Both in flight at once, the way the composer fires them.
+    await Promise.all([
+      app.inject({ method: "POST", url: `/api/sessions/${session.id}/cancel` }),
+      app.inject({
+        method: "POST",
+        url: `/api/sessions/${session.id}/prompt`,
+        payload: { text: "переписанный вопрос", editMessageId: edited.id },
+      }),
+    ]);
+
+    const detail = await waitForDetail(
+      session.id,
+      (d) =>
+        d.status === "idle" && textParts(d).some((t) => t.includes("echo: переписанный вопрос")),
+    );
+    expect(detail.messages.flatMap((m) => m.parts).some((p) => p.type === "note")).toBe(false);
+  });
+
   it("interrupts the live answer and regenerates it when the reader edits the message", async () => {
     await connectAgent();
     const created = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
@@ -4044,6 +4144,10 @@ describe("prompt delivery while the agent is busy", () => {
     // The reader can tell the bubble was rewritten — it is stored, not a tab's
     // own guess, so it survives a reload and shows in every tab.
     expect(detail.messages.find((m) => m.role === "user")?.editedAt).toBeTruthy();
+    // An edit is not the reader's Stop: the turn it replaces owes the thread no
+    // «Ход прерван пользователем», and the answer area of the new turn must not
+    // open on one (chat 74dadea4 read that line where its answer belonged).
+    expect(detail.messages.flatMap((m) => m.parts).some((p) => p.type === "note")).toBe(false);
   });
 
   // An edit rewrites the words of a message, and the files it carries are the

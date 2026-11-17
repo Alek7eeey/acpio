@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -58,6 +58,8 @@ function boot(
   answerHost?: (method: string, params: Record<string, unknown>) => unknown,
   /** Settings as of right now — a knob flipped between two turns. */
   settingsProvider?: () => Promise<AppSettings>,
+  /** Diagnostics the host would write into the deep log. */
+  diagnostics?: Array<{ kind: string; data?: Record<string, unknown> }>,
 ): Harness {
   const agent = createBuiltinTransport({
     settings: { ...DEFAULT_SETTINGS, ...overrides },
@@ -65,6 +67,7 @@ function boot(
     mode: "agent",
     stateDir,
     ...(settingsProvider ? { settingsProvider } : {}),
+    ...(diagnostics ? { onDiagnostic: (event) => diagnostics.push(event) } : {}),
   });
 
   const frames: Array<Record<string, unknown>> = [];
@@ -330,6 +333,51 @@ describe("BuiltinAgent ACP surface", () => {
     const { call } = boot();
     const res = await call<SessionResult>("session/load", { sessionId: "abc-123", cwd: "/w" });
     expect(res.sessionId).toBe("abc-123");
+  });
+
+  // A restore that comes back empty looks exactly like a new chat in every
+  // artifact the host has: the wire log shows a short request, the chat shows
+  // its own transcript. Chat 8294560b resumed by `load` and sent "system + one
+  // note" while its history sat intact on disk, and the empty agent lived on
+  // beside the real one — this record is what separates those two cases.
+  it("session/load reports how much stored history it restored", async () => {
+    const dir = tempDir();
+    saveBuiltinSession(dir, "load-1", {
+      version: 1,
+      cwd: "/w",
+      modelId: "",
+      messages: [
+        { role: "user", content: "первый" },
+        { role: "assistant", content: "ответ" },
+      ],
+    });
+    const diagnostics: Array<{ kind: string; data?: Record<string, unknown> }> = [];
+    const { call } = boot({}, dir, undefined, undefined, diagnostics);
+    await call("session/load", { sessionId: "load-1", cwd: "/w" });
+    const load = diagnostics.find((d) => d.kind === "session-load");
+    expect(load?.data).toMatchObject({
+      agentSessionId: "load-1",
+      filePresent: true,
+      stored: 2,
+      messages: 2,
+    });
+  });
+
+  it.each([
+    ["no file", () => "missing", false],
+    ["a file that will not parse", () => "{ not json", true],
+  ])("session/load says why an empty restore came back empty: %s", async (_label, body, filePresent) => {
+    const dir = tempDir();
+    const payload = (body as () => string)();
+    if (payload !== "missing") writeFileSync(join(dir, "lost-1.json"), payload, "utf8");
+    const diagnostics: Array<{ kind: string; data?: Record<string, unknown> }> = [];
+    const { call } = boot({}, dir, undefined, undefined, diagnostics);
+    await call("session/load", { sessionId: "lost-1", cwd: "/w" });
+    expect(diagnostics.find((d) => d.kind === "session-load")?.data).toMatchObject({
+      stored: 0,
+      messages: 0,
+      filePresent,
+    });
   });
 
   it("session/load refuses an id that is not a plain token", async () => {
@@ -1513,6 +1561,101 @@ describe("builtin provider routing", () => {
       expectGrowing([...beforeRestart, ...afterRestart]);
       expect(afterRestart.at(-1)).toEqual({ input: 4_900, output: 42, cached: 3_800 });
       expect(wire).toEqual({ input: 4_900, output: 42, cached: 3_800 });
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("counts a new session on the chat's own spend, not from zero", async () => {
+    // The report: a chat's in/cached/out rows went backwards every time the
+    // reader rewrote a message — an edit or a regenerate boots a fresh agent
+    // session (`preferResume: false`), and its counter started at zero, so the
+    // panel handed back money the chat had already paid (chat 74dadea4: 54.7M
+    // input tokens in the wire logs, 3.8M on the panel). The harness therefore
+    // hands the chat's totals over at boot, and a session only ever adds to them.
+    const server = createServer((req, res) => {
+      req.resume();
+      req.on("end", () => {
+        res.setHeader("content-type", "text/event-stream");
+        const chunk = (payload: Record<string, unknown>) => `data: ${JSON.stringify(payload)}\n\n`;
+        res.write(
+          chunk({
+            id: "c1",
+            object: "chat.completion.chunk",
+            created: 0,
+            model: "stub",
+            choices: [{ index: 0, delta: { role: "assistant", content: "ok" }, finish_reason: null }],
+          }),
+        );
+        res.write(
+          chunk({
+            id: "c1",
+            object: "chat.completion.chunk",
+            created: 0,
+            model: "stub",
+            choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+            usage: {
+              prompt_tokens: 100,
+              completion_tokens: 5,
+              total_tokens: 105,
+              prompt_tokens_details: { cached_tokens: 90 },
+            },
+          }),
+        );
+        res.write("data: [DONE]\n\n");
+        res.end();
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("stub did not bind a port");
+    const settings = {
+      builtinProviders: [
+        {
+          id: "p1",
+          name: "Local",
+          url: `http://127.0.0.1:${address.port}/v1`,
+          apiKey: "",
+          models: [{ id: "m1", label: "M1", contextWindow: 8_000 }],
+        },
+      ],
+    };
+    /** The last spend rows the agent put on the wire for this session. */
+    const lastRow = (frames: Array<Record<string, unknown>>) => {
+      const rows = frames
+        .map((frame) => frame.params as { update?: Record<string, unknown> } | undefined)
+        .map((params) => params?.update)
+        .filter((update) => update?.sessionUpdate === "usage_update");
+      const last = rows.at(-1);
+      return {
+        input: Number(last?.inputTokens ?? 0),
+        output: Number(last?.outputTokens ?? 0),
+        cached: Number(last?.cachedInputTokens ?? 0),
+      };
+    };
+    const dir = tempDir();
+    try {
+      const first = boot(settings, dir);
+      const session = await first.call<{ sessionId: string }>("session/new", {
+        cwd: dir,
+        _meta: { spend: { inputTokens: 50_000, outputTokens: 400, cachedInputTokens: 45_000 } },
+      });
+      await first.call("session/prompt", { prompt: [{ type: "text", text: "hi" }] });
+      // The carried totals plus this turn's own bill: a fresh session opens on
+      // the chat's money, not on zero.
+      expect(lastRow(first.frames)).toEqual({ input: 50_100, output: 405, cached: 45_090 });
+
+      // A restored session is the other way round: its own file remembers less
+      // than the chat does (the totals were carried past it), and the rows must
+      // not fall back to what that file happens to hold.
+      const second = boot(settings, dir);
+      await second.call("session/load", {
+        sessionId: session.sessionId,
+        cwd: dir,
+        _meta: { spend: { inputTokens: 60_000, outputTokens: 500, cachedInputTokens: 55_000 } },
+      });
+      await second.call("session/prompt", { prompt: [{ type: "text", text: "again" }] });
+      expect(lastRow(second.frames)).toEqual({ input: 60_100, output: 505, cached: 55_090 });
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
@@ -2886,6 +3029,18 @@ describe("compaction reporting", () => {
       .map((frame) => (frame.params as { update?: Record<string, unknown> } | undefined)?.update)
       .filter((update) => update?.sessionUpdate === "agent_message_chunk");
 
+  /**
+   * The provider's count of the view a pass left behind, as the follow-up that
+   * prices the row it names. Nothing else may fill a row that went out with `*`.
+   */
+  const compactionFills = (frames: Array<Record<string, unknown>>) =>
+    frames
+      .map((frame) => (frame.params as { update?: Record<string, unknown> } | undefined)?.update)
+      .filter(
+        (update): update is Record<string, unknown> =>
+          update?.sessionUpdate === "compaction_update",
+      );
+
   it("reports an automatic pass with the digest and both window sizes", async () => {
     const stub = await startStub();
     const dir = tempDir();
@@ -2908,7 +3063,13 @@ describe("compaction reporting", () => {
       expect(row?.manual).toBe(false);
       expect(row?.summary).toBe("конспект");
       expect(Number(row?.coveredAfter)).toBeGreaterThan(Number(row?.coveredBefore));
-      expect(Number(row?.tokensAfter)).toBeLessThan(Number(row?.tokensBefore));
+      // The row goes out with the provider's "before" and a star for "after":
+      // only the next request can price the view the pass left behind.
+      expect(row?.tokensAfter).toBeUndefined();
+      expect(row?.tokensAfterPending).toBe(true);
+      const fill = compactionFills(frames).at(-1);
+      expect(fill?.passId).toBe(row?.passId);
+      expect(Number(fill?.tokensAfter)).toBeGreaterThan(0);
     } finally {
       await stub.close();
     }
@@ -3026,7 +3187,9 @@ describe("compaction reporting", () => {
       // prompt), which is what the request would really have sent.
       expect(before).toBeLessThan(estimateTokens(messages));
       expect(before).toBeGreaterThanOrEqual(estimateTokens(promptView(messages, compaction)));
-      expect(Number(row?.tokensAfter)).toBeLessThan(before);
+      const fill = compactionFills(frames).at(-1);
+      expect(fill?.passId).toBe(row?.passId);
+      expect(Number(fill?.tokensAfter)).toBeLessThan(before);
     } finally {
       await stub.close();
     }
@@ -3449,10 +3612,624 @@ describe("compaction reporting", () => {
       expect(row).toBeTruthy();
       expect(row?.manual).toBe(false);
       expect(row?.summary).toBe("конспект");
-      // The digest is shorter than the head it stood in for, and the turn
-      // still finished its answer on top of it.
-      expect(Number(row?.tokensAfter)).toBeLessThan(Number(row?.tokensBefore));
+      // The follow-up carries the provider's own count of the request the pass
+      // left behind (this stub bills the same 5 000 for every call, so the number
+      // itself is not what proves the squeeze), and the turn still finished its
+      // answer on top of the digest.
+      const fill = compactionFills(frames).at(-1);
+      expect(fill?.passId).toBe(row?.passId);
+      expect(Number(fill?.tokensAfter)).toBe(5_000);
       expect(res.stopReason).toBe("end_turn");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("compacts on the provider's own count, not only on the estimate", async () => {
+    // Chat 9590a5eb: `estimateTokens` reads JSON chars / 4 and ran 20% low on a
+    // Russian, tool-heavy history — the provider billed 258 133 while the
+    // estimate said 200 135 — so a 20% line fired at 26% of the window. Here
+    // the stored history is well under the line by the estimate and past it by
+    // the count the provider reports: the pass has to run on that count.
+    let requests = 0;
+    const server = createServer((req, res) => {
+      let body = "";
+      req.on("data", (chunk) => {
+        body += chunk;
+      });
+      req.on("end", () => {
+        requests += 1;
+        const parsed = JSON.parse(body) as Record<string, unknown>;
+        if (!parsed.stream) {
+          res.setHeader("content-type", "application/json");
+          res.end(
+            JSON.stringify({
+              id: "c1",
+              object: "chat.completion",
+              created: 0,
+              model: "stub",
+              choices: [
+                { index: 0, message: { role: "assistant", content: "конспект" }, finish_reason: "stop" },
+              ],
+              usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+            }),
+          );
+          return;
+        }
+        res.setHeader("content-type", "text/event-stream");
+        const chunk = (payload: Record<string, unknown>) => `data: ${JSON.stringify(payload)}\n\n`;
+        if (requests === 1) {
+          res.write(
+            chunk({
+              id: "c1",
+              object: "chat.completion.chunk",
+              created: 0,
+              model: "stub",
+              choices: [
+                {
+                  index: 0,
+                  delta: {
+                    role: "assistant",
+                    tool_calls: [
+                      {
+                        index: 0,
+                        id: "call-1",
+                        type: "function",
+                        function: { name: "bash", arguments: '{"command":"echo hi"}' },
+                      },
+                    ],
+                  },
+                  finish_reason: null,
+                },
+              ],
+            }),
+          );
+          res.write(
+            chunk({
+              id: "c1",
+              object: "chat.completion.chunk",
+              created: 0,
+              model: "stub",
+              choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
+              // The provider's own count: past the 20% line of a 20k window,
+              // while the messages it counted estimate at ~1k tokens.
+              usage: { prompt_tokens: 5_000, completion_tokens: 1, total_tokens: 5_001 },
+            }),
+          );
+          res.write("data: [DONE]\n\n");
+          res.end();
+          return;
+        }
+        res.write(
+          chunk({
+            id: "c1",
+            object: "chat.completion.chunk",
+            created: 0,
+            model: "stub",
+            choices: [{ index: 0, delta: { role: "assistant", content: "готово" }, finish_reason: null }],
+          }),
+        );
+        res.write(
+          chunk({
+            id: "c1",
+            object: "chat.completion.chunk",
+            created: 0,
+            model: "stub",
+            choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+            usage: { prompt_tokens: 5_000, completion_tokens: 1, total_tokens: 5_001 },
+          }),
+        );
+        res.write("data: [DONE]\n\n");
+        res.end();
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("stub did not bind a port");
+
+    const dir = tempDir();
+    saveBuiltinSession(dir, "count-1", {
+      version: 1,
+      cwd: dir,
+      modelId: "p1::m1",
+      messages: [
+        { role: "user", content: `начало: ${"д".repeat(4_000)}` },
+        { role: "assistant", content: "принято" },
+        { role: "user", content: "проверь" },
+        { role: "assistant", content: "да" },
+      ],
+    });
+    const answerHost = (method: string): unknown => {
+      if (method === "session/request_permission") {
+        return { outcome: { outcome: "selected", optionId: "allow" } };
+      }
+      if (method === "terminal/create") return { terminalId: "t1" };
+      if (method === "terminal/wait_for_exit") return { exitCode: 0 };
+      if (method === "terminal/output") return { output: "ok\n" };
+      return {};
+    };
+    try {
+      const { call, frames } = boot(
+        {
+          builtinProviders: [provider(`http://127.0.0.1:${address.port}/v1`, 20_000)],
+          builtinCompactionThresholdPercent: 20,
+          locale: "ru",
+        },
+        dir,
+        answerHost,
+      );
+      await call("session/load", { sessionId: "count-1", cwd: dir });
+      const res = await call<{ stopReason: string }>("session/prompt", {
+        prompt: [{ type: "text", text: "сделай" }],
+      });
+
+      const row = compactionRows(frames).at(-1);
+      expect(row).toBeTruthy();
+      expect(row?.manual).toBe(false);
+      expect(row?.summary).toBe("конспект");
+      expect(res.stopReason).toBe("end_turn");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  /**
+   * A chat with one pass between its steps, and everything it put on the wire.
+   * Same shape as the mid-turn test above: the history sits under the line and
+   * the step's own tool result is what crosses it.
+   */
+  async function midTurnPass(
+    session: string,
+    /** Tool calls the stub makes before it answers: each adds a step to the turn. */
+    toolSteps = 1,
+  ): Promise<{
+    url: string;
+    bodies: Array<Record<string, unknown>>;
+    close(): Promise<void>;
+  }> {
+    let step = 0;
+    const bodies: Array<Record<string, unknown>> = [];
+    const server = createServer((req, res) => {
+      let body = "";
+      req.on("data", (chunk) => {
+        body += chunk;
+      });
+      req.on("end", () => {
+        const parsed = JSON.parse(body) as Record<string, unknown>;
+        bodies.push(parsed);
+        if (!parsed.stream) {
+          res.setHeader("content-type", "application/json");
+          res.end(
+            JSON.stringify({
+              id: "c1",
+              object: "chat.completion",
+              created: 0,
+              model: "stub",
+              choices: [
+                { index: 0, message: { role: "assistant", content: "конспект" }, finish_reason: "stop" },
+              ],
+              usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+            }),
+          );
+          return;
+        }
+        step += 1;
+        res.setHeader("content-type", "text/event-stream");
+        const chunk = (payload: Record<string, unknown>) => `data: ${JSON.stringify(payload)}\n\n`;
+        if (step <= toolSteps) {
+          res.write(
+            chunk({
+              id: "c1",
+              object: "chat.completion.chunk",
+              created: 0,
+              model: "stub",
+              choices: [
+                {
+                  index: 0,
+                  delta: {
+                    role: "assistant",
+                    tool_calls: [
+                      {
+                        index: 0,
+                        id: `call-${step}`,
+                        type: "function",
+                        function: { name: "bash", arguments: '{"command":"echo hi"}' },
+                      },
+                    ],
+                  },
+                  finish_reason: null,
+                },
+              ],
+            }),
+          );
+          res.write(
+            chunk({
+              id: "c1",
+              object: "chat.completion.chunk",
+              created: 0,
+              model: "stub",
+              choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
+              // Past the line (20% of 20k), which is what asks for a pass.
+              usage: { prompt_tokens: 5_000, completion_tokens: 1, total_tokens: 5_001 },
+            }),
+          );
+          res.write("data: [DONE]\n\n");
+          res.end();
+          return;
+        }
+        res.write(
+          chunk({
+            id: "c1",
+            object: "chat.completion.chunk",
+            created: 0,
+            model: "stub",
+            choices: [{ index: 0, delta: { role: "assistant", content: "готово" }, finish_reason: null }],
+          }),
+        );
+        res.write(
+          chunk({
+            id: "c1",
+            object: "chat.completion.chunk",
+            created: 0,
+            model: "stub",
+            choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+            usage: { prompt_tokens: 5_000, completion_tokens: 1, total_tokens: 5_001 },
+          }),
+        );
+        res.write("data: [DONE]\n\n");
+        res.end();
+      });
+    });
+    void session;
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("stub did not bind a port");
+    return {
+      url: `http://127.0.0.1:${address.port}/v1`,
+      bodies,
+      close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+    };
+  }
+
+  /** The host answers the step's tool call — and is the only watcher of the drift card. */
+  const midTurnHost =
+    (cards: string[]) =>
+    (method: string, params?: Record<string, unknown>): unknown => {
+      if (method === "builtin/context_drift") {
+        cards.push(method);
+        return {
+          outcome: {
+            outcome: "answered",
+            answers: [{ questionId: "drift", selectedOptionIds: ["continue"] }],
+          },
+        };
+      }
+      if (method === "session/request_permission") {
+        return { outcome: { outcome: "selected", optionId: "allow" } };
+      }
+      if (method === "terminal/create") return { terminalId: "t1" };
+      if (method === "terminal/wait_for_exit") return { exitCode: 0 };
+      if (method === "terminal/output") return { output: `${"д".repeat(6_000)}\n` };
+      return {};
+    };
+
+  const saveMidTurnSession = (dir: string, session: string) =>
+    saveBuiltinSession(dir, session, {
+      version: 1,
+      cwd: dir,
+      modelId: "p1::m1",
+      messages: [
+        { role: "user", content: `начало: ${"д".repeat(8_000)}` },
+        { role: "assistant", content: "принято" },
+        { role: "user", content: `ещё: ${"д".repeat(4_000)}` },
+        { role: "assistant", content: "ок" },
+        { role: "user", content: "проверь" },
+        { role: "assistant", content: "да" },
+      ],
+    });
+
+  it("does not ask the reader about the break its own pass made", async () => {
+    // The digest ask is a shortened head by construction (the covered prefix
+    // plus the instruction), and the request behind the pass carries the new
+    // digest. Neither is a move the reader can refuse: the pass they just got a
+    // row about is the cause, and "stop the turn" would only mean stopping.
+    // Chat 62eba797 drew "совпало 245 из 416" over a request its provider
+    // answered from cache in full.
+    // A fresh id per run: the head the wire log remembers for a chat outlives
+    // the process, and this one carries the temp folder it was built in.
+    const session = `drift-mid-${Date.now()}`;
+    const stub = await midTurnPass(session);
+    const dir = tempDir();
+    saveMidTurnSession(dir, session);
+    const cards: string[] = [];
+    try {
+      const { call, frames } = boot(
+        {
+          builtinProviders: [provider(stub.url, 20_000)],
+          builtinCompactionThresholdPercent: 20,
+          diagnosticsContextDrift: true,
+          locale: "ru",
+        },
+        dir,
+        midTurnHost(cards),
+      );
+      await call("session/load", { sessionId: session, cwd: dir });
+      await call("session/prompt", { prompt: [{ type: "text", text: "сделай" }] });
+
+      expect(compactionRows(frames)).toHaveLength(1);
+      expect(cards).toEqual([]);
+    } finally {
+      await stub.close();
+    }
+  });
+
+  it("carries the digest its own pass wrote into the next turn", async () => {
+    // The mid-turn digest used to be this turn's alone, so the next turn folded
+    // the same prefix again and paid for the tail a second time at full price
+    // (chat 62eba797: 99 471 then 106 173 tokens, both with `cached` 0).
+    const session = `carry-mid-${Date.now()}`;
+    const stub = await midTurnPass(session);
+    const dir = tempDir();
+    saveMidTurnSession(dir, session);
+    const cards: string[] = [];
+    const digestAsks = () => stub.bodies.filter((body) => body.stream !== true);
+    try {
+      const { call, frames } = boot(
+        {
+          builtinProviders: [provider(stub.url, 20_000)],
+          builtinCompactionThresholdPercent: 20,
+          diagnosticsContextDrift: true,
+          locale: "ru",
+        },
+        dir,
+        midTurnHost(cards),
+      );
+      await call("session/load", { sessionId: session, cwd: dir });
+      await call("session/prompt", { prompt: [{ type: "text", text: "сделай" }] });
+      expect(compactionRows(frames)).toHaveLength(1);
+      expect(digestAsks()).toHaveLength(1);
+
+      await call("session/prompt", { prompt: [{ type: "text", text: "дальше" }] });
+
+      // One pass in the chat, and its digest is what the next turn sends.
+      expect(compactionRows(frames)).toHaveLength(1);
+      expect(digestAsks()).toHaveLength(1);
+      const next = sentMessages(stub.bodies.at(-1)!);
+      expect(String(next[1]?.content)).toContain("конспект");
+      expect(cards).toEqual([]);
+    } finally {
+      await stub.close();
+    }
+  });
+
+  it("carries the digest a loaded chat already has into the pass between steps", async () => {
+    // A chat that resumes with a digest sends the folded head, not the stored
+    // transcript: its view starts with the digest and its indices count view
+    // messages. The pass between steps measured its cut against a state it did
+    // not have, declared the covered prefix unfolded, asked the summariser to
+    // re-read the digest it had already written — and, when the fold no longer
+    // fit, fell back to a bare prune that sent the whole tail at full price.
+    // Chat 9590a5eb: 7 of its 10 passes reported `coveredBefore: 0` and every
+    // long turn ended on a request whose head the provider had never seen.
+    const session = `carry-folded-${Date.now()}`;
+    const stub = await midTurnPass(session);
+    const dir = tempDir();
+    saveBuiltinSession(dir, session, {
+      version: 1,
+      cwd: dir,
+      modelId: "p1::m1",
+      messages: [
+        { role: "user", content: `начало: ${"д".repeat(8_000)}` },
+        { role: "assistant", content: "принято" },
+        { role: "user", content: `ещё: ${"е".repeat(4_000)}` },
+        { role: "assistant", content: "ок" },
+        { role: "user", content: `третий: ${"т".repeat(4_000)}` },
+        { role: "assistant", content: "хорошо" },
+        { role: "user", content: "проверь" },
+        { role: "assistant", content: "да" },
+      ],
+      // The chat resumes already folded: the first two messages are the digest,
+      // and the tail past them is longer than the budget the pass keeps verbatim,
+      // so there is something left for it to fold.
+      compaction: { summary: "прежний конспект", covered: 2 },
+    });
+    try {
+      const { call, frames } = boot(
+        {
+          builtinProviders: [provider(stub.url, 20_000)],
+          builtinCompactionThresholdPercent: 20,
+          // The verbatim tail a real chat keeps under a 20% line: wide enough
+          // for the pass to have something to fold past the digest.
+          builtinKeepRecentPercent: 10,
+          locale: "ru",
+        },
+        dir,
+        midTurnHost([]),
+      );
+      await call("session/load", { sessionId: session, cwd: dir });
+      await call("session/prompt", { prompt: [{ type: "text", text: "сделай" }] });
+
+      const row = compactionRows(frames).at(-1);
+      expect(row).toBeTruthy();
+      // The pass knows what it is folding: the digest that heads this view.
+      expect(Number(row?.coveredBefore)).toBe(2);
+      // Its cut counts the digest on top of the prefix the old one stood for.
+      expect(Number(row?.coveredAfter)).toBeGreaterThan(2);
+
+      // The request the pass hands the next step still opens on a digest, and
+      // the messages it folded are not sent again.
+      const after = sentMessages(stub.bodies.at(-1)!);
+      expect(String(after[1]?.content)).toContain("конспект");
+      expect(after.some((message) => String(message.content).includes("ещё:"))).toBe(false);
+
+      // And that state is the chat's from now on: the next turn starts from it
+      // instead of folding the same messages a second time.
+      const stored = loadBuiltinSession(dir, session);
+      expect(stored?.compaction?.covered).toBeGreaterThan(2);
+    } finally {
+      await stub.close();
+    }
+  });
+
+  it("does not fold the same turn twice, nor lose the steps it kept", async () => {
+    // The pass hands the loop a chain of its own making: the digest plus the
+    // verbatim tail, not one entry per stored message. Measured on a live chat,
+    // the next between-steps call read that shorter array against
+    // `covered` — an index in the *stored* transcript — and `promptView` sliced
+    // the turn's own steps away: a 5-message request became a 2-message one
+    // (the digest alone), the summariser was asked a second time, and the chat
+    // grew a second "контекст сжат" row in the same turn.
+    const session = `double-mid-${Date.now()}`;
+    const stub = await midTurnPass(session, 3);
+    const dir = tempDir();
+    saveMidTurnSession(dir, session);
+    const cards: string[] = [];
+    const digestAsks = () => stub.bodies.filter((body) => body.stream !== true);
+    try {
+      const { call, frames } = boot(
+        {
+          builtinProviders: [provider(stub.url, 20_000)],
+          builtinCompactionThresholdPercent: 20,
+          diagnosticsContextDrift: true,
+          locale: "ru",
+        },
+        dir,
+        midTurnHost(cards),
+      );
+      await call("session/load", { sessionId: session, cwd: dir });
+      await call("session/prompt", { prompt: [{ type: "text", text: "сделай" }] });
+
+      expect(compactionRows(frames)).toHaveLength(1);
+      expect(digestAsks()).toHaveLength(1);
+      // The chain never shrinks back to the digest alone, and the last request
+      // still carries the tool result of the step that ran after the pass.
+      const last = sentMessages(stub.bodies.at(-1)!);
+      expect(last.length).toBeGreaterThan(2);
+      expect(last.some((message) => message.role === "tool")).toBe(true);
+      expect(cards).toEqual([]);
+    } finally {
+      await stub.close();
+    }
+  });
+});
+
+describe("tool result offload", () => {
+  it("keeps a result the turn already sent verbatim on the next turn", async () => {
+    // The pass decides only what has not crossed the wire yet. The boundary it
+    // reads (`offloadUpTo`) used to move at the NEXT turn's `promptHistory`,
+    // and that reads it before the pass runs — so everything one turn appended
+    // stood "undecided" for exactly one turn, and the next turn archived it in
+    // the middle of a prompt the provider had already cached: chat 304f9398
+    // matched 3 of 87 messages and paid 62 718 tokens again for a
+    // `gitea_get_pull` answer it had sent in full; chat c051bfac did the same
+    // at message 3 of 27, cached 0 of 43 360.
+    const big = "Б".repeat(20_000);
+    let requests = 0;
+    const bodies: Array<{ messages?: Array<Record<string, unknown>> }> = [];
+    const server = createServer((req, res) => {
+      let body = "";
+      req.on("data", (chunk) => {
+        body += chunk;
+      });
+      req.on("end", () => {
+        requests += 1;
+        bodies.push(JSON.parse(body) as { messages?: Array<Record<string, unknown>> });
+        res.setHeader("content-type", "text/event-stream");
+        const chunk = (payload: Record<string, unknown>) => `data: ${JSON.stringify(payload)}\n\n`;
+        const delta = (message: Record<string, unknown>) => ({
+          id: "c1",
+          object: "chat.completion.chunk",
+          created: 0,
+          model: "stub",
+          choices: [{ index: 0, delta: message, finish_reason: null }],
+        });
+        if (requests === 1) {
+          // One bulky tool answer: it goes out in full in the very next step.
+          res.write(
+            chunk(
+              delta({
+                role: "assistant",
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: "call-1",
+                    type: "function",
+                    function: { name: "bash", arguments: '{"command":"echo hi"}' },
+                  },
+                ],
+              }),
+            ),
+          );
+        } else {
+          res.write(chunk(delta({ role: "assistant", content: "готово" })));
+        }
+        res.write(
+          chunk({
+            id: "c1",
+            object: "chat.completion.chunk",
+            created: 0,
+            model: "stub",
+            choices: [{ index: 0, delta: {}, finish_reason: requests === 1 ? "tool_calls" : "stop" }],
+            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          }),
+        );
+        res.write("data: [DONE]\n\n");
+        res.end();
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("stub did not bind a port");
+    const dir = tempDir();
+    try {
+      const { call } = boot(
+        {
+          builtinProviders: [
+            {
+              id: "p1",
+              name: "Relay",
+              url: `http://127.0.0.1:${address.port}/v1`,
+              apiKey: "",
+              // A window nothing can fill: the offload pass is the only tier
+              // in play, so a rewritten message is the boundary's doing.
+              models: [{ id: "m1", label: "M1", contextWindow: 1_000_000 }],
+            },
+          ],
+          // Well under the 20 000-char answer: it is archivable by size alone.
+          builtinOffloadToolResultTokens: 100,
+        },
+        dir,
+        (method) => {
+          if (method === "session/request_permission") {
+            return { outcome: { outcome: "selected", optionId: "allow_once" } };
+          }
+          if (method === "terminal/create") return { terminalId: "t1" };
+          if (method === "terminal/output") return { output: big };
+          return {};
+        },
+      );
+      await call<{ sessionId: string }>("session/new", { cwd: dir });
+      const text = (body: { messages?: Array<Record<string, unknown>> } | undefined) => {
+        const message = (body?.messages ?? []).find((entry) => entry.role === "tool");
+        return String(message?.content ?? "");
+      };
+      expect(
+        (await call<{ stopReason: string }>("session/prompt", { prompt: [{ type: "text", text: "hi" }] }))
+          .stopReason,
+      ).toBe("end_turn");
+      // Sent in full by the step that followed the call — that is the byte
+      // sequence the provider cached and billed.
+      expect(text(bodies[1])).toContain("ББББ");
+
+      expect(
+        (await call<{ stopReason: string }>("session/prompt", {
+          prompt: [{ type: "text", text: "ещё" }],
+        })).stopReason,
+      ).toBe("end_turn");
+      // The next turn may not archive what the previous one already sent: a
+      // citation here moves every message after it and the tail is re-read.
+      expect(text(bodies[2])).not.toContain("[offloaded file=");
+      expect(text(bodies[2])).toContain("ББББ");
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
@@ -3545,7 +4322,11 @@ describe("builtin session store", () => {
     expect(loadBuiltinSession(dir, "../../evil")).toBeUndefined();
   });
 
-  it("keeps image bytes only in the newest user turn", () => {
+  // A restored chat must send the picture the earlier turn was answered with:
+  // swapping it for a note rewrote `messages[3]` of chat 8294560b at 11:12 and
+  // the provider billed the whole history after it again. The session file stays
+  // small — the bytes live beside it — but the message keeps its shape.
+  it("keeps image bytes out of the session file and gives them back whole", () => {
     const dir = tempDir();
     saveBuiltinSession(dir, "s-img", {
       version: 1,
@@ -3563,17 +4344,33 @@ describe("builtin session store", () => {
         { role: "user", content: [{ type: "text", text: "а теперь?" }] },
       ],
     });
+    // The JSON carries a reference, not the bytes: one screenshot per turn
+    // must not put megabytes into the file a reload parses.
+    const onDisk = readFileSync(join(dir, "s-img.json"), "utf8");
+    expect(onDisk).not.toContain("QUJD");
+    expect(onDisk).toContain("session-images/s-img-0-1.png");
+    // And a reload puts the very same bytes back in front of the model.
     expect(loadBuiltinSession(dir, "s-img")?.messages).toEqual([
       {
         role: "user",
         content: [
           { type: "text", text: "вот скриншот" },
-          { type: "text", text: "[изображение из предыдущего сообщения — не сохранено]" },
+          { type: "file", mediaType: "image/png", data: "QUJD", path: "session-images/s-img-0-1.png" },
         ],
       },
       { role: "assistant", content: [{ type: "text", text: "вижу" }] },
       { role: "user", content: [{ type: "text", text: "а теперь?" }] },
     ]);
+    // A picture somebody deleted from disk reads as the note older sessions
+    // already carry, instead of a broken part on the wire.
+    rmSync(join(dir, "session-images"), { recursive: true, force: true });
+    expect(loadBuiltinSession(dir, "s-img")?.messages?.[0]).toEqual({
+      role: "user",
+      content: [
+        { type: "text", text: "вот скриншот" },
+        { type: "text", text: "[изображение из предыдущего сообщения — не сохранено]" },
+      ],
+    });
   });
 });
 
@@ -3940,6 +4737,120 @@ describe("builtin subagents wiring", () => {
 
 // The wire-level rule the incident turned on: a thinking relay rejects the
 // history it produced when one acting step comes back without the field.
+describe("builtin turn durability", () => {
+  it("puts a step on disk while the turn that made it is still running", async () => {
+    // The turn settles its history at the end — and the ends that matter here
+    // are the ones that never come: the agent parks on a question for minutes
+    // and the transport is rebuilt under it, or the server restarts while the
+    // question waits. A step that lived only in memory then leaves the history
+    // the resumed session reads: the model no longer knows about the file it
+    // wrote or the job it started, while both sit on disk (chat 0be3205c — a
+    // 484-message request, then a 479-message one built from a transcript that
+    // never saw the three tool calls in between).
+    let requests = 0;
+    const server = createServer((req, res) => {
+      req.on("data", () => {});
+      req.on("end", () => {
+        requests += 1;
+        // Step two never answers: the turn really is in flight while the store
+        // is read, which is exactly the state a parked question leaves it in.
+        if (requests > 1) return;
+        res.setHeader("content-type", "text/event-stream");
+        const chunk = (payload: Record<string, unknown>) => `data: ${JSON.stringify(payload)}\n\n`;
+        res.write(
+          chunk({
+            id: "c1",
+            object: "chat.completion.chunk",
+            created: 0,
+            model: "stub",
+            choices: [
+              {
+                index: 0,
+                delta: {
+                  role: "assistant",
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: "call-1",
+                      type: "function",
+                      function: { name: "bash", arguments: '{"command":"echo hi"}' },
+                    },
+                  ],
+                },
+                finish_reason: null,
+              },
+            ],
+          }),
+        );
+        res.write(
+          chunk({
+            id: "c1",
+            object: "chat.completion.chunk",
+            created: 0,
+            model: "stub",
+            choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
+          }),
+        );
+        res.write("data: [DONE]\n\n");
+        res.end();
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("stub did not bind a port");
+    const dir = tempDir();
+    try {
+      const { call, close } = boot(
+        {
+          builtinProviders: [
+            {
+              id: "p1",
+              name: "Stall",
+              url: `http://127.0.0.1:${address.port}/v1`,
+              apiKey: "",
+              models: [{ id: "m1", label: "M1", contextWindow: 8_000 }],
+            },
+          ],
+        },
+        dir,
+        (method) => {
+          if (method === "session/request_permission") {
+            return { outcome: { outcome: "selected", optionId: "allow_once" } };
+          }
+          if (method === "terminal/create") return { terminalId: "t1" };
+          if (method === "terminal/output") return { output: "hi\n" };
+          return {};
+        },
+      );
+      const session = await call<{ sessionId: string }>("session/new", { cwd: dir });
+      const prompt = call<{ stopReason: string }>("session/prompt", {
+        prompt: [{ type: "text", text: "hi" }],
+      });
+      // The tool result is on disk before the turn ends — read the file the next
+      // process would load, not the agent's memory.
+      const stored = () => JSON.stringify(loadBuiltinSession(dir, session.sessionId) ?? {});
+      const deadline = Date.now() + 3_000;
+      while (Date.now() < deadline && !stored().includes('"type":"tool-result"')) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      expect(stored()).toContain('"type":"tool-call"');
+      expect(stored()).toContain('"type":"tool-result"');
+      expect(stored()).toContain("hi");
+
+      // …and the turn ends without the step landing twice.
+      await call("session/cancel", {});
+      expect((await prompt).stopReason).toBe("cancelled");
+      close();
+      const after = stored();
+      expect(after.match(/"type":"tool-call"/g)).toHaveLength(1);
+      expect(after.match(/"type":"tool-result"/g)).toHaveLength(1);
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+});
+
 describe("reasoning echo", () => {
   const acting = (reasoning?: string) => ({
     role: "assistant",

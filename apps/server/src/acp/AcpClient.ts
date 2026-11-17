@@ -22,6 +22,7 @@ import {
   isProtocolPlaceholder,
   type AgentMode,
   type AgentProvider,
+  type AcpSpendTotals,
   type AcpUsage,
   type AppSettings,
   type HarnessAdapter,
@@ -1040,6 +1041,8 @@ export class AcpClient extends EventEmitter {
       modelParams?: Record<string, string>;
       /** MCP servers for THIS session (global list filtered per chat). */
       mcpServers?: McpServerConfig[];
+      /** The chat's spend so far — a fresh session counts on from it, not from zero. */
+      spend?: AcpSpendTotals | undefined;
     },
   ): Promise<void> {
     // The deadline covers the whole launch, not just the ACP handshake: stat-ing
@@ -1071,6 +1074,7 @@ export class AcpClient extends EventEmitter {
     model?: string;
     modelParams?: Record<string, string>;
     mcpServers?: McpServerConfig[];
+    spend?: AcpSpendTotals | undefined;
   }): Promise<void> {
     const env = buildAgentEnv(this.adapter, this.settings);
     const cwd = this.cwd || process.cwd();
@@ -1216,7 +1220,18 @@ export class AcpClient extends EventEmitter {
           this.suppressUpdates = false;
         }
       } else {
-        result = (await this.send("session/new", { cwd, mcpServers })) as {
+        result = (await this.send("session/new", {
+          cwd,
+          mcpServers,
+          // A chat's bill outlives the session that was charged for it: an edit
+          // or a regenerate boots a new one (`preferResume: false`), and its
+          // counter starting at zero is what made the panel hand the reader back
+          // what the chat had already spent. Only an in-process agent can read
+          // this — a real ACP harness would ignore it, so it is not sent there.
+          ...(opts?.spend && this.adapter.createTransport
+            ? { _meta: { spend: opts.spend } }
+            : {}),
+        })) as {
           sessionId?: string;
           configOptions?: ConfigOption[];
           modes?: unknown;
@@ -2249,6 +2264,9 @@ export class AcpClient extends EventEmitter {
           u.cached_input_tokens ??
           promptDetails?.cached_tokens,
       ),
+      // A provider's own cache miss on an unchanged head (see `AcpUsage`).
+      coldMisses: num(u.coldMisses ?? u.cold_misses),
+      coldMissTokens: num(u.coldMissTokens ?? u.cold_miss_tokens),
       cost,
       raw,
     };

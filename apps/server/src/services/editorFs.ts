@@ -342,6 +342,9 @@ export async function resolveImport(
   return null;
 }
 
+// TypeScript 7 ships a native compiler with no JS API, so the pane keeps a
+// 5.x copy of its own for what it still needs: parse a tsconfig, resolve a
+// specifier, read a syntax tree.
 type TsModule = typeof import("typescript");
 type ProjectConfig = { ts: TsModule; options: import("typescript").CompilerOptions } | null;
 
@@ -352,7 +355,10 @@ const configs = new Map<string, ProjectConfig>();
 function compilerFor(dir: string): TsModule | null {
   for (const anchor of [path.join(dir, "package.json"), import.meta.url]) {
     try {
-      return createRequire(anchor)("typescript") as TsModule;
+      const loaded = createRequire(anchor)("typescript") as Partial<TsModule> | undefined;
+      // A project's own TypeScript 7.x has no `sys`; keep looking instead.
+      if (typeof loaded?.resolveModuleName !== "function") continue;
+      return loaded as TsModule;
     } catch {
       // Next anchor: a project may have no TypeScript of its own.
     }
