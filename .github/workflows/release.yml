@@ -21,8 +21,10 @@
 # Authentication is npm trusted publishing (OIDC): no secret, no one-time
 # password. The package's Settings → Trusted publishing names this repo and
 # `release.yml`, and the id-token permission below is what the exchange uses.
-# npm only allows that exchange from npm 11.5.1 on, so the publish step upgrades
-# the CLI first — `npm ci` above stays on the runner's own npm.
+# npm only allows that exchange from npm 11.5.1 on, so the publish step installs
+# npm 11 first — `npm ci` above stays on the runner's own npm. It names the major
+# instead of `@latest` because `devEngines` in package.json accepts 11.x only: a
+# future npm 12 would fail the publish on the pin itself.
 #
 # A token cannot replace it: npm now demands a one-time password for direct
 # publishing with credentials (and is retiring 2FA-bypassing tokens in 2027), and
@@ -60,7 +62,9 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          # npm 11, the version `devEngines` in package.json accepts; Node 22's
+          # npm 10.9 would fail `npm ci` on the same pin.
+          node-version: 24
 
       - run: npm ci
 
@@ -82,7 +86,7 @@ jobs:
             echo "$spec is already on npm — nothing to publish, nothing to release."
             exit 0
           fi
-          npm install -g npm@latest
+          npm install -g npm@11.x
           npm publish ./dist-npm --provenance --access public
           echo "published=true" >> "$GITHUB_OUTPUT"
 

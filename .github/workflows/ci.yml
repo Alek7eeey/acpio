@@ -71,8 +71,11 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          # Matches the lockfile's engines (>=20) and what the release builds on.
-          node-version: 22
+          # 24, not 22: it carries npm 11, which is the npm the lockfile is
+          # written with and the only one `devEngines` in package.json accepts.
+          # Node 22 would hand `npm ci` npm 10.9, and the pin would fail the
+          # install before the lockfile could disagree.
+          node-version: 24
           cache: npm
 
       # `npm ci` (not `install`): the lockfile decides, and a lock out of sync
