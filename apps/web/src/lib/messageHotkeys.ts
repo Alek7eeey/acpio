@@ -23,6 +23,16 @@ export type MessageHotkeyTarget = {
 const targets = new Map<string, MessageHotkeyTarget>();
 /** Active only while the pointer is over a message (or its open context menu). */
 let hoverId: string | null = null;
+/**
+ * Whether the pointer's arrival at {@link hoverId} is still a fresh aim at that
+ * message. A second letter is no longer a command: the reader typing «ок» at a
+ * composer that lost focus (the app blurs it after Send) got `KeyJ` for «о» and
+ * then `KeyR` — regenerate — for «к», because the pointer happened to rest over
+ * the answer. That cancelled the running turn, deleted the reply and rewrote
+ * the reader's own message as edited, twice in one chat (74dadea4). Any key we
+ * do not consume is typing, and typing takes the aim away.
+ */
+let armed = false;
 let mediaQuery: MediaQueryList | null = null;
 
 function syncMedia() {
@@ -58,8 +68,16 @@ export function updateMessageHotkeys(target: MessageHotkeyTarget): void {
   if (targets.has(target.id)) targets.set(target.id, target);
 }
 
+/** The pointer entered a message (or left every message): that arrival is the aim. */
 export function setMessageHotkeyHover(id: string | null): void {
   hoverId = id;
+  armed = id !== null;
+}
+
+/** A click on the message aims at it again, after a word took the aim away. */
+export function armMessageHotkey(id: string | null): void {
+  if (id !== null && id !== hoverId) return;
+  armed = id !== null;
 }
 
 function menuPinnedTarget(): MessageHotkeyTarget | null {
@@ -72,8 +90,8 @@ function menuPinnedTarget(): MessageHotkeyTarget | null {
 export function getMessageHotkeyTarget(): MessageHotkeyTarget | null {
   const pinned = menuPinnedTarget();
   if (pinned) return pinned;
-  if (hoverId) return targets.get(hoverId) ?? null;
-  return null;
+  if (!armed || !hoverId) return null;
+  return targets.get(hoverId) ?? null;
 }
 
 export function isTypingTarget(target: EventTarget | null): boolean {
@@ -131,9 +149,12 @@ export function resolveMessageHotkey(e: KeyboardEvent): MessageHotAction | null 
 export function installMessageHotkeys(): () => void {
   const onKey = (e: KeyboardEvent) => {
     const action = resolveMessageHotkey(e);
-    if (!action) return;
-    const target = getMessageHotkeyTarget();
-    if (!target?.has(action)) return;
+    const target = action ? getMessageHotkeyTarget() : null;
+    if (!action || !target?.has(action)) {
+      // Not a command we can run: the reader is typing, not pointing.
+      armed = false;
+      return;
+    }
     e.preventDefault();
     e.stopPropagation();
     target.run(action);

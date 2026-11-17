@@ -133,9 +133,9 @@ import { isImageFile } from "../lib/pathSegments";
 import { openFileInEditor } from "../lib/fileOpen";
 import { sessionTreeDisplayTitle } from "../lib/sessionTitle";
 import {
+  armMessageHotkey,
   prefersHotkeyHints,
   registerMessageHotkeys,
-
   setMessageHotkeyHover,
   subscribeHotkeyHintPreference,
   updateMessageHotkeys,
@@ -661,6 +661,9 @@ function MessageArticle({
       onMouseEnter={() => setMessageHotkeyHover(msg.id)}
       onMouseLeave={() => setMessageHotkeyHover(null)}
       onMouseDown={(e) => {
+        // A click is an aim at this message even when a word was typed over it
+        // since the pointer arrived (see `armMessageHotkey`).
+        if (e.button === 0) armMessageHotkey(msg.id);
         if (!keepComposerFocus.current) return;
         const target = e.target as HTMLElement;
         if (target.closest("button,a,input,textarea")) return;
@@ -1486,6 +1489,7 @@ function UserMessageActions({
           y: Math.min(Math.max(8, y), window.innerHeight - 160),
         });
         setMessageHotkeyHover(messageId);
+        armMessageHotkey(messageId);
       },
     }),
     [messageId],
