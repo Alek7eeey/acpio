@@ -24,20 +24,21 @@
     "moduleDetection": "force",
     "noEmit": true,
     "types": ["node"],
-    "baseUrl": ".",
+    // TypeScript 7 removed `baseUrl`: every `paths` entry is now resolved
+    // against this file, so the prefixes carry the `./` themselves.
     "paths": {
-      "@/*": ["apps/web/src/*"],
-      "@acpio/shared": ["packages/shared/src/index.ts"],
-      "@acpio/i18n": ["packages/i18n/src/index.ts"],
-      "@acpio/plugin-api": ["packages/plugin-api/src/index.ts"],
-      "@acpio/adapter-builtin": ["packages/adapter-builtin/src/index.ts"],
-      "@acpio/adapter-cursor": ["packages/adapter-cursor/src/index.ts"],
-      "@acpio/adapter-omp": ["packages/adapter-omp/src/index.ts"],
-      "@acpio/adapter-opencode": ["packages/adapter-opencode/src/index.ts"],
-      "@acpio/plugin-ponytail": ["packages/plugin-ponytail/src/server.ts"],
-      "@acpio/plugin-example": ["packages/plugin-example/src/server.ts"]
+      "@/*": ["./apps/web/src/*"],
+      "@acpio/shared": ["./packages/shared/src/index.ts"],
+      "@acpio/i18n": ["./packages/i18n/src/index.ts"],
+      "@acpio/plugin-api": ["./packages/plugin-api/src/index.ts"],
+      "@acpio/adapter-builtin": ["./packages/adapter-builtin/src/index.ts"],
+      "@acpio/adapter-cursor": ["./packages/adapter-cursor/src/index.ts"],
+      "@acpio/adapter-omp": ["./packages/adapter-omp/src/index.ts"],
+      "@acpio/adapter-opencode": ["./packages/adapter-opencode/src/index.ts"],
+      "@acpio/plugin-ponytail": ["./packages/plugin-ponytail/src/server.ts"],
+      "@acpio/plugin-example": ["./packages/plugin-example/src/server.ts"]
     }
   },
-  "include": ["packages/*/src", "apps/*/src", "apps/server/test", "apps/web/test"],
-  "exclude": ["**/*.test.ts", "**/*.test.tsx"]
+  "include": ["./packages/*/src", "apps/*/src", "apps/server/test", "apps/web/test"],
+  "exclude": ["./**/*.test.ts", "./**/*.test.tsx"]
 }

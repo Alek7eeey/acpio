@@ -9,6 +9,13 @@
     "rootDir": "src",
     "strict": true,
     "skipLibCheck": true,
+    // TypeScript 7 no longer picks @types/node up from the hoisted root
+    // node_modules of a workspace, so the globals are named here.
+    "types": ["node"],
+    // A restart rebuilds every workspace, and a full re-check of an unchanged
+    // package is pure wait: the build info makes the second run ~1s. Emit stays
+    // per-file, so skipping unchanged files cannot stale a dependent's dist.
+    "incremental": true,
     "esModuleInterop": true
   },
   "include": [

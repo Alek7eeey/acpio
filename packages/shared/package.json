@@ -17,6 +17,6 @@
     "dev": "tsc -p tsconfig.json --watch"
   },
   "devDependencies": {
-    "typescript": "^5.8.2"
+    "typescript": "~7.0.2"
   }
 }

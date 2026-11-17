@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch --conditions=development src/index.ts",
-    "build": "tsc -p tsconfig.json",
+    "build": "node ../../node_modules/typescript/lib/tsc.js -p tsconfig.json",
     "start": "node dist/index.js",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
@@ -42,6 +42,6 @@
     "@types/ws": "^8.18.0",
     "drizzle-kit": "^0.30.5",
     "tsx": "^4.19.3",
-    "typescript": "^5.8.2"
+    "typescript": "5.9.3"
   }
 }
