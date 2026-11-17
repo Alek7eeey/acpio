@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import {
@@ -29,7 +29,6 @@ import {
 import { highlightText, matchAny, settingsSearchIndex } from "../lib/settingsSearch";
 import { isChatSearchEnabled } from "../lib/chatTreeSearch";
 import { ChatSidebar } from "./ChatSidebar";
-import { EditorPage } from "../pages/EditorPage";
 import { collectRecentCwds, CreateSessionFolderPicker } from "./CreateSessionFolderPicker";
 import { harnessLabel, isAgentUsable } from "../lib/harness";
 import { canonicalCwd } from "@acpio/shared";
@@ -41,10 +40,13 @@ import { InstallAppButton } from "./InstallAppButton";
 import { LocaleToggle } from "./LocaleToggle";
 import { SearchDialog, type SearchDialogTab } from "./SearchDialog";
 import { ThemeToggle } from "./ThemeToggle";
-import { BoardPage } from "../pages/BoardPage";
 import { ChatPage } from "../pages/ChatPage";
-import { SettingsPage } from "../pages/SettingsPage";
-import { TasksPage } from "../pages/TasksPage";
+import {
+  LazyBoardPage,
+  LazyEditorPage,
+  LazySettingsPage,
+  LazyTasksPage,
+} from "../pages/lazyPages";
 import styles from "./AppShell.module.css";
 
 const SIDEBAR_WIDTH_KEY = "acpio.sidebarWidth.v2";
@@ -148,13 +150,15 @@ function EditorSlot({
     <>
       {openEditors.map((pane) => (
         <div key={pane.root} className={styles.editorSlot} hidden={pane.root !== root}>
-          <EditorPage
-            root={pane.root}
-            sessionId={pane.sessionId}
-            chatHidden={chatHidden}
-            onToggleChat={onToggleChat}
-            active={pane.root === root}
-          />
+          <Suspense fallback={null}>
+            <LazyEditorPage
+              root={pane.root}
+              sessionId={pane.sessionId}
+              chatHidden={chatHidden}
+              onToggleChat={onToggleChat}
+              active={pane.root === root}
+            />
+          </Suspense>
         </div>
       ))}
     </>
@@ -173,11 +177,27 @@ function ShellPage({
   // The code pane is not a page: the shell keeps it beside whichever page is up.
   const chatPath = pathname === "/" || pathname === "" || pathname.startsWith("/chat");
   if (chatPath) return <ChatPage />;
-  if (pathname.startsWith("/settings")) return <SettingsPage />;
-  if (pathname.startsWith("/tasks")) return <TasksPage onBack={onBackFromTasks} />;
+  if (pathname.startsWith("/settings")) {
+    return (
+      <Suspense fallback={null}>
+        <LazySettingsPage />
+      </Suspense>
+    );
+  }
+  if (pathname.startsWith("/tasks")) {
+    return (
+      <Suspense fallback={null}>
+        <LazyTasksPage onBack={onBackFromTasks} />
+      </Suspense>
+    );
+  }
   if (pathname.startsWith("/editor")) return null;
   if (pathname.startsWith("/board/")) {
-    return <BoardPage boardId={boardIdFromPath(pathname) ?? ""} />;
+    return (
+      <Suspense fallback={null}>
+        <LazyBoardPage boardId={boardIdFromPath(pathname) ?? ""} />
+      </Suspense>
+    );
   }
   return <ChatPage />;
 }

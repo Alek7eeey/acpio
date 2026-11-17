@@ -9,11 +9,13 @@ import { AgentGate, AgentOfflineWarning, HarnessNotConfiguredWarning } from "./c
 import { BootSplash } from "./components/BootSplash";
 import { NotificationPrompt } from "./components/NotificationPrompt";
 import { ToastHost } from "./components/ToastHost";
-import { BoardPage } from "./pages/BoardPage";
 import { ChatPage } from "./pages/ChatPage";
-import { SettingsPage } from "./pages/SettingsPage";
-import { TasksPage } from "./pages/TasksPage";
-import { EditorPage } from "./pages/EditorPage";
+import {
+  LazyBoardPage,
+  LazyEditorPage,
+  LazySettingsPage,
+  LazyTasksPage,
+} from "./pages/lazyPages";
 import { RemoteKeyGate } from "./components/RemoteKeyGate";
 import { api } from "./lib/api";
 import { hasUnsavedComposerAttachments } from "./lib/composerDrafts";
@@ -98,10 +100,10 @@ export function App() {
         <Route element={<AppShell />}>
           <Route index element={<ChatPage />} />
           <Route path="chat" element={<ChatPage />} />
-          <Route path="board/:boardId" element={<BoardPage />} />
-          <Route path="settings" element={<SettingsPage />} />
-          <Route path="tasks" element={<TasksPage />} />
-          <Route path="editor" element={<EditorPage />} />
+          <Route path="board/:boardId" element={<LazyBoardPage />} />
+          <Route path="settings" element={<LazySettingsPage />} />
+          <Route path="tasks" element={<LazyTasksPage />} />
+          <Route path="editor" element={<LazyEditorPage />} />
           <Route path="*" element={<Navigate to="/chat" replace />} />
         </Route>
       </Routes>

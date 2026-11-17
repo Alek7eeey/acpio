@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { BrowserRouter } from "react-router-dom";
 import { DEFAULT_SETTINGS, type BoardDto, type SessionDto } from "@acpio/shared";
@@ -135,7 +135,8 @@ describe("the brand chip's way home", () => {
   // happened to be open before.
   it("keeps the open board open", async () => {
     const brand = renderShell("/board/b1");
-    expect(screen.getByTestId("board-page")).toBeTruthy();
+    // The board is a chunk of its own now, so the first frame is the shell.
+    expect(await screen.findByTestId("board-page")).toBeTruthy();
 
     await userEvent.click(brand);
 
@@ -162,7 +163,7 @@ describe("the brand chip's way home", () => {
 
   // Two panes on different folders: the folder you leave keeps its code pane —
   // tab, buffers and all — and only the focused one is on screen.
-  it("keeps one editor per folder and shows the focused pane's", () => {
+  it("keeps one editor per folder and shows the focused pane's", async () => {
     const other = { ...chat, id: "s3", cwd: "E:/other" };
     useAppStore.setState({
       settings: { ...DEFAULT_SETTINGS, locale: "ru" as const, editorSplit: "right" as const },
@@ -179,9 +180,12 @@ describe("the brand chip's way home", () => {
       </BrowserRouter>,
     );
     const slots = () => Array.from(container.querySelectorAll<HTMLElement>(`.${styles.editorSlot}`));
-    expect(slots().map((slot) => slot.querySelector<HTMLElement>("[data-testid=editor-page]")?.dataset.root)).toEqual([
-      "E:/proj",
-    ]);
+    // The editor is its own chunk: it arrives after the shell's first frame.
+    await waitFor(() => {
+      expect(
+        slots().map((slot) => slot.querySelector<HTMLElement>("[data-testid=editor-page]")?.dataset.root),
+      ).toEqual(["E:/proj"]);
+    });
 
     act(() => useAppStore.setState({ focusedPaneIndex: 1 }));
 

@@ -54,9 +54,11 @@ powershell -ExecutionPolicy Bypass -File install.ps1 -NoLaunch
 
 ```bash
 npm install
-npm run build
-npm run start     # → http://localhost:18741 (UI + API + WebSocket)
+npm run serve     # build + start in one command, no UI type check (CI does it)
 ```
+
+Separately, when a build already exists: `npm run build` (everything, all type
+checks) and `npm run start` → http://localhost:18741 (UI + API + WebSocket).
 
 **Development (hot reload):**
 

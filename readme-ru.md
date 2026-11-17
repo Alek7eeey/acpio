@@ -55,9 +55,11 @@ powershell -ExecutionPolicy Bypass -File install.ps1 -NoLaunch
 
 ```bash
 npm install
-npm run build
-npm run start     # → http://localhost:18741 (UI + API + WebSocket)
+npm run serve     # сборка + запуск одной командой: без тайпчека UI (он в CI)
 ```
+
+Отдельно, если сборка уже есть: `npm run build` (всё, со всеми тайпчеками) и
+`npm run start` → http://localhost:18741 (UI + API + WebSocket).
 
 **Разработка (hot reload):**
 
