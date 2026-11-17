@@ -130,6 +130,23 @@ async function main() {
   await app.listen({ port, host });
   console.log(`Acpio server on http://${host}:${port}`);
 
+  // Recovery reads the whole history through synchronous SQLite: on a 1.1 GB
+  // database the sweep after a restart held the event loop for several seconds,
+  // and a page asked for in that window got its answer only afterwards — the
+  // port was open while the app looked dead. Nothing in it is needed to serve
+  // the shell, so the page goes first and the sweep follows.
+  setTimeout(() => void recoverRuntimeState(), RECOVERY_DELAY_MS);
+}
+
+/** How long the page that a restart reloads gets before the sweep takes the loop. */
+const RECOVERY_DELAY_MS = 3_000;
+
+/**
+ * What a killed process leaves behind, put right after the port is open:
+ * stale turns unlocked, their stuck tool calls failed, the chats that were
+ * mid-turn carried on.
+ */
+async function recoverRuntimeState(): Promise<void> {
   // Sessions left "running"/"waiting" by the previous process (crash, kill,
   // hung MCP tool call) have no live runtime — unlock them and stop their
   // pending tool calls from spinning forever. Runs after listen so startup
