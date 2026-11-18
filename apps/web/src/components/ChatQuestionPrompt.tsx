@@ -135,6 +135,13 @@ export function ChatQuestionPrompt({
     setSelected((prev) => ((prev[q.id] ?? []).length ? { ...prev, [q.id]: [] } : prev));
   };
 
+  /**
+   * A text field is not one of the card's options, so the keyboard position
+   * moves off them: keeping it left the last clicked option ringed while the
+   * field showed its own focus border, and the card looked to hold two answers.
+   */
+  const parkNavHighlight = () => setActiveNavIndex(-1);
+
   const buildAnswers = () =>
     questions.map((q) => ({
       questionId: q.id,
@@ -324,6 +331,7 @@ export function ChatQuestionPrompt({
                   type="text"
                   value={freeText[q.id] ?? q.defaultValue ?? ""}
                   placeholder={q.freeTextLabel ?? ""}
+                  onFocus={parkNavHighlight}
                   onMouseDown={(e) => e.stopPropagation()}
                   onChange={(e) => setFreeText((prev) => ({ ...prev, [q.id]: e.target.value }))}
                   onKeyDown={(e) => {
@@ -373,6 +381,7 @@ export function ChatQuestionPrompt({
                       type="text"
                       value={freeText[q.id] ?? ""}
                       placeholder={q.freeTextLabel ?? t("question.other")}
+                      onFocus={parkNavHighlight}
                       onMouseDown={(e) => e.stopPropagation()}
                       onChange={(e) => changeOwnAnswer(q, e.target.value)}
                       onKeyDown={(e) => {

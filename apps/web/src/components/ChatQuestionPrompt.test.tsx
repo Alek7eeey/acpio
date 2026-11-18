@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { I18nProvider } from "../lib/i18n";
 import { ChatQuestionPrompt, type QuestionPromptPayload } from "./ChatQuestionPrompt";
+import styles from "./ChatInlinePrompt.module.css";
 
 function renderPrompt(payload: QuestionPromptPayload) {
   return render(
@@ -80,6 +81,36 @@ describe("ChatQuestionPrompt", () => {
     // must not answer it a second time (that repeat found no request and put
     // "Question request not found" in the banner while the agent worked on).
     expect(onAnswer).toHaveBeenCalledTimes(1);
+  });
+
+  it("moves the focused ring off the clicked option when the Other field takes the answer", () => {
+    renderPrompt({
+      title: "Which way?",
+      questions: [
+        {
+          id: "mode",
+          prompt: "Which way?",
+          options: [{ id: "git", label: "Update the checkout itself" }],
+          freeTextField: "mode__other",
+          freeTextLabel: "Other",
+        },
+      ],
+    });
+
+    const git = screen.getByRole("radio", { name: "Update the checkout itself" });
+    fireEvent.click(git);
+    // The click put both the pick and the keyboard ring on that option.
+    expect(git.className).toContain(styles.optActive);
+    expect(git.className).toContain(styles.optFocused);
+
+    const other = screen.getByPlaceholderText("Other");
+    fireEvent.focus(other);
+    fireEvent.change(other, { target: { value: "explain the cause first" } });
+
+    // One highlighted border, on the field being typed into — not a second one
+    // on the option the click had left ringed.
+    expect(git.className).not.toContain(styles.optFocused);
+    expect(git.className).not.toContain(styles.optActive);
   });
 
   it("renders plain options without a description line", () => {
