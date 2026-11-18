@@ -10,6 +10,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { DEFAULT_SETTINGS, type MessageDto, type SessionDetailDto } from "@acpio/shared";
 import { composerDraftSnapshot, forgetComposerDraft } from "../lib/composerDrafts";
+import { api } from "../lib/api";
 import { useAppStore } from "../lib/store";
 import { I18nProvider } from "../lib/i18n";
 import { ChatPage } from "./ChatPage";
@@ -203,6 +204,54 @@ describe("right click in the composer", () => {
     expect(
       screen.getByRole("menuitem", { name: "Агент" }).getAttribute("aria-current"),
     ).toBe("true");
+  }, 20_000);
+
+  // The paperclip offers the same four rows on a rest: the button a hand already
+  // sits on is the nearest place to switch the mode, and its presses keep doing
+  // what they did (the attach tests hold that half).
+  it("offers the modes on a rest over the paperclip", async () => {
+    const { container } = renderChat();
+    const paperclip = screen.getByRole("button", { name: /^Прикрепить/ });
+
+    fireEvent.pointerEnter(paperclip);
+    const menu = await screen.findByRole("menu");
+    expect(
+      screen.getAllByRole("menuitem").map((item) => item.textContent?.replace("✓", "")),
+    ).toEqual(["Агент", "План", "Вопрос", "Разбор"]);
+
+    // The pointer crosses the gap onto the popup: it must still be standing.
+    fireEvent.pointerLeave(paperclip);
+    fireEvent.pointerEnter(menu);
+    await userEvent.click(screen.getByRole("menuitem", { name: "План" }));
+    expect(container.querySelector('[data-composer-mode="plan"]')).toBeTruthy();
+  }, 20_000);
+
+  // On a phone the paperclip keeps its two doors: a tap picks a file from the
+  // device, a long press (the browser's own contextmenu) from the server. The
+  // mode never answers either of them.
+  it("keeps the paperclip's two doors on touch", async () => {
+    // The dialog lists a folder as soon as it opens: an empty one is enough.
+    (api as unknown as Record<string, unknown>).browseDirectory = vi.fn(async () => ({
+      path: "C:/",
+      parent: null,
+      entries: [],
+    }));
+    renderChat();
+    const paperclip = screen.getByRole("button", { name: /^Прикрепить/ });
+
+    fireEvent.contextMenu(paperclip);
+    expect(await screen.findByRole("dialog")).toBeTruthy();
+    expect(screen.queryByRole("menu")).toBeNull();
+  }, 20_000);
+
+  // A finger is not a hover: on a phone the same press opens the file picker,
+  // and the mode is reached by the field's long press instead.
+  it("opens nothing on a touch over the paperclip", async () => {
+    renderChat();
+    const paperclip = screen.getByRole("button", { name: /^Прикрепить/ });
+    fireEvent.pointerEnter(paperclip, { pointerType: "touch" });
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    expect(screen.queryByRole("menu")).toBeNull();
   }, 20_000);
 
   it("switches the chat's mode without touching the draft", async () => {

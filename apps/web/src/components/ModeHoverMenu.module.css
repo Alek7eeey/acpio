@@ -1,0 +1,62 @@
+/* The picker the paperclip offers on a rest: the field's mode rows, small
+   enough to sit beside the button it hangs from. */
+.wrap {
+  position: fixed;
+  z-index: 120;
+  /* A hand crossing from the button to the popup takes its first pixels here:
+     the strip is the popup's own box, so nothing closes under the pointer. */
+  padding-bottom: 8px;
+}
+
+.menu {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.76rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.row:hover,
+.row:focus-visible {
+  background: color-mix(in srgb, var(--mode-tint, var(--accent)) 16%, transparent);
+  outline: none;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+  background: var(--mode-tint, var(--accent));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--mode-tint, var(--accent)) 18%, transparent);
+}
+
+.label {
+  flex: 1;
+  min-width: 0;
+}
+
+.check {
+  margin-left: auto;
+  color: var(--mode-tint, var(--accent));
+  font-weight: 700;
+}

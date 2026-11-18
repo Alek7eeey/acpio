@@ -71,6 +71,8 @@ const apiMock = vi.hoisted(() => {
     // The new-task form asks the picked agent for its `/` menu before the task
     // exists — the list itself comes from the test that needs one.
     agentCommands: vi.fn(async () => [] as Array<{ name: string; description: string }>),
+    // The server picker behind the paperclip's second door lists a folder.
+    browseDirectory: vi.fn(async () => ({ path: "C:/", parent: null, entries: [] })),
     // Starting a card from the board sends its description as the first turn.
     prompt: vi.fn(async () => undefined),
   };
@@ -1524,6 +1526,53 @@ describe("BoardPage new task form", () => {
     await waitFor(() =>
       expect(apiMock.prompt).toHaveBeenCalledWith("t2", "/plan Разбери импорт", {}),
     );
+  });
+
+  // The paperclip offers the modes on a rest, like the chat's field: the button
+  // a hand already sits on is the nearest place to switch, and the form stays
+  // put while the pointer crosses onto the popup.
+  it("offers the modes on a rest over the form's paperclip", async () => {
+    renderBoard();
+    await screen.findByText("Fix the login bug");
+    const group = document.querySelector("[data-group]") as HTMLElement;
+    await userEvent.click(within(group).getByLabelText("New task"));
+    const paperclip = within(group).getByRole("button", { name: /^Attach/ });
+
+    fireEvent.pointerEnter(paperclip);
+    const menu = await screen.findByRole("menu");
+    expect(
+      within(menu)
+        .getAllByRole("menuitem")
+        .map((row) => row.textContent?.replace("✓", "")),
+    ).toEqual(["Agent", "Plan", "Ask", "Investigate"]);
+
+    fireEvent.pointerLeave(paperclip);
+    fireEvent.pointerEnter(menu);
+    await userEvent.click(within(menu).getByRole("menuitem", { name: "Plan" }));
+
+    // The pill is the chat's, and the form the pick was made in is still open.
+    await waitFor(() =>
+      expect(within(group).getByRole("button", { name: /^Plan/ })).toBeTruthy(),
+    );
+    expect(within(group).getByPlaceholderText("Describe the task…")).toBeTruthy();
+  });
+
+  // A phone has no right button, so the form's paperclip keeps its two doors:
+  // a tap picks a file from the device, a long press (the browser's own
+  // contextmenu) from the server. The mode never answers either of them — on a
+  // phone it lives on a long press in the empty field instead.
+  it("keeps the form paperclip's two doors on touch", async () => {
+    renderBoard();
+    await screen.findByText("Fix the login bug");
+    const group = document.querySelector("[data-group]") as HTMLElement;
+    await userEvent.click(within(group).getByLabelText("New task"));
+    const paperclip = within(group).getByRole("button", { name: /^Attach/ });
+
+    fireEvent.contextMenu(paperclip);
+    expect(await screen.findByRole("dialog")).toBeTruthy();
+    expect(screen.queryByRole("menu")).toBeNull();
+    // The form the press came from is still open under the picker.
+    expect(within(group).getByPlaceholderText("Describe the task…")).toBeTruthy();
   });
 
   // A right click over words the reader picked is the browser's: copy, search,

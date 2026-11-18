@@ -44,6 +44,7 @@ import { ShareLinkTip, useShareLinkTip } from "../components/ShareLinkTip";
 import { chatLink } from "../lib/shareLink";
 import { ServerFolderBrowseDialog } from "../components/ServerFolderBrowseDialog";
 import { SlashCommandMenu } from "../components/SlashCommandMenu";
+import { ModeHoverMenu } from "../components/ModeHoverMenu";
 import { api } from "../lib/api";
 import { COMPOSER_MODES, COMPOSER_MODE_LABEL_KEY, type ComposerMode } from "../lib/composerMode";
 import { composerEditShortcuts } from "../lib/editShortcuts";
@@ -440,6 +441,8 @@ const NewTaskComposer = memo(function NewTaskComposer({
   const [paramsLoadingFor, setParamsLoadingFor] = useState<string | null>(null);
   const fileSeq = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  /** The paperclip: the mode picker hangs from it on a rest (ModeHoverMenu). */
+  const attachBtnRef = useRef<HTMLButtonElement>(null);
   /** The server's filesystem picker, open while its source is the one chosen. */
   const [attachDialogOpen, setAttachDialogOpen] = useState(false);
   /** Caret in the description — where a skill picked from the menu lands. */
@@ -1191,6 +1194,7 @@ const NewTaskComposer = memo(function NewTaskComposer({
           them, where a hand looks for files before it looks at the values. */}
       <div className={styles.composerTools}>
         <button
+          ref={attachBtnRef}
           type="button"
           className={styles.attachFile}
           aria-label={attachSourceLabels[attachSource]}
@@ -1229,6 +1233,15 @@ const NewTaskComposer = memo(function NewTaskComposer({
         </button>
         {/* Right of the paperclip, the way the chat's field shows it. */}
         {modeChip}
+        {/* A rest on the paperclip offers the modes — the chat field's own
+            gesture, and the button's clips and clicks stay as they were. */}
+        {modePicker ? (
+          <ModeHoverMenu
+            anchorRef={attachBtnRef}
+            mode={modePicker.value}
+            onPick={modePicker.onChange}
+          />
+        ) : null}
       </div>
 
       {/* Everything the task starts on, stated in words — the agent, the model,
