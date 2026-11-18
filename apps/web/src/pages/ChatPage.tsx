@@ -164,6 +164,8 @@ import {
   type ComposerMode,
 } from "../lib/composerMode";
 import { shouldShowGitComposerUi } from "../lib/gitUi";
+// The mode palette, read by the pill, the switcher and the sent message alike.
+import "../lib/modeColors.css";
 import styles from "./ChatPage.module.css";
 
 const URL_RE = /https?:\/\/[^\s<>"')\]]+/g;

@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
@@ -44,6 +45,9 @@ import { chatLink } from "../lib/shareLink";
 import { ServerFolderBrowseDialog } from "../components/ServerFolderBrowseDialog";
 import { SlashCommandMenu } from "../components/SlashCommandMenu";
 import { api } from "../lib/api";
+import { COMPOSER_MODES, COMPOSER_MODE_LABEL_KEY } from "../lib/composerMode";
+// The mode palette, read by the card's pill and its switcher alike.
+import "../lib/modeColors.css";
 import { readComposerDraft, setComposerDraft } from "../lib/composerDrafts";
 import { splitLinkNames } from "../lib/linkNames";
 import { showToast } from "../lib/toast";
@@ -269,6 +273,7 @@ const NewTaskComposer = memo(function NewTaskComposer({
   draftKey,
   seed,
   submitLabel,
+  modeChip,
   persistDraft = true,
   showAutoStart = true,
   onSubmit,
@@ -304,6 +309,9 @@ const NewTaskComposer = memo(function NewTaskComposer({
   seed?: { text: string; model?: string | null; params?: Record<string, string> | null };
   /** What the primary button says: an edit saves where a creation creates. */
   submitLabel: string;
+  /** The prompt mode the card sends in, as the chat's field shows it: a small
+   *  chip beside the paperclip. A card being created has no mode yet. */
+  modeChip?: ReactNode;
   /** Whether the text lives on in the draft registry after the form closes.
    *  A rewrite keeps its text in the card it belongs to, so it does not. */
   persistDraft?: boolean;
@@ -1064,6 +1072,8 @@ const NewTaskComposer = memo(function NewTaskComposer({
             />
           </svg>
         </button>
+        {/* Right of the paperclip, the way the chat's field shows it. */}
+        {modeChip}
       </div>
 
       {/* Everything the task starts on, stated in words — the agent, the model,
@@ -1222,6 +1232,10 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const setTaskColumn = useAppStore((s) => s.setTaskColumn);
   const setTaskFavorite = useAppStore((s) => s.setTaskFavorite);
   const setTaskProvider = useAppStore((s) => s.setTaskProvider);
+  // A board task is a chat, so its prompt mode is the chat's own — the same map
+  // the composer writes, keyed by the session id the card already is.
+  const composerModes = useAppStore((s) => s.composerModes);
+  const setComposerMode = useAppStore((s) => s.setComposerMode);
   const updateBoardTask = useAppStore((s) => s.updateBoardTask);
   const deleteBoardTask = useAppStore((s) => s.deleteBoardTask);
   const setBoardFolders = useAppStore((s) => s.setBoardFolders);
@@ -2548,8 +2562,12 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const columnOf = (task: SessionDto): BoardColumnDto =>
     columnById.get(boardColumnOf(task, boardColumns)) ?? boardColumns[0]!;
 
+  /** The prompt mode a card's chat sends in — `agent` unless one was picked. */
+  const taskMode = (task: SessionDto) => composerModes[task.id] ?? "agent";
+
   const renderCard = (task: SessionDto, group: TodoGroup | null) => {
     const column = columnOf(task);
+    const mode = taskMode(task);
     const inTodo = column.id === todoColumnId;
     const index = group ? group.tasks.findIndex((item) => item.id === task.id) : -1;
     const dropHint = taskDropHint?.id === task.id ? taskDropHint.position : null;
@@ -2567,6 +2585,9 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
       <article
         key={task.id}
         data-task-id={task.id}
+        // The mode a card sends in, worn as a coloured border: it says the
+        // state without ever taking a row of the card's width.
+        data-composer-mode={mode === "agent" ? undefined : mode}
         className={`${styles.card} ${task.status === "running" ? styles.cardLive : ""}${
           draggingTaskId === task.id ? ` ${styles.cardDragging}` : ""
         }${
@@ -2756,6 +2777,35 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
               }}
               submitLabel={t("common.save")}
               showAutoStart={false}
+              // The mode the card sends in, in the field's own words: a chip
+              // right of the paperclip, with the way back to agent.
+              modeChip={
+                mode === "agent" ? undefined : (
+                  <span
+                    className={styles.modeChip}
+                    data-composer-mode={mode}
+                    title={t(COMPOSER_MODE_LABEL_KEY[mode])}
+                  >
+                    {t(COMPOSER_MODE_LABEL_KEY[mode])}
+                    <button
+                      type="button"
+                      className={styles.modeChipExit}
+                      aria-label={t("chat.modeExit")}
+                      title={t("chat.modeExit")}
+                      onClick={() => setComposerMode(task.id, "agent")}
+                    >
+                      <svg width="9" height="9" viewBox="0 0 24 24" fill="none" aria-hidden>
+                        <path
+                          d="M6 6l12 12M18 6 6 18"
+                          stroke="currentColor"
+                          strokeWidth="2.8"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    </button>
+                  </span>
+                )
+              }
               onSubmit={(cwd, description, files, attachments, provider, model, modelParams) =>
                 void submitTaskEdit(
                   task,
@@ -3337,6 +3387,37 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
             }}
             role="menu"
           >
+            {/* A task is a chat, and a chat sends its prompts in a mode: the
+                four rows the composer's right click offers stand here too, so
+                the mode is picked where the card is, not after opening it. */}
+            <div className={styles.menuHead}>{t("chat.modeSection")}</div>
+            {COMPOSER_MODES.map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                role="menuitem"
+                className={styles.menuItem}
+                aria-current={taskMode(taskMenu.task) === mode ? "true" : undefined}
+                onClick={() => {
+                  const id = taskMenu.task.id;
+                  setTaskMenu(null);
+                  setComposerMode(id, mode);
+                }}
+              >
+                <span
+                  className={styles.modeDot}
+                  data-composer-mode={mode}
+                  aria-hidden
+                />
+                <span className={styles.menuModeLabel}>{t(COMPOSER_MODE_LABEL_KEY[mode])}</span>
+                {taskMode(taskMenu.task) === mode ? (
+                  <span className={styles.menuModeCheck} aria-hidden>
+                    ✓
+                  </span>
+                ) : null}
+              </button>
+            ))}
+            <div className={styles.menuDivider} aria-hidden />
             {/* A task that has run has a dialogue worth glancing at, so the
                 card's menu opens with the peek; a card that never started has
                 none yet. */}

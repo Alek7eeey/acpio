@@ -1551,24 +1551,8 @@
   user-select: none;
 }
 
-/* One colour per prompt mode, worn by every surface that shows the mode: the
-   chip in the composer row, the dot in the switcher, and the message it sent.
-   Attribute selectors stay global, so the palette serves both modules. */
-[data-composer-mode="agent"] {
-  --mode-tint: var(--text-secondary);
-}
-
-[data-composer-mode="plan"] {
-  --mode-tint: #7c8cff;
-}
-
-[data-composer-mode="ask"] {
-  --mode-tint: #3fbf8f;
-}
-
-[data-composer-mode="investigate"] {
-  --mode-tint: #e0a03c;
-}
+/* The mode palette is `lib/modeColors.css`, loaded once for every surface that
+   shows a mode — the bubble below just reads `--mode-tint`. */
 
 /* A message a mode sent wears that mode as its whole face: the tint is the
    indicator, and the name just inside it says which mode. The skill that ran

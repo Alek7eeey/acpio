@@ -141,6 +141,8 @@ beforeEach(() => {
     // A rail narrowing outlives the page on purpose; each test starts wide.
     boardFilterCwd: {},
     boardFavoritesOnly: {},
+    // A mode picked on a card would outlive the test that picked it.
+    composerModes: {},
   });
 });
 
@@ -2021,6 +2023,58 @@ describe("BoardPage task edit form", () => {
     // The agents go back to what the file found: a form opened on a leaked one
     // asks for its catalog, and that answer is cached for the whole file.
     useAppStore.setState({ adapters: [], agentAvailability: {} });
+  });
+});
+
+describe("BoardPage card prompt mode", () => {
+  // A board task is a chat, so it sends its prompts in a mode like one: the
+  // card's menu picks it, and the card wears it as a border colour — a chip in
+  // the card's first row pushed the row wider than the card, and a board card
+  // has no room to spare.
+  it("picks the mode in the card's menu and outlines the card with it", async () => {
+    renderBoard();
+    const card = (await screen.findByText("Fix the login bug")).closest(
+      "[data-task-id]",
+    ) as HTMLElement;
+    // The file's locale is the default English one, like every other case here.
+    expect(card.getAttribute("data-composer-mode")).toBeNull();
+
+    fireEvent.contextMenu(card);
+    const menu = screen.getByRole("menu");
+    expect(
+      within(menu).getByRole("menuitem", { name: "Agent" }).getAttribute("aria-current"),
+    ).toBe("true");
+
+    await userEvent.click(within(menu).getByRole("menuitem", { name: "Plan" }));
+
+    // The card carries the mode as state, and the map it wrote is the
+    // composer's own — the task's chat opens already in it.
+    expect(card.getAttribute("data-composer-mode")).toBe("plan");
+    expect(useAppStore.getState().composerModes.t1).toBe("plan");
+    expect(screen.queryByRole("menu")).toBeNull();
+
+    // The menu comes back with the mode in force, so a second pick is a switch.
+    fireEvent.contextMenu(card);
+    expect(
+      screen.getByRole("menuitem", { name: "Plan" }).getAttribute("aria-current"),
+    ).toBe("true");
+  });
+
+  // The card's editor is the one place the mode is spelled out, in the pill the
+  // chat's composer wears — with the same cross back to agent.
+  it("shows the mode as the composer's pill while the card is edited", async () => {
+    useAppStore.setState({ composerModes: { t1: "plan" } });
+    renderBoard();
+    const card = (await screen.findByText("Fix the login bug")).closest(
+      "[data-task-id]",
+    ) as HTMLElement;
+
+    await userEvent.click(within(card).getByRole("button", { name: "Edit task" }));
+    expect(within(card).getByText("Plan")).toBeTruthy();
+
+    await userEvent.click(within(card).getByRole("button", { name: "Back to agent" }));
+    expect(useAppStore.getState().composerModes.t1).toBe("agent");
+    expect(card.getAttribute("data-composer-mode")).toBeNull();
   });
 });
 

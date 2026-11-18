@@ -1,0 +1,27 @@
+/**
+ * One colour per prompt mode, worn by every surface that shows the mode: the
+ * pill in the composer, the dot in the right-click switchers, the message it
+ * sent and the board card it starts.
+ *
+ * Plain CSS on purpose — attribute selectors are global anyway, and the chat
+ * page and the board live in different modules: a variable defined only beside
+ * one of them would leave the other's chips colourless. Every consumer reads
+ * `--mode-tint` off an element carrying `data-composer-mode`, and keeps its own
+ * `var(--mode-tint, var(--accent))` fallback for the case the palette is not
+ * loaded at all.
+ */
+[data-composer-mode="agent"] {
+  --mode-tint: var(--text-secondary);
+}
+
+[data-composer-mode="plan"] {
+  --mode-tint: #7c8cff;
+}
+
+[data-composer-mode="ask"] {
+  --mode-tint: #3fbf8f;
+}
+
+[data-composer-mode="investigate"] {
+  --mode-tint: #e0a03c;
+}

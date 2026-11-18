@@ -946,6 +946,19 @@
   border-color: var(--accent);
 }
 
+/* The mode a card sends in: the border says it, and nothing else moves — no
+   chip, no row, nothing the card's width has to answer for. It comes after the
+   hover and live rules because the mode is the card's persistent state: a
+   pointer over the card must not paint it away. */
+.card[data-composer-mode] {
+  border-color: var(--mode-tint, var(--accent));
+  /* One pixel of colour is faint on a dark lane, so the border brings a ring of
+     the same colour with it — still nothing that could move the layout. */
+  box-shadow:
+    var(--shadow-soft),
+    0 0 0 1px color-mix(in srgb, var(--mode-tint, var(--accent)) 28%, transparent);
+}
+
 /* The card being dragged dims where it lies: the card itself rides under the
    pointer (the preview), so this is the hole it left. */
 .cardDragging {
@@ -1271,6 +1284,84 @@
 /* A destructive row (deleting the card) reads as danger at a glance. */
 .menuItemDanger {
   color: var(--danger);
+}
+
+/* ── The prompt mode of a card ───────────────────────────────────────────────
+   A board task is a chat, so it sends its prompts in a mode like one. The card
+   wears it as a border colour — the state without a single pixel of layout —
+   and the editor shows it as the small chip below, in the field's own row.
+   The palette is `lib/modeColors.css`, keyed by the same attribute. */
+.modeChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 4px 0 7px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--mode-tint, var(--accent)) 34%, transparent);
+  background: color-mix(in srgb, var(--mode-tint, var(--accent)) 15%, transparent);
+  color: var(--mode-tint, var(--accent));
+  font-size: 0.64rem;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  user-select: none;
+}
+
+/* The way back to agent, the same cross the chat's pill carries. */
+.modeChipExit {
+  display: inline-grid;
+  place-items: center;
+  width: 13px;
+  height: 13px;
+  margin-right: -1px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  opacity: 0.65;
+  cursor: pointer;
+  transition: opacity var(--motion), background var(--motion);
+}
+
+.modeChipExit:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--mode-tint, var(--accent)) 26%, transparent);
+}
+
+.modeChipExit:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--mode-tint, var(--accent)) 45%, transparent);
+  outline-offset: 1px;
+  opacity: 1;
+}
+
+/* The dot that leads a mode row in the menu. */
+.modeDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+  background: var(--mode-tint, var(--accent));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--mode-tint, var(--accent)) 18%, transparent);
+}
+
+.menuModeLabel {
+  flex: 1;
+  min-width: 0;
+}
+
+/* The mode in force: the same mark the composer's switcher puts on its row. */
+.menuModeCheck {
+  margin-left: auto;
+  color: var(--mode-tint, var(--accent));
+  font-weight: 700;
+}
+
+.menuDivider {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
 }
 
 .menuToggleOn,
