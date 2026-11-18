@@ -23,7 +23,7 @@ export const COMPOSER_MODE_LABEL_KEY: Record<ComposerMode, string> = {
 /** The modes by session id, kept in the browser: a mode survives a reload. */
 const STORAGE_KEY = "acpio.composerModes.v1";
 
-function isComposerMode(value: unknown): value is ComposerMode {
+export function isComposerMode(value: unknown): value is ComposerMode {
   return typeof value === "string" && (COMPOSER_MODES as readonly string[]).includes(value);
 }
 

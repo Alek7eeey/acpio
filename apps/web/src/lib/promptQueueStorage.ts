@@ -10,12 +10,16 @@
  * The drain (turn end, reconnect, boot) hands them over once the chat has a
  * free slot, so restoring only needs to put them back in the store.
  */
+import { isComposerMode, type ComposerMode } from "./composerMode";
+
 const QUEUE_KEY = "acpio.promptQueue.v1";
 
 export type StoredQueuedPrompt = {
   id: string;
   text: string;
   sessionId: string;
+  /** The mode the request was written in — it travels with the request. */
+  mode?: ComposerMode;
   editMessageId?: string | null;
   attachments?: Array<{ name: string; path: string }>;
 };
@@ -41,6 +45,7 @@ function parseItem(raw: unknown): StoredQueuedPrompt | null {
   // A prompt with neither words nor files is nothing to send.
   if (!text.trim() && !attachments.length) return null;
   const out: StoredQueuedPrompt = { id, text, sessionId };
+  if (isComposerMode(item.mode)) out.mode = item.mode;
   if (typeof item.editMessageId === "string") out.editMessageId = item.editMessageId;
   if (attachments.length) out.attachments = attachments;
   return out;

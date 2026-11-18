@@ -453,6 +453,12 @@ type AppState = {
     id: string;
     text: string;
     sessionId: string;
+    /**
+     * The mode the request was written in, read back when it leaves the queue:
+     * switching the field afterwards is a statement about the *next* prompt, not
+     * about the ones already waiting behind the turn.
+     */
+    mode?: ComposerMode;
     editMessageId?: string | null;
     attachments?: PendingAttachment[];
   }>;
@@ -521,6 +527,8 @@ type AppState = {
       sessionId?: string;
       /** The harness's own prompt: never queued, never shown in the chat. */
       internal?: boolean;
+      /** The mode a queued request was written in; absent = the field's now. */
+      mode?: ComposerMode;
     },
     flags?: { optimistic?: boolean },
   ) => Promise<void>;
@@ -3503,6 +3511,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
             text,
             sessionId: sid,
+            mode: get().composerModes[sid],
             editMessageId: opts?.editMessageId ?? null,
             attachments: opts?.attachments,
           },
@@ -3547,6 +3556,7 @@ export const useAppStore = create<AppState>((set, get) => ({
               id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
               text,
               sessionId: target,
+              mode: get().composerModes[target],
               editMessageId: opts?.editMessageId ?? null,
               attachments: opts?.attachments,
             },
@@ -3619,6 +3629,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         item.text,
         {
           sessionId: sid,
+          ...(item.mode ? { mode: item.mode } : {}),
           ...(item.editMessageId ? { editMessageId: item.editMessageId } : {}),
           ...(item.attachments?.length ? { attachments: item.attachments } : {}),
         },
@@ -3661,7 +3672,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       await api.prompt(
         item.sessionId,
         item.sessionId
-          ? withComposerMode(item.text, get().composerModes[item.sessionId])
+          ? withComposerMode(item.text, item.mode ?? get().composerModes[item.sessionId])
           : item.text,
         {
           delivery,
@@ -3736,6 +3747,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         item.text,
         {
           sessionId: item.sessionId,
+          ...(item.mode ? { mode: item.mode } : {}),
           ...(item.editMessageId ? { editMessageId: item.editMessageId } : {}),
           ...(item.attachments?.length ? { attachments: item.attachments } : {}),
         },
@@ -3768,8 +3780,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     // the one place it lands — every path (queue drain, steer, edit) comes
     // through here. The harness's own prompt carries no mode, and a message
     // edited back out of the field already has its prefix.
+    // A queued request carries the mode it was written in; everything else is
+    // the field's mode as it stands now.
     const text =
-      internal || !id ? rawText : withComposerMode(rawText, get().composerModes[id]);
+      internal || !id
+        ? rawText
+        : withComposerMode(rawText, opts?.mode ?? get().composerModes[id]);
     set({ error: null });
     // The text is now a real message; its composer draft must not linger in the
     // persisted map (or resurrect after a reload). Drop it from the live

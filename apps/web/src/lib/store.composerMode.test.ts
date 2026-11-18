@@ -122,4 +122,70 @@ describe("the chat's mode on the way out", () => {
       delivery: "afterStep",
     });
   });
+
+  // The mode belongs to the prompt that was written under it, not to the field:
+  // switching the field to ask must not turn a queued message into a question.
+  it("keeps the mode a prompt was queued in when the field switches", async () => {
+    settle("plan");
+    useAppStore.setState({
+      activeSession: detail("running"),
+      sessionDetails: { [SID]: detail("running") },
+      sessions: [{ ...row(), status: "running" }],
+      inflight: 1,
+      inflightBySession: { [SID]: 1 },
+    });
+    await useAppStore.getState().sendPrompt("после шага", { sessionId: SID });
+    const item = useAppStore.getState().promptQueue[0]!;
+
+    useAppStore.getState().setComposerMode(SID, "ask");
+    await useAppStore.getState().deliverQueuedPrompt(item.id, "afterStep");
+    expect(apiMock.prompt).toHaveBeenCalledWith(SID, "/plan после шага", {
+      delivery: "afterStep",
+    });
+  });
+
+  it("leaves a queued agent-mode prompt alone when the field switches to a mode", async () => {
+    settle("agent");
+    useAppStore.setState({
+      activeSession: detail("running"),
+      sessionDetails: { [SID]: detail("running") },
+      sessions: [{ ...row(), status: "running" }],
+      inflight: 1,
+      inflightBySession: { [SID]: 1 },
+    });
+    await useAppStore.getState().sendPrompt("после шага", { sessionId: SID });
+    const item = useAppStore.getState().promptQueue[0]!;
+
+    useAppStore.getState().setComposerMode(SID, "investigate");
+    await useAppStore.getState().deliverQueuedPrompt(item.id, "afterStep");
+    expect(apiMock.prompt).toHaveBeenCalledWith(SID, "после шага", {
+      delivery: "afterStep",
+    });
+  });
+
+  // The drain is the other way out of the queue, and it went through
+  // `runSendPrompt`, which read the field's mode at the moment of the send.
+  it("drains a queued prompt in the mode it was queued in", async () => {
+    settle("agent");
+    useAppStore.setState({
+      activeSession: detail("running"),
+      sessionDetails: { [SID]: detail("running") },
+      sessions: [{ ...row(), status: "running" }],
+      inflight: 1,
+      inflightBySession: { [SID]: 1 },
+    });
+    await useAppStore.getState().sendPrompt("после шага", { sessionId: SID });
+
+    useAppStore.getState().setComposerMode(SID, "plan");
+    // The turn ends: the queue gets a free slot and hands the request over.
+    useAppStore.setState({
+      activeSession: detail("idle"),
+      sessionDetails: { [SID]: detail("idle") },
+      sessions: [{ ...row(), status: "idle" }],
+      inflight: 0,
+      inflightBySession: { [SID]: 0 },
+    });
+    await useAppStore.getState().drainPromptQueue();
+    expect(sentText()).toBe("после шага");
+  });
 });
