@@ -52,6 +52,7 @@ const WORKSPACE_PACKAGES = [
   "adapter-omp",
   "adapter-opencode",
   "adapter-builtin",
+  "plugin-ponytail",
 ];
 
 function readJson(file) {
@@ -75,6 +76,20 @@ function copyDir(src, dest, skip = []) {
   }
 }
 
+/**
+ * Folders a package ships next to `dist/` and reads through `import.meta.url`
+ * (`adapter-builtin`'s `BUILTIN_SKILLS_DIR`, a plugin's `skillPath`). Copying
+ * only `dist/` shipped every install without a single built-in skill, and
+ * nothing failed: the scan treats an absent folder as an empty one.
+ */
+function copyPackageAssets(name, dest) {
+  const src = path.join(repoRoot, "packages", name);
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    if (!entry.isDirectory() || entry.name === "dist" || entry.name === "src") continue;
+    copyDir(path.join(src, entry.name), path.join(dest, entry.name));
+  }
+}
+
 /** The number this revision is released as — the same one git stamps into the repo. */
 function appVersion() {
   return deriveVersion(repoRoot, readJson(path.join(repoRoot, "package.json")).version);
@@ -83,16 +98,19 @@ function appVersion() {
 /** Manifest of one bundled workspace package: dist only, pinned to the release version. */
 function workspaceManifest(name, version) {
   const src = readJson(path.join(repoRoot, "packages", name, "package.json"));
+  // The package's own entry, not a fixed one: a plugin exports its `server.js`.
+  const main = src.main ?? "./dist/index.js";
+  const types = src.types ?? "./dist/index.d.ts";
   return {
     name: src.name,
     version,
     type: "module",
-    main: "./dist/index.js",
-    types: "./dist/index.d.ts",
+    main,
+    types,
     // No "development" condition: the bundle has no src/, so the built file is
     // the only entry point — exactly what a plain `node` run resolves.
     exports: {
-      ".": { types: "./dist/index.d.ts", default: "./dist/index.js" },
+      ".": { types, default: main },
     },
   };
 }
@@ -161,7 +179,18 @@ copyDir(path.join(repoRoot, "apps", "web", "dist"), path.join(outRoot, "apps", "
 for (const name of WORKSPACE_PACKAGES) {
   const bundled = path.join(outRoot, "node_modules", "@acpio", name);
   copyDir(path.join(repoRoot, "packages", name, "dist"), path.join(bundled, "dist"));
+  copyPackageAssets(name, bundled);
   writeJson(path.join(bundled, "package.json"), workspaceManifest(name, version));
+}
+
+// The assets the two skill folders hang on: a build that lost them installs an
+// app with no built-in skills at all, which is what this script shipped before.
+for (const [pkg, folder] of [
+  ["adapter-builtin", "skills"],
+  ["plugin-ponytail", "skills"],
+]) {
+  const at = path.join(outRoot, "node_modules", "@acpio", pkg, folder);
+  if (!fs.existsSync(at)) throw new Error(`${pkg}/${folder} did not travel into ${outRoot}`);
 }
 
 // The stamp the shipped copy reports names this release, not the one git saw:
