@@ -1297,10 +1297,15 @@ export class BuiltinAgent implements InProcessAgentTransport {
     // send the noted results back verbatim and recompute the cut for nothing.
     this.maskUpTo = stored?.maskUpTo ?? 0;
     this.prunedFrom = stored?.prunedFrom ?? 0;
-    // A history written before the boundary existed has been on the wire in
-    // full: sealing it is what keeps the archive from re-cutting a prompt the
-    // provider has already cached.
-    this.offloadUpTo = stored ? (stored.offloadUpTo ?? this.messages.length) : 0;
+    // A stored history has been on the wire in full: sealing all of it is what
+    // keeps the archive from re-cutting a prompt the provider has already
+    // cached. The count in the file is no help there — it can only be behind
+    // what was sent, because a batch of tool answers is persisted with the seal
+    // of the request that came before it, and a crash keeps that pair. Chat
+    // c4e7abfc came back at 55 messages with 2, archived a `gitea_get_pull`
+    // answer it had sent in full (7 990 tokens) and matched 3 of 73 messages,
+    // billing 54 055 tokens again.
+    this.offloadUpTo = stored ? this.messages.length : 0;
     // A transport rebuilt mid-chat resumes on the prompt bytes the first turn
     // fixed, instead of inlining (or dropping) a skill body it read again.
     this.frozenSkills = stored?.promptSkills

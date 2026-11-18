@@ -4234,6 +4234,110 @@ describe("tool result offload", () => {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
+
+  it("seals a restored history whatever boundary the file carries", async () => {
+    // The file can sit behind the wire: a batch of tool answers is persisted
+    // with the seal of the request that came before it, so a crash leaves
+    // `messages` ahead of `offloadUpTo`. Chat c4e7abfc came back at 55
+    // messages with a boundary of 2, and the resumed turn archived a
+    // `gitea_get_pull` answer it had sent in full — 3 of 73 messages matched
+    // and 54 055 tokens were billed again. What the file holds has already
+    // been on the wire: the restore seals all of it.
+    const big = "Б".repeat(20_000);
+    const bodies: Array<{ messages?: Array<Record<string, unknown>> }> = [];
+    const server = createServer((req, res) => {
+      let body = "";
+      req.on("data", (chunk) => {
+        body += chunk;
+      });
+      req.on("end", () => {
+        bodies.push(JSON.parse(body) as { messages?: Array<Record<string, unknown>> });
+        res.setHeader("content-type", "text/event-stream");
+        const chunk = (payload: Record<string, unknown>) => `data: ${JSON.stringify(payload)}\n\n`;
+        res.write(
+          chunk({
+            id: "c1",
+            object: "chat.completion.chunk",
+            created: 0,
+            model: "stub",
+            choices: [
+              { index: 0, delta: { role: "assistant", content: "продолжил" }, finish_reason: null },
+            ],
+          }),
+        );
+        res.write(
+          chunk({
+            id: "c1",
+            object: "chat.completion.chunk",
+            created: 0,
+            model: "stub",
+            choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          }),
+        );
+        res.write("data: [DONE]\n\n");
+        res.end();
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("stub did not bind a port");
+    const dir = tempDir();
+    try {
+      saveBuiltinSession(dir, "s-behind", {
+        version: 1,
+        cwd: dir,
+        modelId: "m1",
+        messages: [
+          { role: "user", content: [{ type: "text", text: "hi" }] },
+          {
+            role: "assistant",
+            content: [
+              { type: "tool-call", toolCallId: "call-1", toolName: "bash", input: { command: "echo hi" } },
+            ],
+          },
+          {
+            role: "tool",
+            content: [
+              { type: "tool-result", toolCallId: "call-1", toolName: "bash", output: { type: "text", value: big } },
+            ],
+          },
+          { role: "assistant", content: [{ type: "text", text: "готово" }] },
+        ],
+        // The boundary the crashing process left: two messages sealed, four in
+        // the file, all four already sent.
+        offloadUpTo: 2,
+      } as never);
+      const { call } = boot(
+        {
+          builtinProviders: [
+            {
+              id: "p1",
+              name: "Relay",
+              url: `http://127.0.0.1:${address.port}/v1`,
+              apiKey: "",
+              models: [{ id: "m1", label: "M1", contextWindow: 1_000_000 }],
+            },
+          ],
+          // Archivable by size alone, as in the chat that broke.
+          builtinOffloadToolResultTokens: 100,
+        },
+        dir,
+      );
+      await call("session/load", { sessionId: "s-behind", cwd: dir });
+      expect(
+        (await call<{ stopReason: string }>("session/prompt", { prompt: [{ type: "text", text: "дальше" }] }))
+          .stopReason,
+      ).toBe("end_turn");
+      const tool = (bodies[0]?.messages ?? []).find((entry) => entry.role === "tool");
+      // The first request after the restore repeats bytes the provider has
+      // cached — a citation here moves every message after it.
+      expect(String(tool?.content)).not.toContain("[offloaded file=");
+      expect(String(tool?.content)).toContain("ББББ");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
 });
 
 describe("builtin session store", () => {
