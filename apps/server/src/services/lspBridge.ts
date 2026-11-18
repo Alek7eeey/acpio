@@ -237,14 +237,24 @@ export function attachTypeScriptServer(
     if (process.env.ACPIO_LSP_DEBUG) console.error("[lsp]", chunk.trim().slice(0, 500));
   });
 
-  child.on("exit", () => {
+  // A pane can name a folder that is gone — a restored root, a deleted worktree:
+  // `spawn` then fails with ENOENT, and without this listener that error event is
+  // unhandled and takes the whole server down with it (the pane then reconnects on
+  // startup and kills the fresh process the same way). The pane gets a closed
+  // socket instead, and its own tab can say so.
+  const drop = () => {
     running.delete(id);
     try {
       socket.close();
     } catch {
       // already gone
     }
-  });
+  };
+  child.on("error", drop);
+  child.on("exit", drop);
+  // Same class of failure one step later: writing into a server that already
+  // died raises EPIPE on stdin, which is an unhandled error on that stream.
+  child.stdin.on("error", drop);
 
   socket.on("message", (raw) => {
     if (child.killed || !child.stdin.writable) return;
