@@ -1635,6 +1635,26 @@ describe("BoardPage new task form", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
+  // The report: the field's menu outlived the first keystroke and covered the
+  // task being written under it.
+  it("steps the form's menu aside as soon as the reader types", async () => {
+    renderBoard();
+    await screen.findByText("Fix the login bug");
+    const group = document.querySelector("[data-group]") as HTMLElement;
+    await userEvent.click(within(group).getByLabelText("New task"));
+    const box = within(group).getByPlaceholderText("Describe the task…") as HTMLTextAreaElement;
+
+    fireEvent.contextMenu(box);
+    expect(await screen.findByRole("menu")).toBeTruthy();
+
+    box.focus();
+    await userEvent.type(box, "р", { skipClick: true });
+
+    expect(screen.queryByRole("menu")).toBeNull();
+    // The letter is the field's: the form keeps the task it was given.
+    expect(box.value).toBe("р");
+  });
+
   // Regression: the form ignored every press outside it, so an accidental "+"
   // left it in the lane until Cancel was found — an empty form still goes away.
   it("dismisses an empty form on a press outside it", async () => {

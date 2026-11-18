@@ -10,6 +10,15 @@ import {
 /** Breathing room kept between a floating menu and the viewport edge. */
 export const MENU_VIEWPORT_MARGIN = 8;
 
+/**
+ * A key that writes a character into the page — the reader has started typing,
+ * and a menu floating over the field steps aside so the text stays readable.
+ * Chords (Ctrl+Z, Alt+←) are commands, not a draft, so they leave it open.
+ */
+export function isTypingKey(event: KeyboardEvent): boolean {
+  return event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey;
+}
+
 export type MenuAnchor = { x: number; y: number };
 
 export type MenuPlacement = {

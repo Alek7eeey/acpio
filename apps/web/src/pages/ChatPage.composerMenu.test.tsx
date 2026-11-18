@@ -255,6 +255,23 @@ describe("right click in the composer", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   }, 20_000);
 
+  // The report: the menu outlived the first keystroke and sat over the words
+  // being written into the field; a press outside closed it, a letter did not.
+  it("steps aside as soon as the reader types", async () => {
+    const { container } = renderChat();
+    const input = container.querySelector("textarea")!;
+    menuOf(input);
+    expect(screen.queryByRole("menu")).toBeTruthy();
+
+    // The field is focused by the press; typing is what follows it.
+    input.focus();
+    await userEvent.type(input, "п", { skipClick: true });
+
+    expect(screen.queryByRole("menu")).toBeNull();
+    // The letter is the field's: closing the menu never eats the keystroke.
+    expect(input.value).toBe("п");
+  }, 20_000);
+
   it("switches the chat's mode without touching the draft", async () => {
     const { container } = renderChat();
     const input = container.querySelector("textarea")!;

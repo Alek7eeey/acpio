@@ -49,6 +49,7 @@ import { api } from "../lib/api";
 import { COMPOSER_MODES, COMPOSER_MODE_LABEL_KEY, type ComposerMode } from "../lib/composerMode";
 import { composerEditShortcuts } from "../lib/editShortcuts";
 import { prefersHotkeyHints } from "../lib/messageHotkeys";
+import { isTypingKey } from "../lib/menuPosition";
 // The mode palette, read by the card's pill and its switcher alike.
 import "../lib/modeColors.css";
 import { readComposerDraft, setComposerDraft } from "../lib/composerDrafts";
@@ -495,8 +496,10 @@ const NewTaskComposer = memo(function NewTaskComposer({
       if (target instanceof Element && target.closest('[role="menu"]')) return;
       setFieldMenu(null);
     };
+    // Typing closes it too: the menu sits over the task being written, and the
+    // field keeps the caret while it is open.
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setFieldMenu(null);
+      if (event.key === "Escape" || isTypingKey(event)) setFieldMenu(null);
     };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
@@ -1947,7 +1950,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
       setAgentMenu(null);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setAgentMenu(null);
+      if (e.key === "Escape" || isTypingKey(e)) setAgentMenu(null);
     };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
@@ -1964,7 +1967,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
       setTaskMenu(null);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setTaskMenu(null);
+      if (e.key === "Escape" || isTypingKey(e)) setTaskMenu(null);
     };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
@@ -1981,7 +1984,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
       setFolderMenu(null);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setFolderMenu(null);
+      if (e.key === "Escape" || isTypingKey(e)) setFolderMenu(null);
     };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);

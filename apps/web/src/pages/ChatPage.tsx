@@ -71,7 +71,7 @@ import {
 } from "../lib/composerDrafts";
 import { splitLinkNames } from "../lib/linkNames";
 import { useChatSplitAllowed } from "../lib/panelLayout";
-import { useFixedMenuPlacement } from "../lib/menuPosition";
+import { isTypingKey, useFixedMenuPlacement } from "../lib/menuPosition";
 import { sanitizeCatalogModes, selectLiveSessionDetail, useAppStore, type PendingAttachment } from "../lib/store";
 import { buildAgentTimeline, finalAnswerPart, isSingleItemTimeline, splitQuestionPreamble, stepsPartsStillLive, turnAnswerVisible, unansweredQuestionParts, type AgentQuestionItem, type AgentTimelineItem } from "../lib/assistantTurnTimeline.js";
 import { formatDuration, partDurations, partTtfts, sumDurations } from "../lib/partTiming.js";
@@ -5077,14 +5077,14 @@ function ChatThread() {
 
   useEffect(() => {
     if (!composerMenu) return;
-    // Same closing rules as the chip menu above: a press elsewhere, a scroll
-    // or Escape.
+    // Same closing rules as the chip menu above: a press elsewhere, a scroll,
+    // Escape — or the first character typed into the field underneath it.
     const onPointerDown = (event: Event) => {
       if (composerMenuRef.current?.contains(event.target as Node)) return;
       setComposerMenu(null);
     };
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setComposerMenu(null);
+      if (event.key === "Escape" || isTypingKey(event)) setComposerMenu(null);
     };
     window.addEventListener("mousedown", onPointerDown);
     window.addEventListener("touchstart", onPointerDown);
