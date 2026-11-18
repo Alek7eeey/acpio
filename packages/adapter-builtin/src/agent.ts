@@ -1789,6 +1789,9 @@ export class BuiltinAgent implements InProcessAgentTransport {
         // says: it is what splits the bill in the tokens panel into "wrong head"
         // and "cold provider cache", and the switch only decides whether the
         // warning card is drawn.
+        onAnswer: (status) => {
+          this.answerStatus = status;
+        },
         onHead: (head) => {
           this.headIntact = head.intact;
           // A request whose head went out unchanged is no longer the pass's
@@ -1817,7 +1820,15 @@ export class BuiltinAgent implements InProcessAgentTransport {
       () => this.echoReasoning(),
       // No `onDrift`: a head that moved inside the pass is the pass's own
       // doing, and nothing here draws a card (the same rule children follow).
-      { watch: () => this.watching === true },
+      // The status is the chat's own: the pass sends the chat's bytes, so an
+      // accepted answer vouches for the prefix a failed turn would otherwise
+      // rewrite.
+      {
+        watch: () => this.watching === true,
+        onAnswer: (status) => {
+          this.answerStatus = status;
+        },
+      },
       COMPACTION_LANE,
     );
   }
@@ -1837,6 +1848,14 @@ export class BuiltinAgent implements InProcessAgentTransport {
   private echoThinking: boolean | undefined;
 
   /**
+   * Status of the last answer the turn's endpoint gave, `undefined` before the
+   * first one — the half of the echo rule that is not the transcript's: a
+   * refused or unreachable call cached nothing, so the rerun may decide again,
+   * while an accepted one was read and cached whatever its stream did next.
+   */
+  private answerStatus: number | undefined;
+
+  /**
    * Does the conversation think, as far as this turn's requests are concerned?
    *
    * Asked once, at the session's first request, and held from then on — across
@@ -1854,7 +1873,8 @@ export class BuiltinAgent implements InProcessAgentTransport {
    * a cached one, so the question may be asked again and the rerun can satisfy
    * an endpoint that demands the echo (`400 … The reasoning_content in the
    * thinking mode must be passed back to the API`) at the cost of one break
-   * the reader would have paid anyway.
+   * the reader would have paid anyway. The same holds only for a refusal — an
+   * answer the endpoint accepted does not give the decision back (see `turn`).
    */
   private echoReasoning(): boolean {
     if (this.echoThinking === undefined) this.echoThinking = hasReasoning(this.messages);
@@ -3036,14 +3056,19 @@ export class BuiltinAgent implements InProcessAgentTransport {
           },
         });
       };
-      // One attempt. A failed one may decide the echo again on the rerun: the
-      // request it lost never became a cached prefix, while a message that
-      // crossed the wire and was accepted keeps its bytes.
+      // One attempt. A failed one may decide the echo again on the rerun — but
+      // only when the answer was refused: a 400 turned no prefix into a cached
+      // one, while an accepted answer did, whatever became of its stream (chat
+      // 74e07024 answered a step `200` with an empty body, the rerun took the
+      // echo again and gave six assistant messages a `reasoning_content: ""`
+      // they had already gone out without — the provider's cache ended at the
+      // first of them and the head matched 53 of 135).
       const turn = async () => {
+        this.answerStatus = undefined;
         try {
           return await turnOnce();
         } catch (err) {
-          this.echoThinking = undefined;
+          if (!(this.answerStatus && this.answerStatus < 400)) this.echoThinking = undefined;
           throw err;
         }
       };

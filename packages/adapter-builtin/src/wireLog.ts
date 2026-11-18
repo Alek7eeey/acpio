@@ -130,6 +130,13 @@ export interface WireLogOptions {
    */
   onHead?: (head: WireHeadInfo) => void;
   /**
+   * Told the status of every answer, right after the endpoint replies and
+   * before the body is read: an accepted status is the one thing that says the
+   * prompt was on the wire and its prefix may sit in the provider's cache,
+   * whatever the stream then does with it (see `echoReasoning`).
+   */
+  onAnswer?: (status: number) => void;
+  /**
    * Whether the head is compared at all — the Diagnostics switch. Asked per
    * request, so flipping it reaches the very next call. Defaults to “on when
    * somebody is listening”.
@@ -413,7 +420,7 @@ export function withWireLog(
     // business: the chat's own endpoint asks for it on every call so the tokens
     // panel can say how much of the bill was the provider's cold cache. The
     // switch still gates the warning card alone.
-    if (!watching && !options.onHead) return base(input, init);
+    if (!watching && !options.onHead && !options.onAnswer) return base(input, init);
     const started = Date.now();
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : String(input?.url ?? "");
     const rawBody = typeof init?.body === "string" ? init.body : "";
@@ -549,9 +556,12 @@ export function withWireLog(
         throw new ContextDriftStop();
       }
     }
-    if (!logging) return base(input, init);
-
     const response = await base(input, init);
+    // Reported whether or not anything is written: the agent's echo decision
+    // turns on it, and the log is a diagnostic switch nobody has to flip for a
+    // bill to be right.
+    options.onAnswer?.(response.status);
+    if (!logging) return response;
     const ms = Date.now() - started;
     // The answer's usage rides a clone: the caller's stream stays untouched.
     void (async () => {

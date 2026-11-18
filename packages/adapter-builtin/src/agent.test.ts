@@ -2239,6 +2239,145 @@ describe("builtin provider routing", () => {
     }
   });
 
+  it("keeps the echo decision when the answer that failed was already accepted", async () => {
+    // The incident (chat 74e07024): a request came back `200` and then died with
+    // an empty body, the turn retried, and the rerun took the echo again — six
+    // assistant messages that had already crossed the wire gained
+    // `reasoning_content: ""`, the provider's cache ended at the first of them
+    // and the context-drift card read "53 of 135". A refused call cached
+    // nothing and may decide again; an accepted one was read, so the bytes it
+    // was billed for stay as they went out.
+    const bodies: Array<{ messages?: Array<Record<string, unknown>> }> = [];
+    let requests = 0;
+    const server = createServer((req, res) => {
+      let body = "";
+      req.on("data", (chunk) => {
+        body += chunk;
+      });
+      req.on("end", () => {
+        requests += 1;
+        bodies.push(JSON.parse(body) as { messages?: Array<Record<string, unknown>> });
+        res.setHeader("content-type", "text/event-stream");
+        const chunk = (payload: Record<string, unknown>) => `data: ${JSON.stringify(payload)}\n\n`;
+        const delta = (message: Record<string, unknown>, finish: string | null = null) => ({
+          id: "c1",
+          object: "chat.completion.chunk",
+          created: 0,
+          model: "stub",
+          choices: [{ index: 0, delta: message, finish_reason: finish }],
+        });
+        const answer = () => {
+          res.write(chunk(delta({ role: "assistant", content: "готово" })));
+          res.write(
+            chunk({
+              ...delta({}, "stop"),
+              usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+            }),
+          );
+          res.write("data: [DONE]\n\n");
+          res.end();
+        };
+        if (requests === 1) {
+          // Step one acts without a word of reasoning: it goes out bare, and
+          // the rerun must not dress it up afterwards.
+          res.write(
+            chunk(
+              delta({
+                role: "assistant",
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: "call-1",
+                    type: "function",
+                    function: { name: "bash", arguments: '{"command":"echo hi"}' },
+                  },
+                ],
+              }),
+            ),
+          );
+          res.write(chunk(delta({}, "tool_calls")));
+          res.write("data: [DONE]\n\n");
+          res.end();
+          return;
+        }
+        if (requests === 2) {
+          // The answer thinks: from here on the transcript carries reasoning,
+          // so a decision taken again would come back `true`.
+          res.write(chunk(delta({ role: "assistant", reasoning_content: "думаю" })));
+          answer();
+          return;
+        }
+        if (requests === 3) {
+          // Accepted, then dead: the status says the prompt was read before the
+          // stream gave anything back.
+          res.write(chunk(delta({ role: "assistant", content: "part" })));
+          setTimeout(() => res.destroy(), 50);
+          return;
+        }
+        answer();
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("stub did not bind a port");
+    const dir = tempDir();
+    try {
+      const { call } = boot(
+        {
+          builtinProviders: [
+            {
+              id: "p1",
+              name: "Relay",
+              url: `http://127.0.0.1:${address.port}/v1`,
+              apiKey: "",
+              models: [{ id: "m1", label: "M1", contextWindow: 8_000 }],
+            },
+          ],
+        },
+        dir,
+        (method) => {
+          if (method === "session/request_permission") {
+            return { outcome: { outcome: "selected", optionId: "allow_once" } };
+          }
+          if (method === "terminal/create") return { terminalId: "t1" };
+          if (method === "terminal/output") return { output: "hi\n" };
+          return {};
+        },
+      );
+      await call<{ sessionId: string }>("session/new", { cwd: dir });
+      expect(
+        (await call<{ stopReason: string }>("session/prompt", {
+          prompt: [{ type: "text", text: "hi" }],
+        })).stopReason,
+      ).toBe("end_turn");
+      // Step two thinks, so the transcript now carries reasoning — the state the
+      // rerun below used to read as "this chat echoes".
+      expect(JSON.stringify(bodies[0])).not.toContain("reasoning_content");
+
+      expect(
+        (await call<{ stopReason: string }>("session/prompt", {
+          prompt: [{ type: "text", text: "ещё" }],
+        })).stopReason,
+      ).toBe("end_turn");
+      expect(requests).toBe(4);
+      const bare = (which: number) =>
+        (bodies[which]?.messages ?? []).filter(
+          (message) => message.role === "assistant" && Array.isArray(message.tool_calls),
+        );
+      const before = bare(2);
+      const after = bare(3);
+      expect(before).toHaveLength(1);
+      expect(after).toHaveLength(1);
+      // The step went out without the field, and the retried request hands it
+      // back exactly as the provider was billed for it.
+      expect(before[0]).not.toHaveProperty("reasoning_content");
+      expect(after[0]).not.toHaveProperty("reasoning_content");
+      expect(JSON.stringify(after[0])).toBe(JSON.stringify(before[0]));
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it("leaves an endpoint that never thinks without the reasoning field", async () => {
     const bodies: Array<{ messages?: Array<Record<string, unknown>> }> = [];
     let requests = 0;
