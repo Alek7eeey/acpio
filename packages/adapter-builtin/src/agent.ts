@@ -2486,7 +2486,18 @@ export class BuiltinAgent implements InProcessAgentTransport {
       // folded turn look unfolded to the turn-boundary pass, which then folded
       // the same bytes again and rewrote the digest — one full-price prefix per
       // turn (chat 9590a5eb: 10 passes, 7 of them from a `covered` of 0).
-      const stored = opts.foldedBase !== undefined ? opts.foldedBase + result.state.covered - 1 : result.state.covered;
+      // The turn's own pictures ride in the view as their own messages (see
+      // `attachToolImages`): the cut counts them, the transcript does not. Left
+      // uncorrected, a note standing in front of the cut would name a stored
+      // message the pass never covered.
+      const notesBefore =
+        opts.foldedBase !== undefined
+          ? 0
+          : view.slice(0, result.state.covered).filter(isToolImagesNote).length;
+      const stored =
+        opts.foldedBase !== undefined
+          ? opts.foldedBase + result.state.covered - 1
+          : result.state.covered - notesBefore;
       const before = opts.foldedBase ?? opts.state?.covered ?? 0;
       // Same reason as the turn-boundary pass: the count that fired this one
       // priced a view that no longer exists.
@@ -2501,7 +2512,7 @@ export class BuiltinAgent implements InProcessAgentTransport {
         summaryOutputTokens,
       });
       const mappable = opts.foldedBase !== undefined || this.viewIndexed;
-      if (mappable && !view.some(isToolImagesNote)) {
+      if (mappable) {
         this.compaction = { summary: result.state.summary, covered: stored };
         this.advanceMaskBoundary(settings.builtinPruneToolResultsKeepLast);
         this.persist();

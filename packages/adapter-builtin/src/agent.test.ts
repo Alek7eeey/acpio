@@ -3773,6 +3773,107 @@ describe("compaction reporting", () => {
     }
   });
 
+  it("remembers the digest of a pass whose view carries a tool picture", async () => {
+    // Chat 9590a5eb: every screenshot a tool result carried lands in the view as
+    // its own user message, and the mid-turn pass refused to store its digest
+    // whenever one was there. The next turn then started from the pre-squeeze
+    // boundary again, re-sent the whole history and ran the pass a second time —
+    // measured on the real chat: two passes over 1505..1797/1799 and two reads
+    // with 9% of the prompt cached (104k and 106k tokens at full price).
+    const PNG =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    const mcp = createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on("data", (c: Buffer) => chunks.push(c));
+      req.on("end", () => {
+        const msg = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { id: number; method: string };
+        const results: Record<string, unknown> = {
+          initialize: { protocolVersion: "2024-11-05", capabilities: {} },
+          "tools/list": {
+            tools: [
+              {
+                name: "get_screenshot",
+                description: "Render the model",
+                inputSchema: { type: "object", properties: {} },
+                annotations: { readOnlyHint: true },
+              },
+            ],
+          },
+          "tools/call": {
+            content: [
+              { type: "text", text: "rendered" },
+              { type: "image", data: PNG, mimeType: "image/png" },
+            ],
+          },
+        };
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: results[msg.method] }));
+      });
+    });
+    await new Promise<void>((resolve) => mcp.listen(0, "127.0.0.1", resolve));
+    const address = mcp.address();
+    if (!address || typeof address === "string") throw new Error("mcp did not bind a port");
+    const session = `note-mid-${Date.now()}`;
+    const stub = await midTurnPass(session, 2, "mcp__cad_get_screenshot");
+    const dir = tempDir();
+    // A history well under the 4k line (20% of 20k) and a small tail, so the
+    // pass that the turn's own step triggers is the only one this chat needs:
+    // a second one would be the re-summary this test is counting.
+    saveBuiltinSession(dir, session, {
+      version: 1,
+      cwd: dir,
+      modelId: "p1::m1",
+      messages: [
+        { role: "user", content: `начало: ${"д".repeat(1_000)}` },
+        { role: "assistant", content: "принято" },
+        { role: "user", content: "проверь" },
+        { role: "assistant", content: "да" },
+      ],
+    });
+    try {
+      const { call, frames } = boot(
+        {
+          builtinProviders: [provider(stub.url, 20_000)],
+          builtinCompactionThresholdPercent: 20,
+          locale: "ru",
+        },
+        dir,
+        // The host's terminal answers the second step with a short result: long
+        // enough to be a step, short enough to leave the squeezed view under
+        // the line.
+        (method: string): unknown => {
+          if (method === "session/request_permission") {
+            return { outcome: { outcome: "selected", optionId: "allow" } };
+          }
+          if (method === "terminal/create") return { terminalId: "t1" };
+          if (method === "terminal/wait_for_exit") return { exitCode: 0 };
+          if (method === "terminal/output") return { output: `${"д".repeat(1_500)}\n` };
+          return {};
+        },
+      );
+      await call("session/load", {
+        sessionId: session,
+        cwd: dir,
+        mcpServers: [{ name: "cad", url: `http://127.0.0.1:${address.port}/mcp` }],
+      });
+      await call("session/prompt", { prompt: [{ type: "text", text: "сделай" }] });
+
+      expect(compactionRows(frames)).toHaveLength(1);
+      // The digest the pass paid for is the state the next turn starts from.
+      const stored = loadBuiltinSession(dir, session);
+      expect(stored?.compaction?.summary).toBe("конспект");
+      expect(stored?.compaction?.covered ?? 0).toBeGreaterThan(0);
+
+      // And the next turn rides it instead of folding the same bytes again.
+      await call("session/prompt", { prompt: [{ type: "text", text: "ещё" }] });
+      expect(compactionRows(frames)).toHaveLength(1);
+      expect(stub.bodies.filter((body) => body.stream !== true)).toHaveLength(1);
+    } finally {
+      await stub.close();
+      await new Promise<void>((resolve) => mcp.close(() => resolve()));
+    }
+  });
+
   /**
    * A chat with one pass between its steps, and everything it put on the wire.
    * Same shape as the mid-turn test above: the history sits under the line and
@@ -3782,6 +3883,8 @@ describe("compaction reporting", () => {
     session: string,
     /** Tool calls the stub makes before it answers: each adds a step to the turn. */
     toolSteps = 1,
+    /** A tool the first step calls instead of `bash` — a picture-returning one. */
+    firstTool?: string,
   ): Promise<{
     url: string;
     bodies: Array<Record<string, unknown>>;
@@ -3833,7 +3936,10 @@ describe("compaction reporting", () => {
                         index: 0,
                         id: `call-${step}`,
                         type: "function",
-                        function: { name: "bash", arguments: '{"command":"echo hi"}' },
+                        function:
+                          step === 1 && firstTool
+                            ? { name: firstTool, arguments: "{}" }
+                            : { name: "bash", arguments: '{"command":"echo hi"}' },
                       },
                     ],
                   },
