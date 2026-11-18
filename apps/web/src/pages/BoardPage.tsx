@@ -45,7 +45,9 @@ import { chatLink } from "../lib/shareLink";
 import { ServerFolderBrowseDialog } from "../components/ServerFolderBrowseDialog";
 import { SlashCommandMenu } from "../components/SlashCommandMenu";
 import { api } from "../lib/api";
-import { COMPOSER_MODES, COMPOSER_MODE_LABEL_KEY } from "../lib/composerMode";
+import { COMPOSER_MODES, COMPOSER_MODE_LABEL_KEY, type ComposerMode } from "../lib/composerMode";
+import { composerEditShortcuts } from "../lib/editShortcuts";
+import { prefersHotkeyHints } from "../lib/messageHotkeys";
 // The mode palette, read by the card's pill and its switcher alike.
 import "../lib/modeColors.css";
 import { readComposerDraft, setComposerDraft } from "../lib/composerDrafts";
@@ -250,6 +252,86 @@ function loadTaskModelParams(provider: AgentProvider, model: string) {
   return pending;
 }
 
+/** The glyph of one editing row: the same four the chat's field menu draws. */
+function EditMenuIcon({ children }: { children: ReactNode }) {
+  return (
+    <svg className={styles.menuIcon} viewBox="0 0 24 24" fill="none" aria-hidden>
+      {children}
+    </svg>
+  );
+}
+
+function IconPaste() {
+  return (
+    <EditMenuIcon>
+      <path d="M9 3h6v4H9V3Z" stroke="currentColor" strokeWidth="1.85" strokeLinejoin="round" />
+      <path
+        d="M9 5H6.5A1.5 1.5 0 0 0 5 6.5v13A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5v-13A1.5 1.5 0 0 0 17.5 5H15"
+        stroke="currentColor"
+        strokeWidth="1.85"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </EditMenuIcon>
+  );
+}
+
+function IconSelectAll() {
+  return (
+    <EditMenuIcon>
+      <path
+        d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16"
+        stroke="currentColor"
+        strokeWidth="1.85"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </EditMenuIcon>
+  );
+}
+
+function IconUndo() {
+  return (
+    <EditMenuIcon>
+      <path
+        d="M4 9h10.5a5.5 5.5 0 0 1 0 11H8"
+        stroke="currentColor"
+        strokeWidth="1.85"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="m8 5-4 4 4 4"
+        stroke="currentColor"
+        strokeWidth="1.85"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </EditMenuIcon>
+  );
+}
+
+function IconRedo() {
+  return (
+    <EditMenuIcon>
+      <path
+        d="M20 9H9.5a5.5 5.5 0 0 0 0 11H16"
+        stroke="currentColor"
+        strokeWidth="1.85"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="m16 5 4 4-4 4"
+        stroke="currentColor"
+        strokeWidth="1.85"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </EditMenuIcon>
+  );
+}
+
 /**
  * The board's inline new-task form. What is being written — the description
  * and the pictures — lives here rather than on the page: a keystroke or a
@@ -274,6 +356,7 @@ const NewTaskComposer = memo(function NewTaskComposer({
   seed,
   submitLabel,
   modeChip,
+  modePicker,
   persistDraft = true,
   showAutoStart = true,
   onSubmit,
@@ -312,6 +395,9 @@ const NewTaskComposer = memo(function NewTaskComposer({
   /** The prompt mode the card sends in, as the chat's field shows it: a small
    *  chip beside the paperclip. A card being created has no mode yet. */
   modeChip?: ReactNode;
+  /** The mode the description goes out in, offered by the field's right click
+   *  beside the basic commands the chat's composer carries. */
+  modePicker?: { value: ComposerMode; onChange: (mode: ComposerMode) => void };
   /** Whether the text lives on in the draft registry after the form closes.
    *  A rewrite keeps its text in the card it belongs to, so it does not. */
   persistDraft?: boolean;
@@ -382,6 +468,40 @@ const NewTaskComposer = memo(function NewTaskComposer({
   /** Escape closes the menu for the token it was open on. */
   const [skillMenuDismissed, setSkillMenuDismissed] = useState(false);
   const createAutoStart = useBoardAutoStart("create");
+  /** Where the field's right click opened its menu: the press dropped a caret
+   *  into an empty field, and this is what stands beside it. */
+  const [fieldMenu, setFieldMenu] = useState<{ x: number; y: number } | null>(null);
+  /** The keys beside the editing rows, unless the reader switched them off. */
+  const showEditShortcuts = prefersHotkeyHints();
+  /**
+   * The field's own undo/redo: the stack belongs to the browser and a menu row
+   * cannot type for the reader, so the row reaches it the way the chat's does.
+   * The guarded call is what keeps a browser (or a test environment) without
+   * the command from throwing on a press.
+   */
+  const stepFieldHistory = (direction: "undo" | "redo") => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.focus({ preventScroll: true });
+    if (typeof document.execCommand === "function") document.execCommand(direction);
+  };
+  useEffect(() => {
+    if (!fieldMenu) return;
+    const onDown = (event: globalThis.MouseEvent) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest('[role="menu"]')) return;
+      setFieldMenu(null);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setFieldMenu(null);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [fieldMenu]);
 
   const provider = draftProvider || defaultProvider;
   const settings = useAppStore((s) => s.settings);
@@ -595,6 +715,31 @@ const NewTaskComposer = memo(function NewTaskComposer({
     },
     [],
   );
+
+  /** Clipboard text, put in at the caret: the field's own paste is the
+   *  browser's, which the menu that replaced it has to do itself. */
+  const pasteFromClipboard = async () => {
+    let text = "";
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      return; // no clipboard permission: there is nothing to paste
+    }
+    if (!text) return;
+    const el = inputRef.current;
+    const start = Math.min(el?.selectionStart ?? caret, draft.length);
+    const end = Math.max(start, Math.min(el?.selectionEnd ?? start, draft.length));
+    const next = `${draft.slice(0, start)}${text}${draft.slice(end)}`;
+    const after = start + text.length;
+    setDraft(next);
+    setCaret(after);
+    requestAnimationFrame(() => {
+      const input = inputRef.current;
+      if (!input) return;
+      input.focus();
+      input.setSelectionRange(after, after);
+    });
+  };
 
   /** Put the names of the files just attached into the description, at the
    *  caret, and leave it after them — the same place a skill lands. */
@@ -879,6 +1024,16 @@ const NewTaskComposer = memo(function NewTaskComposer({
           setCaret(e.target.selectionStart ?? e.target.value.length);
         }}
         onSelect={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
+        onContextMenu={(e) => {
+          // Words the reader picked belong to the browser: its own menu copies
+          // them. The quick commands are for the empty field, where the press
+          // drops a caret — exactly the rule the chat's composer keeps.
+          const el = e.currentTarget;
+          if (el.selectionStart !== el.selectionEnd) return;
+          if (!modePicker) return;
+          e.preventDefault();
+          setFieldMenu({ x: e.clientX, y: e.clientY });
+        }}
         onPaste={(e) => {
           const pasted = clipboardFiles(e.clipboardData);
           if (!pasted.length) return;
@@ -1188,6 +1343,105 @@ const NewTaskComposer = memo(function NewTaskComposer({
             document.body,
           )
         : null}
+      {fieldMenu
+        ? createPortal(
+            <div
+              className={styles.menu}
+              style={{ left: fieldMenu.x, top: fieldMenu.y }}
+              role="menu"
+            >
+              {modePicker ? (
+                <>
+                  <div className={styles.menuHead}>{t("chat.modeSection")}</div>
+                  {COMPOSER_MODES.map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      role="menuitem"
+                      className={styles.menuItem}
+                      aria-current={modePicker.value === mode ? "true" : undefined}
+                      onClick={() => {
+                        modePicker.onChange(mode);
+                        setFieldMenu(null);
+                      }}
+                    >
+                      <span className={styles.modeDot} data-composer-mode={mode} aria-hidden />
+                      <span className={styles.menuModeLabel}>
+                        {t(COMPOSER_MODE_LABEL_KEY[mode])}
+                      </span>
+                      {modePicker.value === mode ? (
+                        <span className={styles.menuModeCheck} aria-hidden>
+                          ✓
+                        </span>
+                      ) : null}
+                    </button>
+                  ))}
+                  <div className={styles.menuDivider} aria-hidden />
+                </>
+              ) : null}
+              {/* The basic rows an empty press is looked at for — the very four
+                  the chat's field offers, with their glyphs and their keys,
+                  doing what the browser would do if its own menu were here. */}
+              {(
+                [
+                  {
+                    id: "paste",
+                    label: t("chat.paste"),
+                    icon: <IconPaste />,
+                    run: () => void pasteFromClipboard(),
+                  },
+                  {
+                    id: "selectAll",
+                    label: t("chat.selectAll"),
+                    icon: <IconSelectAll />,
+                    run: () => {
+                      const el = inputRef.current;
+                      if (!el) return;
+                      el.focus({ preventScroll: true });
+                      el.setSelectionRange(0, el.value.length);
+                      setCaret(el.value.length);
+                    },
+                  },
+                  {
+                    id: "undo",
+                    label: t("chat.undo"),
+                    icon: <IconUndo />,
+                    // The field's undo stack is the browser's: the row reaches
+                    // it the way the chat's does — its own history is not ours
+                    // to keep.
+                    run: () => stepFieldHistory("undo"),
+                  },
+                  {
+                    id: "redo",
+                    label: t("chat.redo"),
+                    icon: <IconRedo />,
+                    run: () => stepFieldHistory("redo"),
+                  },
+                ] as const
+              ).map((row) => (
+                <button
+                  key={row.id}
+                  type="button"
+                  role="menuitem"
+                  className={styles.menuItem}
+                  onClick={() => {
+                    setFieldMenu(null);
+                    row.run();
+                  }}
+                >
+                  {row.icon}
+                  <span className={styles.menuModeLabel}>{row.label}</span>
+                  {showEditShortcuts ? (
+                    <span className={styles.menuShortcut}>
+                      {composerEditShortcuts()[row.id]}
+                    </span>
+                  ) : null}
+                </button>
+              ))}
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 });
@@ -1300,6 +1554,25 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   /** Bumped on every close, so a reopened form starts empty again. */
   const [composerEpoch, setComposerEpoch] = useState(0);
   const [creating, setCreating] = useState(false);
+  /**
+   * The mode the task being written will be sent in, and the chip's menu.
+   * The mode belongs to the prompt, so it is picked where the prompt is written
+   * — in Todo's form — instead of being hunted for on a card that already runs.
+   */
+  const [newTaskMode, setNewTaskMode] = useState<ComposerMode>("agent");
+  const [newTaskModeMenu, setNewTaskModeMenu] = useState<{ x: number; bottom: number } | null>(
+    null,
+  );
+  useEffect(() => {
+    if (!newTaskModeMenu) return;
+    const onDown = (event: globalThis.MouseEvent) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest('[role="menu"]')) return;
+      setNewTaskModeMenu(null);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [newTaskModeMenu]);
   /** Creation form: send the description as the first message on create. */
   const createAutoStart = useBoardAutoStart("create");
   const [agentMenu, setAgentMenu] = useState<{ task: SessionDto; x: number; y: number } | null>(
@@ -1600,8 +1873,14 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
       const target = e.target as Node;
       if (composerBoxRef.current?.contains(target)) return;
       // A dialog (or a picker's list) the board opened on top owns the press:
-      // choosing there closes the form through its own handler.
-      if (target instanceof Element && target.closest('[role="dialog"], [role="listbox"]')) return;
+      // choosing there closes the form through its own handler. The form's own
+      // mode menu is one of them — a mode picked before the first word would
+      // otherwise take the empty form, and the pick, with it.
+      if (
+        target instanceof Element &&
+        target.closest('[role="dialog"], [role="listbox"], [role="menu"]')
+      )
+        return;
       if (composerDirtyRef.current) return;
       closeNewTask();
     };
@@ -1624,7 +1903,11 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
       if (promptBoxRef.current?.contains(target)) return;
       // The agent picker of the editor hangs its menu in a portal of its own:
       // a press inside it chooses, it must not drop the editor underneath.
-      if (target instanceof Element && target.closest('[role="dialog"], [role="listbox"]')) return;
+      if (
+        target instanceof Element &&
+        target.closest('[role="dialog"], [role="listbox"], [role="menu"]')
+      )
+        return;
       // A form that holds something is not dropped by a press outside it — the
       // same rule the new-task form keeps: Cancel or Escape is the way it goes.
       if (editTaskId && editDirtyRef.current) return;
@@ -1850,6 +2133,11 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
       });
       setCreating(false);
       if (!created) return; // keep the form so nothing the user typed is lost
+      // The mode the task was written in, before anything can send it: the
+      // folder queue may have picked the fresh card up already, and the start
+      // below reads the chat's mode, not this form's.
+      if (newTaskMode !== "agent") setComposerMode(created.id, newTaskMode);
+      setNewTaskMode("agent");
       // The task is born: the form's text has no form left to come back to.
       setComposerDraft(boardTaskDraftKey(boardId, cwd), "");
       closeNewTask();
@@ -1869,6 +2157,8 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
       createBoardTask,
       creating,
       defaultTaskProvider,
+      newTaskMode,
+      setComposerMode,
       taskAgentPicker,
       taskEffortPicker,
       taskModelPicker,
@@ -2602,7 +2892,13 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
           if (suppressCardClickRef.current) return;
           void openTask(task);
         }}
-        onContextMenu={(e) => openTaskMenu(e, task)}
+        onContextMenu={(e) => {
+          // Words the reader picked belong to the browser: its own menu copies
+          // them, and a card that took that press would offer nothing to do it.
+          const picked = window.getSelection();
+          if (picked && !picked.isCollapsed) return;
+          openTaskMenu(e, task);
+        }}
         onPointerDown={(e) => {
           // Every press on a card is a fresh gesture — the suppression belongs
           // to the pointerup that ended the drag, and nothing else.
@@ -2777,6 +3073,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
               }}
               submitLabel={t("common.save")}
               showAutoStart={false}
+              modePicker={{ value: mode, onChange: (next) => setComposerMode(task.id, next) }}
               // The mode the card sends in, in the field's own words: a chip
               // right of the paperclip, with the way back to agent.
               modeChip={
@@ -3212,6 +3509,65 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                               attachSource={attachDefaultSource}
                               draftKey={boardTaskDraftKey(boardId, group.cwd)}
                               submitLabel={t("common.create")}
+                              modePicker={{ value: newTaskMode, onChange: setNewTaskMode }}
+                              // The prompt's mode is picked while the prompt is
+                              // written: this form is where a task is formed.
+                              // The chat's field wears this pill only when a mode
+                              // is in force: agent is the absence of one, and a
+                              // row that says «Агент» reads like a harness pick
+                              // that is not there. The empty field's right click
+                              // is where the modes are chosen.
+                              modeChip={
+                                newTaskMode === "agent" ? undefined : (
+                                  <span
+                                    className={styles.modeChip}
+                                    data-composer-mode={newTaskMode}
+                                    title={t(COMPOSER_MODE_LABEL_KEY[newTaskMode])}
+                                  >
+                                    <button
+                                      type="button"
+                                      className={styles.modeChipLabel}
+                                      aria-haspopup="menu"
+                                      onClick={(e) => {
+                                        const rect = e.currentTarget.getBoundingClientRect();
+                                        setNewTaskModeMenu({
+                                          x: rect.left,
+                                          bottom: window.innerHeight - rect.top + 6,
+                                        });
+                                      }}
+                                    >
+                                      <span
+                                        className={styles.modeDot}
+                                        data-composer-mode={newTaskMode}
+                                        aria-hidden
+                                      />
+                                      {t(COMPOSER_MODE_LABEL_KEY[newTaskMode])}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className={styles.modeChipExit}
+                                      aria-label={t("chat.modeExit")}
+                                      title={t("chat.modeExit")}
+                                      onClick={() => setNewTaskMode("agent")}
+                                    >
+                                      <svg
+                                        width="9"
+                                        height="9"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        aria-hidden
+                                      >
+                                        <path
+                                          d="M6 6l12 12M18 6 6 18"
+                                          stroke="currentColor"
+                                          strokeWidth="2.8"
+                                          strokeLinecap="round"
+                                        />
+                                      </svg>
+                                    </button>
+                                  </span>
+                                )
+                              }
                               onCancel={() => {
                                 // Cancel is the way out of a half-written task:
                                 // the form goes, and so does its text.
@@ -3373,6 +3729,39 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
           document.body,
         )}
 
+            {newTaskModeMenu &&
+        createPortal(
+          <div
+            className={styles.menu}
+            style={{ left: newTaskModeMenu.x, bottom: newTaskModeMenu.bottom }}
+            role="menu"
+          >
+            <div className={styles.menuHead}>{t("chat.modeSection")}</div>
+            {COMPOSER_MODES.map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                role="menuitem"
+                className={styles.menuItem}
+                aria-current={newTaskMode === mode ? "true" : undefined}
+                onClick={() => {
+                  setNewTaskMode(mode);
+                  setNewTaskModeMenu(null);
+                }}
+              >
+                <span className={styles.modeDot} data-composer-mode={mode} aria-hidden />
+                <span className={styles.menuModeLabel}>{t(COMPOSER_MODE_LABEL_KEY[mode])}</span>
+                {newTaskMode === mode ? (
+                  <span className={styles.menuModeCheck} aria-hidden>
+                    ✓
+                  </span>
+                ) : null}
+              </button>
+            ))}
+          </div>,
+          document.body,
+        )}
+
       <ShareLinkTip tip={shareTip} />
 
       {taskMenu &&
@@ -3390,34 +3779,43 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
             {/* A task is a chat, and a chat sends its prompts in a mode: the
                 four rows the composer's right click offers stand here too, so
                 the mode is picked where the card is, not after opening it. */}
-            <div className={styles.menuHead}>{t("chat.modeSection")}</div>
-            {COMPOSER_MODES.map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                role="menuitem"
-                className={styles.menuItem}
-                aria-current={taskMode(taskMenu.task) === mode ? "true" : undefined}
-                onClick={() => {
-                  const id = taskMenu.task.id;
-                  setTaskMenu(null);
-                  setComposerMode(id, mode);
-                }}
-              >
-                <span
-                  className={styles.modeDot}
-                  data-composer-mode={mode}
-                  aria-hidden
-                />
-                <span className={styles.menuModeLabel}>{t(COMPOSER_MODE_LABEL_KEY[mode])}</span>
-                {taskMode(taskMenu.task) === mode ? (
-                  <span className={styles.menuModeCheck} aria-hidden>
-                    ✓
-                  </span>
-                ) : null}
-              </button>
-            ))}
-            <div className={styles.menuDivider} aria-hidden />
+            {/* The mode is formed with the prompt, and a prompt is formed in
+                Todo: a card that already runs, closed or waiting offers no
+                mode list — its mode is what it was written in. */}
+            {columnOf(taskMenu.task).id === todoColumnId ? (
+              <>
+                <div className={styles.menuHead}>{t("chat.modeSection")}</div>
+                {COMPOSER_MODES.map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    role="menuitem"
+                    className={styles.menuItem}
+                    aria-current={taskMode(taskMenu.task) === mode ? "true" : undefined}
+                    onClick={() => {
+                      const id = taskMenu.task.id;
+                      setTaskMenu(null);
+                      setComposerMode(id, mode);
+                    }}
+                  >
+                    <span
+                      className={styles.modeDot}
+                      data-composer-mode={mode}
+                      aria-hidden
+                    />
+                    <span className={styles.menuModeLabel}>
+                      {t(COMPOSER_MODE_LABEL_KEY[mode])}
+                    </span>
+                    {taskMode(taskMenu.task) === mode ? (
+                      <span className={styles.menuModeCheck} aria-hidden>
+                        ✓
+                      </span>
+                    ) : null}
+                  </button>
+                ))}
+                <div className={styles.menuDivider} aria-hidden />
+              </>
+            ) : null}
             {/* A task that has run has a dialogue worth glancing at, so the
                 card's menu opens with the peek; a card that never started has
                 none yet. */}

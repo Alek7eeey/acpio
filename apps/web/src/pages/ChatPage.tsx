@@ -164,6 +164,7 @@ import {
   type ComposerMode,
 } from "../lib/composerMode";
 import { shouldShowGitComposerUi } from "../lib/gitUi";
+import { composerEditShortcuts, isAppleUi } from "../lib/editShortcuts";
 // The mode palette, read by the pill, the switcher and the sent message alike.
 import "../lib/modeColors.css";
 import styles from "./ChatPage.module.css";
@@ -283,11 +284,6 @@ function selectionInsideMessage(messageId: string): boolean {
   const el = node instanceof Element ? node : node.parentElement;
   const safeId = messageId.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   return Boolean(el?.closest(`[data-msg-hotkey="${safeId}"]`));
-}
-
-function isAppleUi(): boolean {
-  if (typeof navigator === "undefined") return false;
-  return /Mac|iPhone|iPad|iPod/i.test(navigator.userAgent);
 }
 
 /** Shortcut labels shown in the message context menu (platform-aware). */
@@ -1387,16 +1383,6 @@ function IconRedo() {
       />
     </MsgIcon>
   );
-}
-
-/** Shortcut labels shown in the input's editing rows (platform-aware). */
-function composerEditShortcuts(apple = isAppleUi()) {
-  return {
-    paste: apple ? "\u2318V" : "Ctrl+V",
-    selectAll: apple ? "\u2318A" : "Ctrl+A",
-    undo: apple ? "\u2318Z" : "Ctrl+Z",
-    redo: apple ? "\u2318\u21e7Z" : "Ctrl+Shift+Z",
-  } as const;
 }
 
 function UserMessageActions({

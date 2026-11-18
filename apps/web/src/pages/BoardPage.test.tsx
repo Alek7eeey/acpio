@@ -71,6 +71,8 @@ const apiMock = vi.hoisted(() => {
     // The new-task form asks the picked agent for its `/` menu before the task
     // exists — the list itself comes from the test that needs one.
     agentCommands: vi.fn(async () => [] as Array<{ name: string; description: string }>),
+    // Starting a card from the board sends its description as the first turn.
+    prompt: vi.fn(async () => undefined),
   };
 });
 vi.mock("../lib/api", () => ({ api: apiMock }));
@@ -1489,6 +1491,101 @@ describe("BoardPage new task form", () => {
     );
   });
 
+  // The mode belongs to the prompt, so it is picked where the prompt is written:
+  // the task is formed in Todo, and the card that runs it carries the choice.
+  it("starts a task formed in Todo in the mode picked in its form", async () => {
+    renderBoard();
+    await screen.findByText("Fix the login bug");
+    const group = document.querySelector("[data-group]") as HTMLElement;
+    await userEvent.click(within(group).getByLabelText("New task"));
+
+    // Agent is the absence of a pill, exactly as in the chat's field: the mode
+    // is picked on the empty field's right click, and only then does a pill
+    // appear — with the cross that goes back to agent.
+    const field = within(group).getByPlaceholderText("Describe the task…");
+    expect(within(group).queryByText("Agent")).toBeNull();
+    fireEvent.contextMenu(field);
+    await userEvent.click(await screen.findByRole("menuitem", { name: /Plan/ }));
+    await waitFor(() =>
+      expect(within(group).getByRole("button", { name: /^Plan/ })).toBeTruthy(),
+    );
+
+    await userEvent.type(field, "Разбери импорт");
+    await userEvent.click(within(group).getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(apiMock.createSession).toHaveBeenCalled());
+
+    // The created task carries the mode, so the board's own start sends it.
+    expect(useAppStore.getState().composerModes["t2"]).toBe("plan");
+    const card = (await screen.findByText("Разбери импорт")).closest(
+      "[data-task-id]",
+    ) as HTMLElement;
+    expect(card.getAttribute("data-composer-mode")).toBe("plan");
+    await userEvent.click(within(card).getByLabelText("Start work"));
+    await waitFor(() =>
+      expect(apiMock.prompt).toHaveBeenCalledWith("t2", "/plan Разбери импорт", {}),
+    );
+  });
+
+  // A right click over words the reader picked is the browser's: copy, search,
+  // translate. A card that took that press offered nothing to do any of them.
+  it("leaves a right click on picked words to the browser", async () => {
+    renderBoard();
+    const text = await screen.findByText("Fix the login bug");
+    const range = document.createRange();
+    range.selectNodeContents(text);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+
+    fireEvent.contextMenu(text);
+    expect(screen.queryByRole("menu")).toBeNull();
+
+    // Nothing picked: the same press is the card's own menu.
+    window.getSelection()?.removeAllRanges();
+    fireEvent.contextMenu(text);
+    expect(await screen.findByRole("menu")).toBeTruthy();
+  });
+
+  it("offers the modes and the basic commands on an empty right click in the form", async () => {
+    renderBoard();
+    await screen.findByText("Fix the login bug");
+    const group = document.querySelector("[data-group]") as HTMLElement;
+    await userEvent.click(within(group).getByLabelText("New task"));
+    const box = within(group).getByPlaceholderText("Describe the task…") as HTMLTextAreaElement;
+
+    fireEvent.contextMenu(box);
+    const menu = await screen.findByRole("menu");
+    const rows = within(menu)
+      .getAllByRole("menuitem")
+      .map((row) => (row.textContent ?? "").replace("✓", ""));
+    // The chat's field menu in full: the modes, then the four editing rows.
+    for (const label of [
+      "Agent",
+      "Plan",
+      "Ask",
+      "Investigate",
+      "Paste",
+      "Select all",
+      "Undo",
+      "Redo",
+    ]) {
+      expect(rows.some((row) => row.startsWith(label))).toBe(true);
+    }
+    // Each of the four wears its own glyph, as in the chat's field.
+    expect(menu.querySelectorAll("svg")).toHaveLength(4);
+
+    // The mode picked there is the chip's: one state, two doors.
+    await userEvent.click(within(menu).getByRole("menuitem", { name: /Plan/ }));
+    await waitFor(() =>
+      expect(within(group).getByRole("button", { name: "Plan" })).toBeTruthy(),
+    );
+
+    // Words picked in the field go back to the browser's own menu.
+    await userEvent.type(box, "разбери");
+    box.setSelectionRange(0, 3);
+    fireEvent.contextMenu(box);
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
   // Regression: the form ignored every press outside it, so an accidental "+"
   // left it in the lane until Cancel was found — an empty form still goes away.
   it("dismisses an empty form on a press outside it", async () => {
@@ -2058,6 +2155,26 @@ describe("BoardPage card prompt mode", () => {
     expect(
       screen.getByRole("menuitem", { name: "Plan" }).getAttribute("aria-current"),
     ).toBe("true");
+  });
+
+  // The mode is formed with the prompt, and a prompt is formed in Todo: a card
+  // that has already run is handed to its agent, so its menu carries no mode
+  // list — the mode it wears is the one it was written in.
+  it("offers no mode list on a card that has already run", async () => {
+    useAppStore.setState({
+      boardSessions: [{ ...task, startedAt: "2026-09-20T11:00:00.000Z" }],
+    });
+    renderBoard();
+    const card = (await screen.findByText("Fix the login bug")).closest(
+      "[data-task-id]",
+    ) as HTMLElement;
+
+    fireEvent.contextMenu(card);
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).queryByRole("menuitem", { name: "Plan" })).toBeNull();
+    expect(within(menu).queryByText("Mode")).toBeNull();
+    // The card's own rows are untouched.
+    expect(within(menu).getByRole("menuitem", { name: /Delete/ })).toBeTruthy();
   });
 
   // The card's editor is the one place the mode is spelled out, in the pill the
