@@ -735,7 +735,7 @@ export const en = {
     chatActionReadAloud: "Read aloud",
     chatMetaChips: "Bar above the input",
     chatMetaChipsHint: "Which items to show above the input field. Drag chips in the preview to reorder.",
-    chatMetaChipFolder: "Folder",
+    chatMetaChipPromptMode: "Prompt mode",
     chatMetaChipBoard: "Board",
     chatMetaChipGit: "Git",
     chatMetaChipGitBranch: "Git branch",

@@ -16,7 +16,7 @@ import { isChatSearchEnabled } from "../lib/chatTreeSearch";
 import styles from "./ChatSettingsPreview.module.css";
 
 const CHIP_ORDER: ChatMetaChipId[] = [
-  "folder",
+  "promptMode",
   "board",
   "gitBranch",
   "gitChanges",
@@ -28,7 +28,7 @@ const CHIP_ORDER: ChatMetaChipId[] = [
 const ALL_META_CHIPS: ChatMetaChipId[] = [...CHIP_ORDER];
 
 const CHIP_LABEL_KEY: Record<ChatMetaChipId, string> = {
-  folder: "settings.chatMetaChipFolder",
+  promptMode: "settings.chatMetaChipPromptMode",
   board: "settings.chatMetaChipBoard",
   gitBranch: "settings.chatMetaChipGitBranch",
   gitChanges: "settings.chatMetaChipGitChanges",

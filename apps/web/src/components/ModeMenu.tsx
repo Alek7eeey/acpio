@@ -13,28 +13,161 @@ import {
   type ComposerMode,
 } from "../lib/composerMode";
 import { useT } from "../lib/i18n";
-import styles from "./ModeHoverMenu.module.css";
+import styles from "./ModeMenu.module.css";
 
-/**
- * The mode a prompt goes out in, offered by the paperclip the way the field's
- * right click offers it — the same four rows, one press away from the button a
- * hand already rests on.
- *
- * A hover alone is not enough to open a menu: the reader's pointer travels over
- * the paperclip on its way to the field, so the popup waits for a rest, and it
- * outlives a leave long enough for the pointer to cross onto it — the strip
- * below the popup is part of its own box, so the crossing never passes over
- * dead space. Both clicks of the button keep whatever they did before: this
- * only watches.
- */
-const OPEN_DELAY_MS = 350;
-const CLOSE_DELAY_MS = 260;
 /** The popup's width, and how much of it a narrow screen may take. */
 const MENU_WIDTH = 148;
 const VIEWPORT_GAP = 8;
-/** The strip under the menu that joins it to its button — see the styles. */
+/** The strip under the menu that joins it to its anchor — see the styles. */
 const BRIDGE_PX = 8;
 
+/**
+ * The mode a prompt goes out in: the field's own four rows, in a popup small
+ * enough to sit beside the control that offers them. Two doors reach it — a
+ * rest on the paperclip in the board's form ({@link ModeHoverMenu}) and a press
+ * on the composer's mode chip in a chat — and both hang from the element the
+ * reader touched.
+ *
+ * `anchor` is that element, and `null` closes the menu: the chip that opens it
+ * is the one that was pressed, which matters in the "…" row where the same chip
+ * is mounted twice.
+ */
+export function ModeMenu({
+  anchor,
+  mode,
+  onPick,
+  onClose,
+  menuRef,
+}: {
+  /** The element the popup hangs from; `null` while it is closed. */
+  anchor: HTMLElement | null;
+  /** The mode in force; the popup marks its row. */
+  mode: ComposerMode;
+  onPick: (mode: ComposerMode) => void;
+  onClose: () => void;
+  /** The hover door watches the popup's own pointer events (ModeHoverMenu). */
+  menuRef?: RefObject<HTMLDivElement | null>;
+}) {
+  const t = useT();
+  const ownRef = useRef<HTMLDivElement>(null);
+  const ref = menuRef ?? ownRef;
+  const [pos, setPos] = useState<{ anchor: HTMLElement; left: number; top: number } | null>(
+    null,
+  );
+
+  // A popup left open by a pointer that never came back would stand over the
+  // form forever: Escape, a press anywhere else, or a scroll drops it.
+  useEffect(() => {
+    if (!anchor) return;
+    const onDown = (event: MouseEvent) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest('[role="menu"]')) return;
+      if (target instanceof Node && anchor.contains(target)) return;
+      onClose();
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    // Captured: the chip's own row scrolls under a phone's finger, and the
+    // popup would stay behind where its anchor used to be.
+    window.addEventListener("scroll", onClose, { capture: true, passive: true });
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", onClose, { capture: true });
+    };
+  }, [anchor, onClose]);
+
+  // A closed popup forgets where it stood: the chip it hangs from may have
+  // moved (a scrolled row) by the time it opens again.
+  useEffect(() => {
+    if (!anchor) setPos(null);
+  }, [anchor]);
+
+  // Measured, then placed: the popup never leaves the window, however close to
+  // an edge its anchor stands — over it where there is room, under it
+  // otherwise, and the same for the left and right edges.
+  useLayoutEffect(() => {
+    if (!anchor) return;
+    const place = () => {
+      const menu = ref.current;
+      if (!menu) return;
+      const box = anchor.getBoundingClientRect();
+      const width = menu.offsetWidth || MENU_WIDTH;
+      const height = menu.offsetHeight - BRIDGE_PX;
+      const left = Math.max(
+        VIEWPORT_GAP,
+        Math.min(box.left, window.innerWidth - width - VIEWPORT_GAP),
+      );
+      const above = box.top - height - 2;
+      const top =
+        above >= VIEWPORT_GAP
+          ? above
+          : Math.min(window.innerHeight - height - VIEWPORT_GAP, box.bottom + 6);
+      setPos({ anchor, left, top });
+    };
+    place();
+    window.addEventListener("resize", place);
+    window.visualViewport?.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.visualViewport?.removeEventListener("resize", place);
+    };
+  }, [anchor, ref]);
+
+  if (!anchor) return null;
+  // The place is the anchor's own: a measurement taken for the chip the reader
+  // pressed is never reused for another one.
+  const placed = pos?.anchor === anchor ? pos : null;
+  return createPortal(
+    <div
+      ref={ref}
+      className={styles.wrap}
+      style={{
+        left: placed?.left ?? 0,
+        top: placed?.top ?? 0,
+        width: Math.min(MENU_WIDTH, window.innerWidth - VIEWPORT_GAP * 2),
+        visibility: placed ? "visible" : "hidden",
+      }}
+    >
+      <div className={styles.menu} role="menu" aria-label={t("chat.modeSection")}>
+        {COMPOSER_MODES.map((option) => (
+          <button
+            key={option}
+            type="button"
+            role="menuitem"
+            aria-current={option === mode ? "true" : undefined}
+            className={styles.row}
+            onClick={() => {
+              onPick(option);
+              onClose();
+            }}
+          >
+            <span className={styles.dot} data-composer-mode={option} aria-hidden />
+            <span className={styles.label}>{t(COMPOSER_MODE_LABEL_KEY[option])}</span>
+            {option === mode ? (
+              <span className={styles.check} aria-hidden>
+                ✓
+              </span>
+            ) : null}
+          </button>
+        ))}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+const OPEN_DELAY_MS = 350;
+const CLOSE_DELAY_MS = 260;
+
+/**
+ * The same menu, offered by the paperclip: a rest of 350 ms opens it, and a
+ * leave gives the pointer 260 ms to cross onto the popup. Both clicks of the
+ * button keep whatever they did before — this only watches.
+ */
 export function ModeHoverMenu({
   anchorRef,
   mode,
@@ -49,9 +182,7 @@ export function ModeHoverMenu({
   /** The button does nothing right now (a locked composer): nothing to offer. */
   disabled?: boolean;
 }) {
-  const t = useT();
   const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   /** The pointer is on the button or on the popup: neither closes the other. */
   const hoveringRef = useRef(false);
@@ -64,6 +195,7 @@ export function ModeHoverMenu({
     openRef.current = value;
     setOpen(value);
   }, []);
+  const close = useCallback(() => show(false), [show]);
   const clearTimer = useCallback((timer: RefObject<number | null>) => {
     if (timer.current != null) {
       window.clearTimeout(timer.current);
@@ -125,88 +257,13 @@ export function ModeHoverMenu({
     };
   }, [enter, leave, open]);
 
-  // A popup left open by a pointer that never came back would stand over the
-  // form forever: Escape, a press anywhere else, or a scroll drops it.
-  useEffect(() => {
-    if (!open) return;
-    const close = () => show(false);
-    const onDown = (event: MouseEvent) => {
-      const target = event.target;
-      if (target instanceof Element && target.closest('[role="menu"]')) return;
-      if (anchorRef.current?.contains(target as Node)) return;
-      close();
-    };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") close();
-    };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    window.addEventListener("scroll", close, { passive: true });
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-      window.removeEventListener("scroll", close);
-    };
-  }, [anchorRef, open, show]);
-
-  // Measured, then placed: the popup never leaves the window, however close to
-  // an edge its button stands — over the button where there is room, under it
-  // otherwise, and the same for the left and right edges.
-  useLayoutEffect(() => {
-    if (!open) return;
-    const anchor = anchorRef.current?.getBoundingClientRect();
-    const menu = menuRef.current;
-    if (!anchor || !menu) return;
-    const width = menu.offsetWidth || MENU_WIDTH;
-    const height = menu.offsetHeight - BRIDGE_PX;
-    const left = Math.max(
-      VIEWPORT_GAP,
-      Math.min(anchor.left, window.innerWidth - width - VIEWPORT_GAP),
-    );
-    const above = anchor.top - height - 2;
-    const top =
-      above >= VIEWPORT_GAP
-        ? above
-        : Math.min(window.innerHeight - height - VIEWPORT_GAP, anchor.bottom + 6);
-    setPos({ left, top });
-  }, [anchorRef, open]);
-
-  if (!open) return null;
-  return createPortal(
-    <div
-      ref={menuRef}
-      className={styles.wrap}
-      style={{
-        left: pos?.left ?? 0,
-        top: pos?.top ?? 0,
-        width: Math.min(MENU_WIDTH, window.innerWidth - VIEWPORT_GAP * 2),
-        visibility: pos ? "visible" : "hidden",
-      }}
-    >
-      <div className={styles.menu} role="menu" aria-label={t("chat.modeSection")}>
-        {COMPOSER_MODES.map((option) => (
-          <button
-            key={option}
-            type="button"
-            role="menuitem"
-            aria-current={option === mode ? "true" : undefined}
-            className={styles.row}
-            onClick={() => {
-              onPick(option);
-              show(false);
-            }}
-          >
-            <span className={styles.dot} data-composer-mode={option} aria-hidden />
-            <span className={styles.label}>{t(COMPOSER_MODE_LABEL_KEY[option])}</span>
-            {option === mode ? (
-              <span className={styles.check} aria-hidden>
-                ✓
-              </span>
-            ) : null}
-          </button>
-        ))}
-      </div>
-    </div>,
-    document.body,
+  return (
+    <ModeMenu
+      anchor={open ? anchorRef.current : null}
+      mode={mode}
+      onPick={onPick}
+      onClose={close}
+      menuRef={menuRef}
+    />
   );
 }

@@ -255,16 +255,16 @@ describe("health & settings", () => {
     const put = await app.inject({
       method: "PUT",
       url: "/api/settings",
-      payload: { chatGitBranchPosition: "above", chatChipOptions: { folder: { compress: false } } },
+      payload: { chatGitBranchPosition: "above", chatChipOptions: { gitBranch: { compress: false } } },
     });
     expect(put.statusCode).toBe(200);
     expect(put.json().chatGitBranchPosition).toBe("above");
-    expect(put.json().chatChipOptions.folder).toEqual({ compress: false, truncate: "middle" });
+    expect(put.json().chatChipOptions.gitBranch).toEqual({ compress: false });
 
     const get = await app.inject({ method: "GET", url: "/api/settings" });
     expect(get.statusCode).toBe(200);
     expect(get.json().chatGitBranchPosition).toBe("above");
-    expect(get.json().chatChipOptions.folder).toEqual({ compress: false, truncate: "middle" });
+    expect(get.json().chatChipOptions.gitBranch).toEqual({ compress: false });
   });
 
   // The pane's own look, side and shortcuts are settings, not code: a save has
@@ -356,7 +356,6 @@ describe("health & settings", () => {
     });
     expect(put.statusCode).toBe(200);
     expect(put.json().chatChipOptions).toEqual({
-      folder: { compress: true, truncate: "middle" },
       gitBranch: { compress: true },
       gitChanges: { compress: true, metrics: "none" },
       context: { format: "percent" },

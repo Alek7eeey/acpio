@@ -125,7 +125,6 @@ import { MarkdownContent, MarkdownImage } from "../components/MarkdownContent";
 import { ImageViewer, type ViewerPicture } from "../components/ImageViewer";
 import { ShareLinkTip, useShareLinkTip } from "../components/ShareLinkTip";
 import { SlashCommandMenu } from "../components/SlashCommandMenu";
-import { ModeHoverMenu } from "../components/ModeHoverMenu";
 import { chatLink } from "../lib/shareLink";
 import { notifyTurnComplete } from "../lib/notify";
 import { useFillPanelWhenChatTight } from "../lib/panelLayout";
@@ -5070,8 +5069,6 @@ function ChatThread() {
    *  browser's own menu. */
   const [composerMenu, setComposerMenu] = useState<{ x: number; y: number } | null>(null);
   const composerMenuRef = useRef<HTMLDivElement | null>(null);
-  /** The paperclip: the mode picker hangs from it on a rest (see ModeHoverMenu). */
-  const attachBtnRef = useRef<HTMLButtonElement | null>(null);
   const composerMenuStyle = useFixedMenuPlacement(composerMenu, composerMenuRef);
   // The editing rows carry their shortcuts only while the reader wants hints.
   const showHints = useShowHotkeyHints();
@@ -8486,6 +8483,8 @@ function ChatThread() {
             sessionMode={sessionMode}
             composerLocked={composerLocked}
             onModeChange={onModeChange}
+            promptMode={composerMode}
+            onPickPromptMode={chooseComposerMode}
             onOpenMcpDialog={() => setMcpDialogOpen(true)}
             modeLabel={modeLabel}
             planChip={{
@@ -8739,7 +8738,6 @@ function ChatThread() {
             <div className={styles.pillFooter}>
               {(settings.chatComposerButtons ?? []).includes("attach") && (
               <button
-                ref={attachBtnRef}
                 type="button"
                 className={styles.attachBtn}
                 aria-label={attachSourceLabels[attachDefaultSource]}
@@ -8764,18 +8762,10 @@ function ChatThread() {
                 </svg>
               </button>
               )}
-              {/* The mode picker: resting on the paperclip offers it, the way an
-                  empty press on the field does, and the clips and clicks of the
-                  button keep doing what they did. */}
-              <ModeHoverMenu
-                anchorRef={attachBtnRef}
-                mode={composerMode}
-                onPick={chooseComposerMode}
-                disabled={composerLocked || rewriting}
-              />
               {/* The chat's mode, right of the paperclip: a pill in the mode's
                   own colour, so the reader sees how the prompt will go out
-                  while typing. The mode is chosen by the right click; the pill
+                  while typing. The mode itself is picked in the row above (the
+                  prompt-mode chip) or by the field's right click; the pill
                   carries the one way out of it. */}
               {composerMode !== "agent" ? (
                 <span

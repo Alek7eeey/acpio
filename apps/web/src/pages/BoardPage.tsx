@@ -44,7 +44,7 @@ import { ShareLinkTip, useShareLinkTip } from "../components/ShareLinkTip";
 import { chatLink } from "../lib/shareLink";
 import { ServerFolderBrowseDialog } from "../components/ServerFolderBrowseDialog";
 import { SlashCommandMenu } from "../components/SlashCommandMenu";
-import { ModeHoverMenu } from "../components/ModeHoverMenu";
+import { ModeHoverMenu } from "../components/ModeMenu";
 import { api } from "../lib/api";
 import { COMPOSER_MODES, COMPOSER_MODE_LABEL_KEY, type ComposerMode } from "../lib/composerMode";
 import { composerEditShortcuts } from "../lib/editShortcuts";

@@ -24,6 +24,8 @@ import { useT } from "../lib/i18n";
 import { formatDuration } from "../lib/partTiming";
 import { showToast } from "../lib/toast";
 import { OptionPicker } from "./OptionPicker";
+import { ModeMenu } from "./ModeMenu";
+import { COMPOSER_MODE_LABEL_KEY, type ComposerMode } from "../lib/composerMode";
 import {
   ComposerGitChangesButton,
   GitChangesChipLoader,
@@ -32,7 +34,6 @@ import {
   type GitChangesAgentCommand,
 } from "./ComposerGitBar";
 import gitBarStyles from "./ComposerGitBar.module.css";
-import { MiddleTruncate } from "./MiddleTruncate";
 import styles from "../pages/ChatPage.module.css";
 
 const DESKTOP_MQ = "(min-width: 701px)";
@@ -47,7 +48,6 @@ const MENU_VIEWPORT_PAD = 12;
  * menu instead.
  */
 const CHIP_MIN_WIDTH: Partial<Record<MetaChipId, number>> = {
-  folder: 104,
   gitBranch: 76,
   gitChanges: 34,
 };
@@ -56,8 +56,6 @@ const CHIP_MIN_WIDTH: Partial<Record<MetaChipId, number>> = {
 function chipMinWidth(id: MetaChipId, options: ChatChipOptions): number {
   const wraps = (() => {
     switch (id) {
-      case "folder":
-        return options.folder.compress;
       case "gitBranch":
         return options.gitBranch.compress;
       case "gitChanges":
@@ -122,12 +120,6 @@ function useDesktopMetaLayout() {
   return desktop;
 }
 
-/** Last segment of a cwd — the only part that still reads on a phone-width chip. */
-function folderName(cwd: string): string {
-  const parts = cwd.replace(/[\\/]+$/, "").split(/[\\/]/);
-  return parts[parts.length - 1] || cwd;
-}
-
 type MetaChipId = ChatMetaChipId | "plan";
 
 type MetaChipItem = {
@@ -148,6 +140,8 @@ export function ComposerMetaChips({
   sessionMode,
   composerLocked,
   onModeChange,
+  promptMode,
+  onPickPromptMode,
   onOpenMcpDialog,
   modeLabel,
   planChip,
@@ -180,6 +174,9 @@ export function ComposerMetaChips({
   sessionMode: AgentMode;
   composerLocked: boolean;
   onModeChange: (value: string) => void;
+  /** The mode a prompt goes out in; its chip opens the four rows. */
+  promptMode: ComposerMode;
+  onPickPromptMode: (mode: ComposerMode) => void;
   onOpenMcpDialog: () => void;
   modeLabel: (value: string, fallback?: string) => string;
   planChip?: {
@@ -226,6 +223,13 @@ export function ComposerMetaChips({
   const [measureRetry, setMeasureRetry] = useState(0);
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [overflowMenuReady, setOverflowMenuReady] = useState(false);
+  /**
+   * The mode chip the reader pressed, or null: the popup hangs from that very
+   * element, because the same chip is mounted twice while it sits in the "…"
+   * row, and only the pressed copy knows where it stands.
+   */
+  const [modeMenuAnchor, setModeMenuAnchor] = useState<HTMLElement | null>(null);
+  const closeModeMenu = useCallback(() => setModeMenuAnchor(null), []);
   const contextChipRef = useRef<HTMLButtonElement | null>(null);
   const contextPanelRef = useRef<HTMLDivElement | null>(null);
   const [contextOpen, setContextOpen] = useState(false);
@@ -296,42 +300,26 @@ export function ComposerMetaChips({
     for (const id of settings.chatMetaChips) {
       let node: ReactNode | null = null;
 
-      if (id === "folder" && activeSession?.cwd?.trim()) {
-        const cwd = activeSession.cwd.trim();
+      if (id === "promptMode") {
+        const label = t(COMPOSER_MODE_LABEL_KEY[promptMode]);
+        const title = t("chat.modeChipTitle", { name: label });
         node = (
           <button
             type="button"
-            className={styles.sessionCwd}
-            title={cwd}
-            aria-label={`${t("common.folder")}: ${cwd}`}
-            onClick={() => showToast(cwd)}
+            className={`${styles.metaChip} ${styles.metaChipMode} ${styles.metaChipForceLabel}`}
+            data-composer-mode={promptMode}
+            aria-haspopup="menu"
+            aria-expanded={modeMenuAnchor != null}
+            aria-label={title}
+            title={title}
+            disabled={composerLocked}
+            onClick={(event) => {
+              const el = event.currentTarget;
+              setModeMenuAnchor((current) => (current ? null : el));
+            }}
           >
-            <span className={styles.sessionCwdIcon} aria-hidden>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                <path
-                  d="M3.5 8.5V7a2 2 0 0 1 2-2h4.2l1.6 1.7H18.5a2 2 0 0 1 2 2v1"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-                <path
-                  d="M3.5 10.2h17v6.3a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-6.3Z"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </span>
-            {isDesktop ? (
-              <MiddleTruncate
-                text={cwd}
-                className={styles.sessionCwdText}
-                mode={chipOptions.folder.truncate}
-              />
-            ) : (
-              <span className={styles.sessionCwdText}>{folderName(cwd)}</span>
-            )}
+            <span className={styles.modeDot} aria-hidden />
+            <span className={styles.metaChipLabel}>{label}</span>
           </button>
         );
       } else if (id === "board") {
@@ -544,7 +532,9 @@ export function ComposerMetaChips({
     activeSession,
     boards,
     chatMcp,
-    chipOptions.folder.truncate,
+    composerLocked,
+    modeMenuAnchor,
+    promptMode,
     chipOptions.gitChanges.compress,
     chipOptions.gitChanges.metrics,
     compressing,
@@ -572,8 +562,9 @@ export function ComposerMetaChips({
   const gitLayoutSig = gitChip
     ? `${gitChip.awaiting ? "a" : ""}${gitChip.loading ? "l" : ""}:${gitChip.status?.branch ?? ""}:${gitChip.status?.files.length ?? 0}:${gitChip.status?.additions ?? 0}:${gitChip.status?.deletions ?? 0}:${gitChip.status?.dirty ? 1 : 0}`
     : "";
-  const chipOptionsSig = `${chipOptions.folder.compress ? 1 : 0}${chipOptions.folder.truncate === "end" ? "e" : "m"}|${chipOptions.gitBranch.compress ? 1 : 0}|${chipOptions.gitChanges.compress ? 1 : 0}:${chipOptions.gitChanges.metrics}`;
-  const chipLayoutKey = `${chipKey}|${gitLayoutSig}|${contextDisplay?.label ?? ""}|${settings.consoleChipStyle}|${chipOptionsSig}`;
+  const chipOptionsSig = `${chipOptions.gitBranch.compress ? 1 : 0}|${chipOptions.gitChanges.compress ? 1 : 0}:${chipOptions.gitChanges.metrics}`;
+  // The mode chip's width is its mode's own word: a switch re-measures the row.
+  const chipLayoutKey = `${chipKey}|${promptMode}|${gitLayoutSig}|${contextDisplay?.label ?? ""}|${settings.consoleChipStyle}|${chipOptionsSig}`;
   const measuring = isDesktop && visibleCount === null && !renderSkeleton;
   const overflowCount =
     isDesktop && visibleCount !== null ? Math.max(0, chipItems.length - visibleCount) : 0;
@@ -831,6 +822,13 @@ export function ComposerMetaChips({
   useEffect(() => {
     if (!chatBgJobs.length) setBgOpen(false);
   }, [chatBgJobs.length]);
+
+  // The mode menu belongs to a chat's row: another chat, another chip, and a
+  // locked composer has nothing to offer.
+  useEffect(() => {
+    if (composerLocked) setModeMenuAnchor(null);
+  }, [composerLocked]);
+  useEffect(() => setModeMenuAnchor(null), [activeSession?.id]);
 
   const openOverflowMenu = (anchor: HTMLElement) => {
     menuAnchorRef.current = anchor.getBoundingClientRect();
@@ -1173,6 +1171,13 @@ export function ComposerMetaChips({
             document.body,
           )
         : null}
+
+      <ModeMenu
+        anchor={modeMenuAnchor}
+        mode={promptMode}
+        onPick={onPickPromptMode}
+        onClose={closeModeMenu}
+      />
 
       {overflowOpen && overflowItems.length > 0
         ? createPortal(

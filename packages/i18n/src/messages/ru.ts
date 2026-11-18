@@ -753,7 +753,7 @@ export const ru = {
     chatActionReadAloud: "Прочесть вслух",
     chatMetaChips: "Панель над полем ввода",
     chatMetaChipsHint: "Какие элементы показывать над полем ввода. Перетаскивайте чипы в превью, чтобы изменить порядок.",
-    chatMetaChipFolder: "Папка",
+    chatMetaChipPromptMode: "Режим промпта",
     chatMetaChipBoard: "Доска",
     chatMetaChipGit: "Git",
     chatMetaChipGitBranch: "Ветка Git",

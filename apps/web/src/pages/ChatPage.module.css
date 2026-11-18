@@ -2667,53 +2667,6 @@ button.userSlashCmd:focus-visible {
   overflow: visible;
 }
 
-.sessionCwd {
-  margin: 0;
-  padding: 7px 13px;
-  min-height: 30px;
-  min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  width: fit-content;
-  max-width: 100%;
-  box-sizing: border-box;
-  overflow: hidden;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--border) 58%, transparent);
-  background: color-mix(in srgb, var(--surface) 46%, transparent);
-  backdrop-filter: blur(16px) saturate(1.08);
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, white 8%, transparent),
-    0 1px 3px color-mix(in srgb, var(--bg) 10%, transparent);
-  color: var(--text-secondary);
-}
-
-.sessionCwdIcon {
-  flex: 0 0 auto;
-  display: grid;
-  place-items: center;
-  color: color-mix(in srgb, var(--accent) 78%, var(--text));
-  opacity: 1;
-}
-
-.sessionCwdIcon svg {
-  display: block;
-}
-
-.sessionCwdText {
-  display: block;
-  min-width: 0;
-  flex: 1 1 auto;
-  overflow: hidden;
-  white-space: nowrap;
-  font-size: 0.72rem;
-  line-height: 1.3;
-  opacity: 0.9;
-  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
-  letter-spacing: -0.01em;
-}
-
 .composerMetaShell {
   position: relative;
   min-width: 0;
@@ -2817,12 +2770,6 @@ button.userSlashCmd:focus-visible {
   animation: thoughtIconTwinkle 0.55s ease;
 }
 
-.sessionCwd:hover {
-  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
-  color: var(--text);
-  background: color-mix(in srgb, var(--surface) 62%, transparent);
-}
-
 .metaChipActive {
   border-color: color-mix(in srgb, var(--accent) 52%, var(--border));
   color: var(--text);
@@ -2874,6 +2821,21 @@ button.userSlashCmd:focus-visible {
   line-height: 1;
 }
 
+/* The prompt-mode chip: the mode's own word and dot, in the palette the menu,
+   the pill beside the paperclip and the sent message already wear — so the
+   colour of the chip says which mode the prompt will go out in. */
+.metaChipMode {
+  color: var(--mode-tint, var(--text));
+  border-color: color-mix(in srgb, var(--mode-tint, var(--border)) 34%, var(--border));
+}
+
+.metaChipMode:hover,
+.metaChipMode[aria-expanded="true"] {
+  border-color: color-mix(in srgb, var(--mode-tint, var(--accent)) 58%, var(--border));
+  color: var(--text);
+  background: color-mix(in srgb, var(--mode-tint, var(--accent)) 14%, var(--surface) 46%);
+}
+
 .metaChipPending {
   position: relative;
 }
@@ -2883,8 +2845,7 @@ button.userSlashCmd:focus-visible {
   align-items: center;
 }
 
-:global([data-theme="light"]) .metaChip,
-:global([data-theme="light"]) .sessionCwd {
+:global([data-theme="light"]) .metaChip {
   background: color-mix(in srgb, var(--surface) 58%, transparent);
   box-shadow:
     inset 0 1px 0 color-mix(in srgb, white 72%, transparent),
@@ -2909,12 +2870,6 @@ button.userSlashCmd:focus-visible {
 
   .metaChip:not(.metaChipForceLabel) .metaChipLabel {
     display: none;
-  }
-
-  .sessionCwd {
-    max-width: none;
-    width: auto;
-    padding: 7px 10px;
   }
 }
 
@@ -3031,17 +2986,11 @@ button.userSlashCmd:focus-visible {
   min-width: 0;
 }
 
-.composerMetaOverflowItem .metaChip,
-.composerMetaOverflowItem .sessionCwd {
+.composerMetaOverflowItem .metaChip {
   width: 100%;
   max-width: none;
   justify-content: flex-start;
   box-sizing: border-box;
-}
-
-.composerMetaOverflowItem .sessionCwdText {
-  white-space: normal;
-  word-break: break-all;
 }
 
 /* The context chip's click panel: the token bill of this chat, glass card of
@@ -4053,20 +4002,6 @@ button.userSlashCmd:focus-visible {
     /* Short conversations: pin content to the bottom so the last message
        sits next to the composer instead of leaving a gap below it. */
     margin-top: auto;
-  }
-
-  .sessionCwd {
-    max-width: min(52vw, 220px);
-    flex: 0 0 auto;
-  }
-
-  .sessionCwdText {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    word-break: normal;
-    line-height: 1.3;
-    font-size: 0.72rem;
   }
 
   .composerMetaShell::before,

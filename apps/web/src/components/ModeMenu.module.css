@@ -1,10 +1,12 @@
-/* The picker the paperclip offers on a rest: the field's mode rows, small
-   enough to sit beside the button it hangs from. */
+/* The mode picker, opened by a rest on the board's paperclip and by a press on
+   the chat's mode chip: the field's mode rows, small enough to sit beside the
+   control it hangs from. */
 .wrap {
   position: fixed;
   z-index: 120;
   /* A hand crossing from the button to the popup takes its first pixels here:
-     the strip is the popup's own box, so nothing closes under the pointer. */
+     the strip is the popup's own box, so nothing closes under the pointer. It
+     is also what keeps the popup off the chip that opened it. */
   padding-bottom: 8px;
 }
 

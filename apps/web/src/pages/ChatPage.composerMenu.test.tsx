@@ -206,24 +206,35 @@ describe("right click in the composer", () => {
     ).toBe("true");
   }, 20_000);
 
-  // The paperclip offers the same four rows on a rest: the button a hand already
-  // sits on is the nearest place to switch the mode, and its presses keep doing
-  // what they did (the attach tests hold that half).
-  it("offers the modes on a rest over the paperclip", async () => {
+  // The four rows live in the chip above the field: a press on it is the whole
+  // gesture, on a mouse and on a phone alike, and the paperclip keeps both of
+  // its own doors (the attach tests hold that half).
+  it("offers the modes from the chip above the field", async () => {
+    useAppStore.setState({
+      settings: { ...DEFAULT_SETTINGS, locale: "ru", chatMetaChips: ["promptMode"] },
+    } as never);
     const { container } = renderChat();
-    const paperclip = screen.getByRole("button", { name: /^Прикрепить/ });
+    const chip = screen.getByRole("button", { name: "Режим промпта: Агент" });
+    expect(chip.getAttribute("aria-expanded")).toBe("false");
 
-    fireEvent.pointerEnter(paperclip);
-    const menu = await screen.findByRole("menu");
+    await userEvent.click(chip);
+    expect(chip.getAttribute("aria-expanded")).toBe("true");
     expect(
       screen.getAllByRole("menuitem").map((item) => item.textContent?.replace("✓", "")),
     ).toEqual(["Агент", "План", "Вопрос", "Разбор"]);
 
-    // The pointer crosses the gap onto the popup: it must still be standing.
-    fireEvent.pointerLeave(paperclip);
-    fireEvent.pointerEnter(menu);
     await userEvent.click(screen.getByRole("menuitem", { name: "План" }));
+    // The chip is where the mode is read now, and the popup went with the pick.
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(screen.getByRole("button", { name: "Режим промпта: План" })).toBeTruthy();
     expect(container.querySelector('[data-composer-mode="plan"]')).toBeTruthy();
+    expect(localStorage.getItem("acpio.composerModes.v1")).toContain('"s1":"plan"');
+
+    // A rest over the paperclip offers nothing in a chat: the mode is the
+    // chip's, and the button keeps its own two doors.
+    fireEvent.pointerEnter(screen.getByRole("button", { name: /^Прикрепить/ }));
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    expect(screen.queryByRole("menu")).toBeNull();
   }, 20_000);
 
   // On a phone the paperclip keeps its two doors: a tap picks a file from the
@@ -244,16 +255,6 @@ describe("right click in the composer", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   }, 20_000);
 
-  // A finger is not a hover: on a phone the same press opens the file picker,
-  // and the mode is reached by the field's long press instead.
-  it("opens nothing on a touch over the paperclip", async () => {
-    renderChat();
-    const paperclip = screen.getByRole("button", { name: /^Прикрепить/ });
-    fireEvent.pointerEnter(paperclip, { pointerType: "touch" });
-    await new Promise((resolve) => setTimeout(resolve, 450));
-    expect(screen.queryByRole("menu")).toBeNull();
-  }, 20_000);
-
   it("switches the chat's mode without touching the draft", async () => {
     const { container } = renderChat();
     const input = container.querySelector("textarea")!;
@@ -267,11 +268,9 @@ describe("right click in the composer", () => {
     expect(sendPrompt).not.toHaveBeenCalled();
     expect(input.value).toBe("переписать парсер");
     expect(document.querySelector('[role="menu"]')).toBeNull();
-    // No second control appears for it: the mode marks the model chip in the
-    // field (a dot in the mode's colour) and outlives the page — the mode is
-    // the chat's until it is switched back.
+    // The mode outlives the page — it is the chat's until it is switched back —
+    // and the field wears it in the mode's colour beside the paperclip.
     expect(container.querySelector('[data-composer-mode="plan"]')).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "План" })).toBeNull();
     expect(localStorage.getItem("acpio.composerModes.v1")).toContain('"s1":"plan"');
 
     // The right click still opens the switcher, with the check on the mode in
