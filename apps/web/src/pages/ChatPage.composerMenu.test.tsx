@@ -5,7 +5,7 @@
 // the way out, the bubble hides it again and shows the mode over the message.
 // The basic editing rows (paste, select all, undo, redo) come after them.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { DEFAULT_SETTINGS, type MessageDto, type SessionDetailDto } from "@acpio/shared";
@@ -296,6 +296,41 @@ describe("right click in the composer", () => {
     expect(
       screen.getByRole("menuitem", { name: "План" }).getAttribute("aria-current"),
     ).toBe("true");
+  }, 20_000);
+
+  // The pencil in the queue hands a request's text down to the field. The mode
+  // it was written in comes with it: the chip over the words is that request's,
+  // and a pick rewrites the request — the chat's own mode never moves.
+  it("rewrites a queued request in its own mode", async () => {
+    useAppStore.setState({
+      settings: { ...DEFAULT_SETTINGS, locale: "ru", chatMetaChips: ["promptMode"] },
+      promptQueue: [
+        {
+          id: "q1",
+          text: "переписать парсер",
+          sessionId: "s1",
+          mode: "plan",
+          editMessageId: null,
+        },
+      ],
+    } as never);
+    const { container } = renderChat();
+
+    const row = container.querySelector('[data-queue-id="q1"]') as HTMLElement;
+    await userEvent.click(within(row).getAllByRole("button")[1]!);
+
+    // The field is the request's editor, and it wears the request's mode: the
+    // chat itself is still in agent, and nothing was written to it.
+    expect(container.querySelector("textarea")!.value).toBe("переписать парсер");
+    expect(container.querySelector('[class*="modePill"]')?.textContent).toContain("План");
+    expect(localStorage.getItem("acpio.composerModes.v1")).toBeNull();
+
+    // The chip writes the pick back to the request, and the row follows it.
+    await userEvent.click(screen.getByRole("button", { name: "Режим промпта: План" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Вопрос" }));
+    expect(useAppStore.getState().promptQueue[0]!.mode).toBe("ask");
+    expect(localStorage.getItem("acpio.composerModes.v1")).toBeNull();
+    expect(row.querySelector('[data-composer-mode="ask"]')?.textContent).toBe("Вопрос");
   }, 20_000);
 
   it("leaves the mode from the cross in the field's pill", async () => {

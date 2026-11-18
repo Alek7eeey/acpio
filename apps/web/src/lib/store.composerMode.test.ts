@@ -144,6 +144,32 @@ describe("the chat's mode on the way out", () => {
     });
   });
 
+  // The chip over a queued request's text writes *that request's* mode (see
+  // `setQueuedPromptMode`): the queue is what the pick was about, and the mode
+  // the reader last saw on the chip is the one that reaches the wire.
+  it("hands a queued prompt over in the mode picked for it", async () => {
+    settle("plan");
+    useAppStore.setState({
+      activeSession: detail("running"),
+      sessionDetails: { [SID]: detail("running") },
+      sessions: [{ ...row(), status: "running" }],
+      inflight: 1,
+      inflightBySession: { [SID]: 1 },
+    });
+    await useAppStore.getState().sendPrompt("после шага", { sessionId: SID });
+    const item = useAppStore.getState().promptQueue[0]!;
+
+    useAppStore.getState().setQueuedPromptMode(item.id, "ask");
+    expect(useAppStore.getState().promptQueue[0]!.mode).toBe("ask");
+    // The chat's own mode is untouched: the next prompt still goes out as plan.
+    expect(useAppStore.getState().composerModes[SID]).toBe("plan");
+
+    await useAppStore.getState().deliverQueuedPrompt(item.id, "afterStep");
+    expect(apiMock.prompt).toHaveBeenCalledWith(SID, "/ask после шага", {
+      delivery: "afterStep",
+    });
+  });
+
   it("leaves a queued agent-mode prompt alone when the field switches to a mode", async () => {
     settle("agent");
     useAppStore.setState({

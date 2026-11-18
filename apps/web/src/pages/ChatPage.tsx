@@ -5795,10 +5795,21 @@ function ChatThread() {
   // The chat's mode: the skill its prompts run as. It belongs to the chat, not
   // to the message, so it stays until the reader switches it back.
   const sessionId = bind?.sessionId ?? null;
-  const composerMode = useAppStore(
+  // The field's mode is the *next* prompt's. While the composer holds a queued
+  // request (`editingQueueId`) the mode it wears is that request's: it goes out
+  // in the mode it was written in, whichever way it leaves the queue — so the
+  // chip over the words must say that mode, not the chat's.
+  const sessionComposerMode = useAppStore(
     (s) => (sessionId ? s.composerModes[sessionId] : undefined) ?? "agent",
   );
+  const queuedEditMode = useAppStore((s) =>
+    editingQueueId
+      ? (s.promptQueue.find((q) => q.id === editingQueueId)?.mode ?? "agent")
+      : null,
+  );
+  const composerMode = queuedEditMode ?? sessionComposerMode;
   const setComposerMode = useAppStore((s) => s.setComposerMode);
+  const setQueuedPromptMode = useAppStore((s) => s.setQueuedPromptMode);
   const slashCtx = useMemo(() => getSlashContext(text, cursorPos), [text, cursorPos]);
   const filteredSlashCommands = useMemo(() => {
     if (!slashCtx) return [];
@@ -6396,11 +6407,14 @@ function ChatThread() {
     }
   };
 
-  /** Switch the chat's mode. The menu row is the whole interaction: the skill
-   *  it stands for is added on the way out, never typed into the field. */
+  /** Switch the mode. The menu row is the whole interaction: the skill it stands
+   *  for is added on the way out, never typed into the field. While the field
+   *  holds a queued request, the pick is that request's — writing it to the chat
+   *  instead would leave the row going out in a mode the chip no longer shows. */
   const chooseComposerMode = (mode: ComposerMode) => {
     setComposerMenu(null);
-    if (sessionId) setComposerMode(sessionId, mode);
+    if (editingQueueId) setQueuedPromptMode(editingQueueId, mode);
+    else if (sessionId) setComposerMode(sessionId, mode);
   };
 
   /**

@@ -82,6 +82,28 @@ describe("PromptQueueBar", () => {
     expect(screen.getByText(/3/)).toBeTruthy();
   });
 
+  // The mode travels with the request, not with the field: the chip above the
+  // composer talks about the *next* prompt, so a row has to say its own.
+  it("names the mode each request was written in", () => {
+    useAppStore.setState({
+      promptQueue: [
+        { id: "q1", text: "First queued", sessionId: "s1", mode: "plan" },
+        { id: "q2", text: "Second queued", sessionId: "s1" },
+      ],
+    });
+    renderBar();
+    const rowOf = (text: string) =>
+      screen.getByText(text).closest("[data-queue-id]") as HTMLElement;
+    expect(rowOf("First queued").querySelector('[data-composer-mode="plan"]')?.textContent).toBe(
+      "Plan",
+    );
+    // Agent is the default and says so in its quiet grey rather than nothing at
+    // all: a row with no mode at all would read as a request of unknown kind.
+    expect(rowOf("Second queued").querySelector('[data-composer-mode="agent"]')?.textContent).toBe(
+      "Agent",
+    );
+  });
+
   it("deletes a request from the queue", async () => {
     renderBar();
     const row = screen.getByText("Second queued").closest("[data-queue-id]") as HTMLElement;

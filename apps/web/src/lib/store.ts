@@ -535,6 +535,12 @@ type AppState = {
   removeQueuedPrompt: (id: string) => void;
   updateQueuedPrompt: (id: string, text: string) => void;
   /**
+   * Rewrite the mode a queued request goes out in — the composer's chip while
+   * its text sits in the field. The chat's own mode stays where it is: the
+   * request is what the pick is about.
+   */
+  setQueuedPromptMode: (id: string, mode: ComposerMode) => void;
+  /**
    * Move a queued request to another slot. The queue is the delivery order —
    * the drain hands over whatever stands first — so this is what a drag in the
    * queue bar writes.
@@ -3590,6 +3596,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   updateQueuedPrompt(id, text) {
     set({
       promptQueue: get().promptQueue.map((item) => (item.id === id ? { ...item, text } : item)),
+    });
+  },
+
+  setQueuedPromptMode(id, mode) {
+    set({
+      promptQueue: get().promptQueue.map((item) => (item.id === id ? { ...item, mode } : item)),
     });
   },
 

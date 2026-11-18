@@ -1,10 +1,11 @@
 import { useState } from "react";
+import { COMPOSER_MODE_LABEL_KEY, type ComposerMode } from "../lib/composerMode";
 import { useT } from "../lib/i18n";
 import { useAppStore } from "../lib/store";
 import styles from "./PromptQueueBar.module.css";
 
 /** What the bar needs of a queued request — the store's item is wider. */
-type QueueItem = { id: string; text: string };
+type QueueItem = { id: string; text: string; mode?: ComposerMode };
 
 /** How far a press must travel before the grip starts a reorder. */
 const DRAG_THRESHOLD_PX = 6;
@@ -19,6 +20,10 @@ const DRAG_THRESHOLD_PX = 6;
  * The pencil does not open a field of its own: the row hands its text to the
  * chat's composer (`onEdit`), which is where the reader writes — one editor for
  * the message they are sending and the request they are still shaping.
+ *
+ * Each row says the mode it was written in: the mode travels with the request,
+ * not with the field, so a row queued as a plan goes out as one whatever the
+ * chip above the composer reads by then.
  */
 export function PromptQueueBar({
   items,
@@ -143,6 +148,16 @@ export function PromptQueueBar({
                   <circle cx="7.5" cy="11.5" r="1.2" />
                 </svg>
               </button>
+              <span
+                className={styles.queueItemMode}
+                data-composer-mode={item.mode ?? "agent"}
+                title={t("chat.modeChipTitle", {
+                  name: t(COMPOSER_MODE_LABEL_KEY[item.mode ?? "agent"]),
+                })}
+              >
+                <span className={styles.queueItemModeDot} aria-hidden />
+                {t(COMPOSER_MODE_LABEL_KEY[item.mode ?? "agent"])}
+              </span>
               <span
                 className={styles.queueItemText}
                 title={item.text}

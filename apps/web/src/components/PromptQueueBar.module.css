@@ -93,6 +93,34 @@
   white-space: nowrap;
 }
 
+/* The mode the request was written in — the same tint the composer's chip and
+   the message it becomes wear, so a queued plan or question is told apart from
+   the rows around it without reading the words. */
+.queueItemMode {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 7px;
+  border: 1px solid color-mix(in srgb, var(--mode-tint) 32%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--mode-tint) 11%, transparent);
+  color: var(--mode-tint);
+  font-size: 0.68rem;
+  font-weight: 650;
+  line-height: 1.5;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.queueItemModeDot {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--mode-tint);
+  flex: 0 0 auto;
+}
+
 /* The row whose text the composer is holding: the queue says which request the
    reader is shaping down there. */
 .queueItemEditing {
