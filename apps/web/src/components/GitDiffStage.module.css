@@ -210,8 +210,8 @@
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
-  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
-  font-size: 0.72rem;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
   font-weight: 600;
 }
 
@@ -627,8 +627,8 @@
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
-  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
-  font-size: 0.74rem;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
 }
 
 .sheetStats {

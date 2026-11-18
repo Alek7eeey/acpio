@@ -153,7 +153,8 @@
 .outgoingSubject {
   flex: 1 1 auto;
   min-width: 0;
-  font-size: 0.74rem;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
   font-weight: 550;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -170,7 +171,8 @@
 .outgoingFileName {
   flex: 1 1 auto;
   min-width: 0;
-  font-size: 0.72rem;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -279,8 +281,9 @@
 .filePath {
   flex: 1;
   min-width: 0;
-  font-size: 0.72rem;
-  line-height: 1.35;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  line-height: 1.45;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -302,16 +305,18 @@
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--text-secondary);
-  font-size: 0.76rem;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
 }
 
 .fileName {
   flex: 0 1 auto;
   min-width: min-content;
-  font-size: 0.82rem;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
   font-weight: 650;
   color: var(--text);
-  line-height: 1.3;
+  line-height: 1.35;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -359,7 +364,8 @@
 .folderName {
   flex: 1;
   min-width: 0;
-  font-size: 0.72rem;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
   font-weight: 650;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -488,7 +494,8 @@
 }
 
 .summaryInput {
-  font-size: 0.78rem;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
   font-weight: 600;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
 }
@@ -503,8 +510,9 @@
   flex: 1 1 auto;
   min-height: 0;
   resize: none;
-  font-size: 0.74rem;
-  line-height: 1.4;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  line-height: 1.5;
 }
 
 .summaryInput:focus,

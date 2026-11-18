@@ -135,8 +135,8 @@
   flex: 1 1 auto;
   padding: 3px 2px;
   color: var(--text);
-  font-size: 0.74rem;
-  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -240,7 +240,8 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
 }
 
 /* Right-click menu of a branch row: placed from the pointer, clamped on screen. */

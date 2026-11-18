@@ -28,6 +28,9 @@
   --mobile-dock-h: calc(28px + env(safe-area-inset-bottom, 0px));
   --toolbar-btn-size: 36px;
   --font: "Figtree", sans-serif;
+  /* The built-in editor's code font (see lib/editorTheme.ts). The git panel's
+     text uses it too: a path or a commit reads there as it does in the editor. */
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --motion: 180ms ease;
   color-scheme: light;
 }
