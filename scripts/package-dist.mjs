@@ -27,6 +27,23 @@ const pkgName = `acpio-${version}-win-x64`;
 const pkgDir = path.join(distRoot, pkgName);
 const isWindows = process.platform === "win32";
 
+/**
+ * Workspace packages the compiled server imports at runtime — the list the
+ * layout, the `file:` dependencies and the materialized copies all read. It
+ * named neither `adapter-builtin` (imported by `routes.ts` and the adapter
+ * registry on the first line the server runs) nor `adapter-opencode`, so the
+ * zip unpacked into an app that died at import.
+ */
+const WORKSPACE_PACKAGES = [
+  "shared",
+  "i18n",
+  "adapter-omp",
+  "adapter-cursor",
+  "adapter-opencode",
+  "adapter-builtin",
+  "plugin-ponytail",
+];
+
 /** Copy a dir recursively, skipping node_modules and dist inside sources. */
 function copyDir(src, dest) {
   fs.mkdirSync(dest, { recursive: true });
@@ -45,6 +62,12 @@ function copyPackage(name) {
   const dest = path.join(pkgDir, "packages", name);
   copyDir(path.join(src, "dist"), path.join(dest, "dist"));
   copyDir(src, dest); // package.json (dist/ is skipped by copyDir)
+  // npm installs the devDependencies of a `file:` dependency as well: the
+  // registry copy of `typescript`, and `@acpio/plugin-api`, which is not on the
+  // registry at all — the install died on 404 before the first byte shipped.
+  const manifest = JSON.parse(fs.readFileSync(path.join(dest, "package.json"), "utf8"));
+  delete manifest.devDependencies;
+  fs.writeFileSync(path.join(dest, "package.json"), JSON.stringify(manifest, null, 2) + "\n");
 }
 
 console.log(`Packaging ${pkgName}…`);
@@ -61,8 +84,20 @@ copyDir(
   path.join(pkgDir, "apps", "server", "dist"),
 );
 copyDir(path.join(repoRoot, "apps", "web", "dist"), path.join(pkgDir, "apps", "web", "dist"));
-for (const name of ["shared", "i18n", "adapter-omp", "adapter-cursor", "plugin-ponytail"]) {
+for (const name of WORKSPACE_PACKAGES) {
   copyPackage(name);
+}
+
+// The folders a package reads beside its bundle (`adapter-builtin`'s
+// `BUILTIN_SKILLS_DIR`, the ponytail plugin's `skillPath`): `copyPackage`
+// carries them, and a build that lost one would ship an app with no built-in
+// skills and nothing to say about it.
+for (const [name, folder] of [
+  ["adapter-builtin", "skills"],
+  ["plugin-ponytail", "skills"],
+]) {
+  const at = path.join(pkgDir, "packages", name, folder);
+  if (!fs.existsSync(at)) throw new Error(`${name}/${folder} did not travel into ${pkgDir}`);
 }
 
 // 3. Prod manifest: registry deps from the server + workspace file: deps.
@@ -74,7 +109,7 @@ for (const [name, ver] of Object.entries(serverPkg.dependencies)) {
   if (name.startsWith("@acpio/")) continue;
   dependencies[name] = ver;
 }
-for (const name of ["shared", "i18n", "adapter-omp", "adapter-cursor", "plugin-ponytail"]) {
+for (const name of WORKSPACE_PACKAGES) {
   dependencies[`@acpio/${name}`] = `file:packages/${name}`;
 }
 fs.writeFileSync(
@@ -101,7 +136,7 @@ execSync("npm install --omit=dev --no-audit --no-fund --loglevel=error", {
 });
 // npm installs `file:` workspace deps as symlinks — zip/expand would turn
 // them into empty dirs. Materialize them as real copies.
-for (const name of ["shared", "i18n", "adapter-omp", "adapter-cursor", "plugin-ponytail"]) {
+for (const name of WORKSPACE_PACKAGES) {
   const target = path.join(pkgDir, "node_modules", "@acpio", name);
   fs.rmSync(target, { recursive: true, force: true });
   fs.cpSync(path.join(pkgDir, "packages", name), target, { recursive: true });
