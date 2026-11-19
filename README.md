@@ -1,3 +1,5 @@
+<div align="center">
+
 # Acpio
 
 Self-hosted web harness for agents speaking [ACP](https://agentclientprotocol.com/):
@@ -6,7 +8,22 @@ server, so a chat works without installing a CLI at all. Kanban **boards** drive
 across projects, each task being a chat of its own.
 Chat with streamed reasoning, tool calls and subagents, settings, META-style light/dark theme.
 
+**English** · [Русский](readme-ru.md)
+
+[Quick start](#install-from-npm) · [Screenshots](#screenshots) · [Harnesses](#harnesses) · [Docs](docs/usage.md) · [Adapters](docs/adapters.md) · [Releases](https://github.com/Alek7eeey/acpio/releases)
+
+[![npm](https://img.shields.io/npm/v/acpio?logo=npm&labelColor=555&color=cb3837)](https://www.npmjs.com/package/acpio)
+[![release](https://img.shields.io/github/v/release/Alek7eeey/acpio?label=release&labelColor=555&color=blue)](https://github.com/Alek7eeey/acpio/releases/latest)
+[![CI](https://github.com/Alek7eeey/acpio/actions/workflows/ci.yml/badge.svg)](https://github.com/Alek7eeey/acpio/actions/workflows/ci.yml)
+[![license](https://img.shields.io/badge/license-MIT-blue?labelColor=555)](LICENSE)
+
+[![downloads/month](https://img.shields.io/npm/dm/acpio?logo=npm&label=downloads%2Fmonth&labelColor=555&color=brightgreen)](https://www.npmjs.com/package/acpio)
+[![stars](https://img.shields.io/github/stars/Alek7eeey/acpio?logo=github&label=stars&labelColor=555&color=blue)](https://github.com/Alek7eeey/acpio/stargazers)
+[![node](https://img.shields.io/badge/node-%E2%89%A520-blue?labelColor=555)](package.json)
+
 **Current version:** 0.1.48
+
+</div>
 
 > **AI disclaimer:** This project was developed in substantial part with the help of AI coding assistants. Review, test, and verify changes before relying on it in production.
 

@@ -1,3 +1,5 @@
+<div align="center">
+
 # Acpio
 
 Самостоятельно размещаемый веб-харнесс для агентов по [ACP](https://agentclientprotocol.com/):
@@ -6,7 +8,22 @@
 нескольким проектам сразу, и каждая задача — это отдельный чат.
 Чат со стримом рассуждений, tool calls и субагентов, настройки, светлая/тёмная тема в стиле META.
 
+[English](README.md) · **Русский**
+
+[Быстрый старт](#установка-из-npm) · [Скриншоты](#скриншоты) · [Харнессы](#харнессы) · [Документация](docs/usage-ru.md) · [Адаптеры](docs/adapters-ru.md) · [Релизы](https://github.com/Alek7eeey/acpio/releases)
+
+[![npm](https://img.shields.io/npm/v/acpio?logo=npm&labelColor=555&color=cb3837)](https://www.npmjs.com/package/acpio)
+[![release](https://img.shields.io/github/v/release/Alek7eeey/acpio?label=release&labelColor=555&color=blue)](https://github.com/Alek7eeey/acpio/releases/latest)
+[![CI](https://github.com/Alek7eeey/acpio/actions/workflows/ci.yml/badge.svg)](https://github.com/Alek7eeey/acpio/actions/workflows/ci.yml)
+[![license](https://img.shields.io/badge/license-MIT-blue?labelColor=555)](LICENSE)
+
+[![downloads/month](https://img.shields.io/npm/dm/acpio?logo=npm&label=downloads%2Fmonth&labelColor=555&color=brightgreen)](https://www.npmjs.com/package/acpio)
+[![stars](https://img.shields.io/github/stars/Alek7eeey/acpio?logo=github&label=stars&labelColor=555&color=blue)](https://github.com/Alek7eeey/acpio/stargazers)
+[![node](https://img.shields.io/badge/node-%E2%89%A520-blue?labelColor=555)](package.json)
+
 **Актуальная версия:** 0.1.48
+
+</div>
 
 > **Disclaimer (AI):** This project was developed in substantial part with the help of AI coding assistants. Review, test, and verify changes before relying on it in production.
 
