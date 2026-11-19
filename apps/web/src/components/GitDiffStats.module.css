@@ -2,7 +2,7 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: inherit;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;

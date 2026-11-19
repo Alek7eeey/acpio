@@ -54,9 +54,11 @@
 .plain,
 .diff,
 .diffSplit {
-  font-family: Consolas, "Cascadia Mono", ui-monospace, "Segoe UI Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
-  line-height: 1.5;
+  /* The editor's own leading (lib/editorTheme.ts): a patch reads line for line
+     the way the same code reads in the editor. */
+  line-height: 1.55;
   white-space: pre-wrap;
   word-break: break-word;
   padding: 0 12px 12px;

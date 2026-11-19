@@ -154,7 +154,7 @@
   flex: 1 1 auto;
   min-width: 0;
   font-family: var(--font-mono);
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
   font-weight: 550;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -164,7 +164,7 @@
 .outgoingHash {
   flex: 0 0 auto;
   font-size: 0.64rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   color: var(--text-secondary);
 }
 
@@ -172,7 +172,7 @@
   flex: 1 1 auto;
   min-width: 0;
   font-family: var(--font-mono);
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -282,7 +282,7 @@
   flex: 1;
   min-width: 0;
   font-family: var(--font-mono);
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
   line-height: 1.45;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -306,14 +306,14 @@
   text-overflow: ellipsis;
   color: var(--text-secondary);
   font-family: var(--font-mono);
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
 }
 
 .fileName {
   flex: 0 1 auto;
   min-width: min-content;
   font-family: var(--font-mono);
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
   font-weight: 650;
   color: var(--text);
   line-height: 1.35;
@@ -365,7 +365,7 @@
   flex: 1;
   min-width: 0;
   font-family: var(--font-mono);
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
   font-weight: 650;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -495,7 +495,7 @@
 
 .summaryInput {
   font-family: var(--font-mono);
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
   font-weight: 600;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
 }
@@ -511,7 +511,7 @@
   min-height: 0;
   resize: none;
   font-family: var(--font-mono);
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
   line-height: 1.5;
 }
 

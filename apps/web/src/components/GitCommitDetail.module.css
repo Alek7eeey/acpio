@@ -95,7 +95,7 @@
 }
 
 .hashValue {
-  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+  font-family: var(--font-mono);
   font-weight: 650;
   color: var(--text);
 }
@@ -120,7 +120,7 @@
 .subject {
   margin: 0 0 6px;
   font-family: var(--font-mono);
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
   font-weight: 650;
   line-height: 1.5;
   word-break: break-word;
@@ -129,7 +129,7 @@
 .body {
   margin: 0 0 10px;
   font-family: var(--font-mono);
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
   line-height: 1.55;
   color: var(--text-secondary);
   white-space: pre-wrap;
@@ -185,7 +185,7 @@
   background: transparent;
   padding: 0;
   font: inherit;
-  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.68rem;
   font-weight: 650;
   color: color-mix(in srgb, var(--accent) 82%, var(--text));
@@ -315,7 +315,7 @@
   min-width: 0;
   flex: 1;
   font-family: var(--font-mono);
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
   font-weight: 400;
   line-height: 1.45;
   overflow: hidden;

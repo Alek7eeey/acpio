@@ -595,6 +595,9 @@
   flex: none;
   padding: 0 8px 0 6px;
   font: inherit;
+  /* The code font of the pane beside it: a path reads here as it does in the
+     editor, and as it does in the chat's git panel. */
+  font-family: var(--font-mono);
   font-size: 13px;
   line-height: 22px;
   text-align: left;

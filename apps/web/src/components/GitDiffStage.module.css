@@ -200,7 +200,7 @@
   border-radius: 5px;
   background: var(--bg-tertiary);
   color: var(--text-secondary);
-  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.62rem;
   font-weight: 700;
 }
@@ -211,7 +211,7 @@
   overflow: hidden;
   white-space: nowrap;
   font-family: var(--font-mono);
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
   font-weight: 600;
 }
 
@@ -219,7 +219,7 @@
   display: inline-flex;
   flex-shrink: 0;
   gap: 6px;
-  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.68rem;
 }
 
@@ -432,7 +432,7 @@
   overflow: hidden;
   white-space: nowrap;
   text-align: left;
-  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.72rem;
 }
 
@@ -617,7 +617,7 @@
   border-radius: 5px;
   background: var(--bg-tertiary);
   color: var(--text-secondary);
-  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.64rem;
   font-weight: 700;
 }
@@ -628,14 +628,14 @@
   overflow: hidden;
   white-space: nowrap;
   font-family: var(--font-mono);
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
 }
 
 .sheetStats {
   display: inline-flex;
   flex-shrink: 0;
   gap: 6px;
-  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.68rem;
 }
 
