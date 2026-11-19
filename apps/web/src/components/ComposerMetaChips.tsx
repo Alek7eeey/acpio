@@ -351,10 +351,14 @@ export function ComposerMetaChips({
       } else if (id === "promptMode") {
         const label = t(COMPOSER_MODE_LABEL_KEY[promptMode]);
         const title = t("chat.modeChipTitle", { name: label });
+        // In the row this chip is its dot alone — the field's own pill right
+        // under it already spells the mode out. The word stays in the tree for
+        // the "…" menu, which is outside the row and needs it: there the chip
+        // is the row's mode with no pill in sight.
         node = (
           <button
             type="button"
-            className={`${styles.metaChip} ${styles.metaChipMode} ${styles.metaChipForceLabel}`}
+            className={`${styles.metaChip} ${styles.metaChipMode}`}
             data-composer-mode={promptMode}
             aria-haspopup="menu"
             aria-expanded={modeMenuAnchor != null}
@@ -612,8 +616,9 @@ export function ComposerMetaChips({
     ? `${gitChip.awaiting ? "a" : ""}${gitChip.loading ? "l" : ""}:${gitChip.status?.branch ?? ""}:${gitChip.status?.files.length ?? 0}:${gitChip.status?.additions ?? 0}:${gitChip.status?.deletions ?? 0}:${gitChip.status?.dirty ? 1 : 0}`
     : "";
   const chipOptionsSig = `${chipOptions.folder.compress ? 1 : 0}${chipOptions.folder.truncate === "end" ? "e" : "m"}|${chipOptions.gitBranch.compress ? 1 : 0}|${chipOptions.gitChanges.compress ? 1 : 0}:${chipOptions.gitChanges.metrics}`;
-  // The mode chip's width is its mode's own word: a switch re-measures the row.
-  const chipLayoutKey = `${chipKey}|${promptMode}|${gitLayoutSig}|${contextDisplay?.label ?? ""}|${settings.consoleChipStyle}|${chipOptionsSig}`;
+  // What a chip's width is made of: a switch re-measures the row. The mode chip
+  // is a bare dot, so its mode is not one of them.
+  const chipLayoutKey = `${chipKey}|${gitLayoutSig}|${contextDisplay?.label ?? ""}|${settings.consoleChipStyle}|${chipOptionsSig}`;
   const measuring = isDesktop && visibleCount === null && !renderSkeleton;
   const overflowCount =
     isDesktop && visibleCount !== null ? Math.max(0, chipItems.length - visibleCount) : 0;

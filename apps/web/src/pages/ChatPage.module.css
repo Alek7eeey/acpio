@@ -2874,12 +2874,28 @@ button.userSlashCmd:focus-visible {
   line-height: 1;
 }
 
-/* The prompt-mode chip: the mode's own word and dot, in the palette the menu,
-   the pill beside the paperclip and the sent message already wear — so the
-   colour of the chip says which mode the prompt will go out in. */
+/* The prompt-mode chip: the mode's own dot, in the palette the menu, the pill
+   beside the paperclip and the sent message already wear — so the colour of the
+   chip says which mode the prompt will go out in. In the row above the field the
+   word is not here: the field's pill carries it under the reader's eyes, and the
+   chip is as wide as its dot and the ring around it make it. */
 .metaChipMode {
   color: var(--mode-tint, var(--text));
   border-color: color-mix(in srgb, var(--mode-tint, var(--border)) 34%, var(--border));
+}
+
+.composerMetaStart .metaChipMode {
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  gap: 0;
+}
+
+/* The word is not dropped from the chip, only from the row: the "…" menu mounts
+   the same chip outside it, where a bare dot would name no mode at all. */
+.composerMetaStart .metaChipMode .metaChipLabel {
+  display: none;
 }
 
 .metaChipMode:hover,
