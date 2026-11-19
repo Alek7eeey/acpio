@@ -34,6 +34,7 @@ import {
   type GitChangesAgentCommand,
 } from "./ComposerGitBar";
 import gitBarStyles from "./ComposerGitBar.module.css";
+import { MiddleTruncate } from "./MiddleTruncate";
 import styles from "../pages/ChatPage.module.css";
 
 const DESKTOP_MQ = "(min-width: 701px)";
@@ -48,6 +49,7 @@ const MENU_VIEWPORT_PAD = 12;
  * menu instead.
  */
 const CHIP_MIN_WIDTH: Partial<Record<MetaChipId, number>> = {
+  folder: 104,
   gitBranch: 76,
   gitChanges: 34,
 };
@@ -56,6 +58,8 @@ const CHIP_MIN_WIDTH: Partial<Record<MetaChipId, number>> = {
 function chipMinWidth(id: MetaChipId, options: ChatChipOptions): number {
   const wraps = (() => {
     switch (id) {
+      case "folder":
+        return options.folder.compress;
       case "gitBranch":
         return options.gitBranch.compress;
       case "gitChanges":
@@ -118,6 +122,12 @@ function useDesktopMetaLayout() {
     return () => mq.removeEventListener("change", sync);
   }, []);
   return desktop;
+}
+
+/** Last segment of a cwd — the only part that still reads on a phone-width chip. */
+function folderName(cwd: string): string {
+  const parts = cwd.replace(/[\\/]+$/, "").split(/[\\/]/);
+  return parts[parts.length - 1] || cwd;
 }
 
 type MetaChipId = ChatMetaChipId | "plan";
@@ -300,7 +310,45 @@ export function ComposerMetaChips({
     for (const id of settings.chatMetaChips) {
       let node: ReactNode | null = null;
 
-      if (id === "promptMode") {
+      if (id === "folder" && activeSession?.cwd?.trim()) {
+        const cwd = activeSession.cwd.trim();
+        node = (
+          <button
+            type="button"
+            className={styles.sessionCwd}
+            title={cwd}
+            aria-label={`${t("common.folder")}: ${cwd}`}
+            onClick={() => showToast(cwd)}
+          >
+            <span className={styles.sessionCwdIcon} aria-hidden>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                <path
+                  d="M3.5 8.5V7a2 2 0 0 1 2-2h4.2l1.6 1.7H18.5a2 2 0 0 1 2 2v1"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M3.5 10.2h17v6.3a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-6.3Z"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </span>
+            {isDesktop ? (
+              <MiddleTruncate
+                text={cwd}
+                className={styles.sessionCwdText}
+                mode={chipOptions.folder.truncate}
+              />
+            ) : (
+              <span className={styles.sessionCwdText}>{folderName(cwd)}</span>
+            )}
+          </button>
+        );
+      } else if (id === "promptMode") {
         const label = t(COMPOSER_MODE_LABEL_KEY[promptMode]);
         const title = t("chat.modeChipTitle", { name: label });
         node = (
@@ -535,6 +583,7 @@ export function ComposerMetaChips({
     composerLocked,
     modeMenuAnchor,
     promptMode,
+    chipOptions.folder.truncate,
     chipOptions.gitChanges.compress,
     chipOptions.gitChanges.metrics,
     compressing,
@@ -562,7 +611,7 @@ export function ComposerMetaChips({
   const gitLayoutSig = gitChip
     ? `${gitChip.awaiting ? "a" : ""}${gitChip.loading ? "l" : ""}:${gitChip.status?.branch ?? ""}:${gitChip.status?.files.length ?? 0}:${gitChip.status?.additions ?? 0}:${gitChip.status?.deletions ?? 0}:${gitChip.status?.dirty ? 1 : 0}`
     : "";
-  const chipOptionsSig = `${chipOptions.gitBranch.compress ? 1 : 0}|${chipOptions.gitChanges.compress ? 1 : 0}:${chipOptions.gitChanges.metrics}`;
+  const chipOptionsSig = `${chipOptions.folder.compress ? 1 : 0}${chipOptions.folder.truncate === "end" ? "e" : "m"}|${chipOptions.gitBranch.compress ? 1 : 0}|${chipOptions.gitChanges.compress ? 1 : 0}:${chipOptions.gitChanges.metrics}`;
   // The mode chip's width is its mode's own word: a switch re-measures the row.
   const chipLayoutKey = `${chipKey}|${promptMode}|${gitLayoutSig}|${contextDisplay?.label ?? ""}|${settings.consoleChipStyle}|${chipOptionsSig}`;
   const measuring = isDesktop && visibleCount === null && !renderSkeleton;

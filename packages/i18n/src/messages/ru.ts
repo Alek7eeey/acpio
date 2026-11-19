@@ -754,6 +754,7 @@ export const ru = {
     chatMetaChips: "Панель над полем ввода",
     chatMetaChipsHint: "Какие элементы показывать над полем ввода. Перетаскивайте чипы в превью, чтобы изменить порядок.",
     chatMetaChipPromptMode: "Режим промпта",
+    chatMetaChipFolder: "Папка",
     chatMetaChipBoard: "Доска",
     chatMetaChipGit: "Git",
     chatMetaChipGitBranch: "Ветка Git",

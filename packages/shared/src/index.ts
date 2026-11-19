@@ -1121,6 +1121,7 @@ export type ChatActionId =
 /** Chips shown in the composer bar above the input. */
 export type ChatMetaChipId =
   | "promptMode"
+  | "folder"
   | "board"
   | "gitBranch"
   | "gitChanges"
@@ -1137,6 +1138,9 @@ export type ChatToolbarStyle = "classic" | "minimal";
  *  a quiet slim row, or nothing (the group's "+" still adds). */
 export type BoardAddCardStyle = "card" | "compact" | "hidden";
 
+/** Folder chip: how an over-long path shortens once the chip is compressed. */
+export type ChatCwdTruncate = "middle" | "end";
+
 /** Changes chip: what the chip shows next to its icon. */
 export type ChatChangesMetrics = "none" | "lines" | "files" | "linesAndFiles";
 
@@ -1150,6 +1154,12 @@ export type ChatContextFormat = "usage" | "percent";
  * one that moves into the "…" menu.
  */
 export interface ChatChipOptions {
+  folder: {
+    /** Shrink the path instead of dropping the chip into the "…" menu. */
+    compress: boolean;
+    /** "middle" keeps the head and tail of the path, "end" only the tail. */
+    truncate: ChatCwdTruncate;
+  };
   gitBranch: { compress: boolean };
   gitChanges: {
     compress: boolean;
@@ -1160,6 +1170,7 @@ export interface ChatChipOptions {
 }
 
 export const DEFAULT_CHAT_CHIP_OPTIONS: ChatChipOptions = {
+  folder: { compress: true, truncate: "middle" },
   gitBranch: { compress: true },
   gitChanges: { compress: true, metrics: "linesAndFiles" },
   context: { format: "usage" },
@@ -2773,6 +2784,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   chatActions: ["copy", "edit", "like", "dislike", "share", "regenerate", "readAloud"],
   chatMetaChips: [
     "promptMode",
+    "folder",
     "board",
     "gitBranch",
     "gitChanges",

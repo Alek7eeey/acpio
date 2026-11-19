@@ -418,6 +418,7 @@ export function settingsSearchIndex(
       t("settings.chatTitleMaxLen"),
       t("settings.chatToolbarStyle"),
       t("settings.chatGitBranchPosition"),
+      t("settings.chatChipFolder"),
       t("settings.chatChipBranch"),
       t("settings.chatChipChanges"),
       t("settings.chatChipChangesMetrics"),

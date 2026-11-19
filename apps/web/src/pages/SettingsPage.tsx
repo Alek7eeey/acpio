@@ -219,6 +219,7 @@ type CustomAgentTest = {
 /** Canonical display order for composer chips. */
 const CHAT_CHIP_ORDER: ChatMetaChipId[] = [
   "promptMode",
+  "folder",
   "board",
   "gitBranch",
   "gitChanges",
@@ -354,6 +355,7 @@ function ChatInteractiveConfigRows({
           {(
             [
               ["promptMode", t("settings.chatMetaChipPromptMode")],
+              ["folder", t("settings.chatMetaChipFolder")],
               ["board", t("settings.chatMetaChipBoard")],
               ["gitBranch", t("settings.chatMetaChipGitBranch")],
               ["gitChanges", t("settings.chatMetaChipGitChanges")],
@@ -400,6 +402,41 @@ function ChatInteractiveConfigRows({
                   patch("chatGitBranchPosition", id);
                   void saveSettings({ chatGitBranchPosition: id });
                 }}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      </SettingRow>
+
+      <SettingRow label={t("settings.chatChipFolder")} hint={t("settings.chatChipFolderHint")}>
+        <Toggle
+          checked={chipOptions.folder.compress}
+          onChange={(v) => patchChipOptions({ folder: { compress: v } })}
+          label={t("settings.chatChipFolder")}
+        />
+      </SettingRow>
+
+      <SettingRow
+        label={t("settings.chatChipFolderTruncate")}
+        hint={t("settings.chatChipFolderTruncateHint")}
+      >
+        <div className={styles.actionChips}>
+          {(
+            [
+              ["middle", t("settings.chatChipFolderTruncateMiddle")],
+              ["end", t("settings.chatChipFolderTruncateEnd")],
+            ] as const
+          ).map(([id, label]) => {
+            const on = chipOptions.folder.truncate === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                className={`${styles.actionChip}${on ? ` ${styles.actionChipOn}` : ""}`}
+                aria-pressed={on}
+                onClick={() => patchChipOptions({ folder: { truncate: id } })}
               >
                 {label}
               </button>

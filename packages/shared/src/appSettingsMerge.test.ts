@@ -45,6 +45,7 @@ describe("normalizeChatMetaChips", () => {
     const chips = ["thoughts", "mcp", "context", "console"];
     expect(normalizeChatMetaChips(chips, 2)).toEqual([
       "promptMode",
+      "folder",
       "board",
       "gitBranch",
       "gitChanges",
@@ -59,6 +60,7 @@ describe("normalizeChatMetaChips", () => {
     const chips = ["thoughts", "mcp", "context"];
     expect(normalizeChatMetaChips(chips, 1)).toEqual([
       "promptMode",
+      "folder",
       "board",
       "gitBranch",
       "gitChanges",
@@ -73,6 +75,7 @@ describe("normalizeChatMetaChips", () => {
     const chips = ["gitBranch", "gitChanges", "thoughts", "mcp", "context", "console"];
     expect(normalizeChatMetaChips(chips, 5)).toEqual([
       "promptMode",
+      "folder",
       "board",
       "gitBranch",
       "gitChanges",
@@ -87,6 +90,7 @@ describe("normalizeChatMetaChips", () => {
     const chips = ["console"];
     expect(normalizeChatMetaChips(chips, 1)).toEqual([
       "promptMode",
+      "folder",
       "board",
       "gitBranch",
       "gitChanges",
@@ -95,16 +99,17 @@ describe("normalizeChatMetaChips", () => {
     ]);
   });
 
-  // A chip that is gone from the composer is gone from saved lists too: the id
-  // is no longer known, so the list gives it up whatever its schema.
-  it("drops the retired folder and thoughts chips", () => {
+  // The "Размышления" chip is gone from the composer: the id is no longer
+  // known, so any list saved with it gives it up, whatever its schema.
+  it("drops the retired thoughts chip", () => {
     expect(normalizeChatMetaChips(["folder", "thoughts", "console"], 8)).toEqual([
       "promptMode",
+      "folder",
       "console",
     ]);
     expect(
       normalizeChatMetaChips(["folder", "thoughts", "console"], SETTINGS_SCHEMA_VERSION),
-    ).toEqual(["console"]);
+    ).toEqual(["folder", "console"]);
   });
 
   it("falls back to the shipped row", () => {
@@ -119,12 +124,14 @@ describe("normalizeChatMetaChips", () => {
   it("appends the background-task chip to settings saved before it", () => {
     expect(normalizeChatMetaChips(["mcp", "console"], 6)).toEqual([
       "promptMode",
+      "folder",
       "mcp",
       "console",
       "bgJobs",
     ]);
     expect(normalizeChatMetaChips(["bgJobs", "mcp"], 6)).toEqual([
       "promptMode",
+      "folder",
       "bgJobs",
       "mcp",
     ]);
@@ -136,10 +143,31 @@ describe("normalizeChatMetaChips", () => {
   it("puts the prompt-mode chip first in settings saved before it", () => {
     expect(normalizeChatMetaChips(["mcp", "console"], 9)).toEqual([
       "promptMode",
+      "folder",
       "mcp",
       "console",
     ]);
-    expect(normalizeChatMetaChips(["promptMode", "mcp"], 9)).toEqual(["promptMode", "mcp"]);
+    expect(normalizeChatMetaChips(["promptMode", "mcp"], 9)).toEqual([
+      "promptMode",
+      "folder",
+      "mcp",
+    ]);
+  });
+
+  // The folder chip is back: a list saved while it was gone takes it right
+  // after the prompt-mode chip, where the default keeps it.
+  it("returns the folder chip to settings saved before it", () => {
+    expect(normalizeChatMetaChips(["promptMode", "board", "mcp"], 10)).toEqual([
+      "promptMode",
+      "folder",
+      "board",
+      "mcp",
+    ]);
+    expect(normalizeChatMetaChips(["board", "mcp"], 10)).toEqual([
+      "folder",
+      "board",
+      "mcp",
+    ]);
   });
 });
 
@@ -246,6 +274,7 @@ describe("mergeClientAppSettings", () => {
   it("defaults chip options and heals partial objects", () => {
     const defaults = mergeClientAppSettings({}).chatChipOptions;
     expect(defaults).toEqual({
+      folder: { compress: true, truncate: "middle" },
       gitBranch: { compress: true },
       gitChanges: { compress: true, metrics: "linesAndFiles" },
       context: { format: "usage" },
@@ -257,6 +286,7 @@ describe("mergeClientAppSettings", () => {
         chatChipOptions: { gitBranch: { compress: false } },
       }).chatChipOptions,
     ).toEqual({
+      folder: { compress: true, truncate: "middle" },
       gitBranch: { compress: false },
       gitChanges: { compress: true, metrics: "linesAndFiles" },
       context: { format: "usage" },
@@ -266,6 +296,7 @@ describe("mergeClientAppSettings", () => {
         chatChipOptions: { gitChanges: { metrics: "weird" }, context: { format: "percent" } },
       }).chatChipOptions,
     ).toEqual({
+      folder: { compress: true, truncate: "middle" },
       gitBranch: { compress: true },
       gitChanges: { compress: true, metrics: "linesAndFiles" },
       context: { format: "percent" },

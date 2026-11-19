@@ -411,6 +411,10 @@ const settingsSchema = z.object({
   chatGitBranchPosition: z.enum(["below", "above"]).optional(),
   chatChipOptions: z
     .object({
+      folder: z
+        .object({ compress: z.boolean(), truncate: z.enum(["middle", "end"]) })
+        .partial()
+        .optional(),
       gitBranch: z.object({ compress: z.boolean() }).partial().optional(),
       gitChanges: z
         .object({

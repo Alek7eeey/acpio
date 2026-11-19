@@ -33,10 +33,11 @@ import {
 } from "./index.js";
 
 /** Bumped when persisted settings need a one-time migration on load. */
-export const SETTINGS_SCHEMA_VERSION = 10;
+export const SETTINGS_SCHEMA_VERSION = 11;
 
 const CHAT_META_CHIP_IDS: ChatMetaChipId[] = [
   "promptMode",
+  "folder",
   "board",
   "gitBranch",
   "gitChanges",
@@ -86,18 +87,36 @@ export function normalizeChatMetaChips(
     next = [...next, "console"];
   }
   if (schemaVersion < 3 && !next.includes("gitBranch") && !next.includes("gitChanges")) {
-    next = ["gitBranch", "gitChanges", ...next];
+    const folderIdx = next.indexOf("folder");
+    const gitPair: ChatMetaChipId[] = ["gitBranch", "gitChanges"];
+    next =
+      folderIdx >= 0
+        ? [...next.slice(0, folderIdx + 1), ...gitPair, ...next.slice(folderIdx + 1)]
+        : [...gitPair, ...next];
   }
   if (schemaVersion < 5) {
     next = expandLegacyGitChip(next);
   }
   if (schemaVersion < 6 && !next.includes("board")) {
-    next = ["board", ...next];
+    const folderIdx = next.indexOf("folder");
+    next =
+      folderIdx >= 0
+        ? [...next.slice(0, folderIdx + 1), "board", ...next.slice(folderIdx + 1)]
+        : ["board", ...next];
   }
   // The prompt-mode chip opens the list: settings saved before it take it at
   // the front, where the default keeps it and where the row never overflows.
   if (schemaVersion < 10 && !next.includes("promptMode")) {
     next = ["promptMode", ...next];
+  }
+  // The folder chip is back with schema 11: a saved list takes it right after
+  // the prompt-mode chip, where the default keeps it.
+  if (schemaVersion < 11 && !next.includes("folder")) {
+    const modeIdx = next.indexOf("promptMode");
+    next =
+      modeIdx >= 0
+        ? [...next.slice(0, modeIdx + 1), "folder", ...next.slice(modeIdx + 1)]
+        : ["folder", ...next];
   }
   // The background-task chip arrived last, so it joins saved lists at the end
   // — where the default list keeps it.
@@ -486,6 +505,7 @@ export function mergeChatChipOptions(base: ChatChipOptions, patch: unknown): Cha
   const raw = (patch && typeof patch === "object" ? patch : {}) as Partial<
     Record<keyof ChatChipOptions, unknown>
   >;
+  const folder = (raw.folder ?? {}) as { compress?: unknown; truncate?: unknown };
   const gitBranch = (raw.gitBranch ?? {}) as { compress?: unknown };
   const gitChanges = (raw.gitChanges ?? {}) as { compress?: unknown; metrics?: unknown };
   const context = (raw.context ?? {}) as { format?: unknown };
@@ -493,6 +513,10 @@ export function mergeChatChipOptions(base: ChatChipOptions, patch: unknown): Cha
   const pick = <T extends string>(v: unknown, allowed: readonly T[], fallback: T): T =>
     typeof v === "string" && (allowed as readonly string[]).includes(v) ? (v as T) : fallback;
   return {
+    folder: {
+      compress: bool(folder.compress, base.folder.compress),
+      truncate: pick(folder.truncate, ["middle", "end"] as const, base.folder.truncate),
+    },
     gitBranch: { compress: bool(gitBranch.compress, base.gitBranch.compress) },
     gitChanges: {
       compress: bool(gitChanges.compress, base.gitChanges.compress),

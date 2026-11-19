@@ -529,6 +529,7 @@ describe("DEFAULT_SETTINGS", () => {
     chatActions: ["copy", "edit", "like", "dislike", "share", "regenerate", "readAloud"],
     chatMetaChips: [
       "promptMode",
+      "folder",
       "board",
       "gitBranch",
       "gitChanges",
@@ -562,6 +563,7 @@ describe("DEFAULT_SETTINGS", () => {
     boardShowFirstMessage: true,
     chatGitBranchPosition: "below",
     chatChipOptions: {
+      folder: { compress: true, truncate: "middle" },
       gitBranch: { compress: true },
       gitChanges: { compress: true, metrics: "linesAndFiles" },
       context: { format: "usage" },

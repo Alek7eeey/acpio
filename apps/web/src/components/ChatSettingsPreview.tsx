@@ -17,6 +17,7 @@ import styles from "./ChatSettingsPreview.module.css";
 
 const CHIP_ORDER: ChatMetaChipId[] = [
   "promptMode",
+  "folder",
   "board",
   "gitBranch",
   "gitChanges",
@@ -29,6 +30,7 @@ const ALL_META_CHIPS: ChatMetaChipId[] = [...CHIP_ORDER];
 
 const CHIP_LABEL_KEY: Record<ChatMetaChipId, string> = {
   promptMode: "settings.chatMetaChipPromptMode",
+  folder: "settings.chatMetaChipFolder",
   board: "settings.chatMetaChipBoard",
   gitBranch: "settings.chatMetaChipGitBranch",
   gitChanges: "settings.chatMetaChipGitChanges",
