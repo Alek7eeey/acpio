@@ -25,7 +25,29 @@ Chat with streamed reasoning, tool calls and subagents, settings, META-style lig
 
 </div>
 
+<div align="center">
+
+![Acpio in action](docs/screens/demo-en.gif)
+
+</div>
+
+> [!NOTE]
 > **AI disclaimer:** This project was developed in substantial part with the help of AI coding assistants. Review, test, and verify changes before relying on it in production.
+
+<details>
+<summary>Contents</summary>
+
+- [Install from npm](#install-from-npm)
+- [Screenshots](#screenshots)
+- [Harnesses](#harnesses)
+- [Boards](#boards)
+- [Phone and VPN](#phone-and-vpn)
+- [Tests](#tests)
+- [Architecture](#architecture)
+- [Versioning](#versioning)
+- [License](#license)
+
+</details>
 
 ## Install from npm
 
@@ -39,6 +61,7 @@ npm i -g acpio     # global → `acpio`
 Opens http://localhost:18741; `acpio --help` and `acpio --version` answer without
 starting anything.
 
+> [!WARNING]
 > **npm 11.17+** skips install-time scripts unless the package is allowed, and they
 > are what builds the native modules — add
 > `--allow-scripts=acpio,better-sqlite3,node-pty` to the commands above.
@@ -125,7 +148,11 @@ Type `/` in the composer to browse agent commands (from ACP `available_commands`
 A board is a workspace of its own: four lanes — **Todo**, **In Progress**, **Wait**,
 **Done** — a rail of the folders it works in, and one chat per task.
 
+<div align="center">
+
 ![Kanban board](docs/screens/board-en.webp)
+
+</div>
 
 ### Settings and mobile
 
@@ -135,10 +162,13 @@ Connect agents, tune models, open from a phone over VPN/LAN.
 |---|---|---|---|
 | ![Settings](docs/screens/settings-en.webp) | ![Agents](docs/screens/settings-agents-en.webp) | ![Remote access](docs/screens/settings-remote-en.webp) | ![Mobile chat](docs/screens/mobile-chat-en.webp) |
 
-Regenerate screenshots after UI changes: `npm run screens` (requires `npm run dev` and
-`npx playwright install chromium`, or `SCREEN_BASE_URL=http://127.0.0.1:18741` against a
-production build). English shots (`*-en.webp`) use the English UI; Russian shots omit the
-`-en` suffix. Capture prefers conversations whose text matches that language.
+Regenerate screenshots after UI changes: `node scripts/demo-data.mjs --locale en` seeds a
+throwaway database in `tmp/demo-en` with the prompts of `scripts/demo-agent.mjs` — no real
+chat is ever photographed — and then `SCREEN_BASE_URL=http://127.0.0.1:18772 npm run screens`
+shoots it (`npx playwright install chromium` once). English shots (`*-en.webp`) use the
+English UI; Russian shots omit the `-en` suffix and come from `--locale ru` on port 18773.
+`node scripts/capture-demo.mjs --locale en` records the clip under the header from the same
+database.
 
 ## Harnesses
 
@@ -331,10 +361,17 @@ One acpio per database file: a start against a locked database refuses and names
 pid. `ACPIO_TAKEOVER=1` replaces that refusal with kill-and-claim — verify the holder really
 is an acpio process, kill its whole process tree, then claim the lock.
 
-**Only a person may use this.** Agents and CI must never set it: it force-kills whoever holds
-the lock, and two live servers on one database is exactly the corruption the lock prevents.
-Without the variable the old behavior stands: refuse.
+> [!CAUTION]
+> **Only a person may use this.** Agents and CI must never set it: it force-kills whoever holds
+> the lock, and two live servers on one database is exactly the corruption the lock prevents.
+> Without the variable the old behavior stands: refuse.
 
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+<div align="center">
+
+[Release history](VERSIONS.md) · [Releases](https://github.com/Alek7eeey/acpio/releases) · [↑ Back to top](#acpio)
+
+</div>

@@ -15,9 +15,16 @@ if (!name) {
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = path.join(ROOT, "docs", "screens");
-const API = "http://127.0.0.1:18741";
 /** UI address: the dev server by default, the prod single port with SCREEN_BASE_URL. */
 const BASE = (process.env.SCREEN_BASE_URL ?? "http://localhost:18751").trim().replace(/\/$/, "");
+/**
+ * API address: the server's own port in dev. A production build answers the API
+ * and serves the UI on one port, so SCREEN_BASE_URL names both then, and the
+ * demo database the docs are photographed from is reached through exactly that.
+ */
+const API = (process.env.SCREEN_API_URL ?? (process.env.SCREEN_BASE_URL ? BASE : "http://127.0.0.1:18741"))
+  .trim()
+  .replace(/\/$/, "");
 
 async function api(pathname, init) {
   const res = await fetch(`${API}${pathname}`, {
@@ -293,7 +300,14 @@ async function main() {
 
   try {
     const page = await browser.newPage();
-    await page.setViewportSize(mobile ? { width: 390, height: 844 } : { width: 1440, height: 900 });
+    // A board is four lanes wide and its Done column falls off a 1440 screen;
+    // the shot takes the width the board itself needs.
+    const size = mobile
+      ? { width: 390, height: 844 }
+      : action === "board"
+        ? { width: 1720, height: 1000 }
+        : { width: 1440, height: 900 };
+    await page.setViewportSize(size);
 
     const panePayload =
       action === "split" && session && splitSecond
@@ -305,6 +319,7 @@ async function main() {
         localStorage.setItem("acpio.locale", locale);
         localStorage.setItem("acpio.theme", theme);
         localStorage.setItem("acpio.bootSplashDismissed", "1");
+        localStorage.setItem("acpio.notificationsPrompt.v1", "1");
         localStorage.removeItem("acpio.gitPanelOpen.v1");
         localStorage.removeItem("acpio.consoleOpen.v1");
         if (sessionId) localStorage.setItem("acpio.activeSessionId", sessionId);
@@ -316,6 +331,12 @@ async function main() {
         document.documentElement.setAttribute("data-theme", theme === "dark" ? "dark" : "light");
       },
       { locale, theme, sessionId: session?.id ?? null, panePayload },
+    );
+
+    // A shot must not depend on npm's answer: this build is older than the
+    // published one, so the update popup would open by itself and cover the tree.
+    await page.route("**/api/app/update", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ status: "idle", available: false }) }),
     );
 
     const url =
@@ -364,9 +385,16 @@ async function main() {
         .first()
         .click();
       await page.waitForTimeout(400);
+      // "Search across all messages" is the feature, so the shot searches
+      // messages: a phrase of the chat itself, typed in that tab, has hits.
+      await page
+        .getByRole("dialog")
+        .getByRole("tab", { name: locale === "ru" ? /^По сообщениям$/ : /^Messages$/i })
+        .click();
+      await page.waitForTimeout(300);
       const q = session?.searchHint?.slice(0, 20) ?? (locale === "ru" ? "папка" : "folder");
       await page.getByRole("dialog").locator("input[type='search']").fill(q);
-      await page.waitForTimeout(500);
+      await page.waitForTimeout(700);
     } else if (action === "split") {
       if (!splitSecond) {
         await page.getByRole("button", { name: locale === "ru" ? /Разделить|два чата/i : /Split|two chats/i }).click();

@@ -25,7 +25,29 @@
 
 </div>
 
+<div align="center">
+
+![Acpio в работе](docs/screens/demo-ru.gif)
+
+</div>
+
+> [!NOTE]
 > **Disclaimer (AI):** This project was developed in substantial part with the help of AI coding assistants. Review, test, and verify changes before relying on it in production.
+
+<details>
+<summary>Содержание</summary>
+
+- [Установка из npm](#установка-из-npm)
+- [Скриншоты](#скриншоты)
+- [Харнессы](#харнессы)
+- [Доски](#доски)
+- [Телефон и VPN](#телефон-и-vpn)
+- [Тесты](#тесты)
+- [Архитектура](#архитектура)
+- [Версионирование](#версионирование)
+- [Лицензия](#лицензия)
+
+</details>
 
 ## Установка из npm
 
@@ -39,6 +61,7 @@ npm i -g acpio     # глобально → `acpio`
 Открывает http://localhost:18741; `acpio --help` и `acpio --version` отвечают,
 ничего не запуская.
 
+> [!WARNING]
 > **npm 11.17+** не запускает install-скрипты пакета, пока его не разрешат, а
 > именно они собирают нативные модули — добавьте к командам выше
 > `--allow-scripts=acpio,better-sqlite3,node-pty`.
@@ -126,7 +149,11 @@ npm run dev       # UI http://localhost:18751, API http://localhost:18741
 Доска — отдельное рабочее пространство: четыре колонки — **Todo**, **In Progress**,
 **Wait**, **Done**, — рельса папок, в которых она работает, и один чат на задачу.
 
+<div align="center">
+
 ![Канбан-доска](docs/screens/board.webp)
+
+</div>
 
 ### Настройки и телефон
 
@@ -136,10 +163,12 @@ npm run dev       # UI http://localhost:18751, API http://localhost:18741
 |---|---|---|---|
 | ![Настройки](docs/screens/settings.webp) | ![Агенты](docs/screens/settings-agents.webp) | ![Удалённый доступ](docs/screens/settings-remote.webp) | ![Мобильный чат](docs/screens/mobile-chat.webp) |
 
-Переснять скриншоты после изменений UI: `npm run screens` (нужны `npm run dev` и
-`npx playwright install chromium`, либо `SCREEN_BASE_URL=http://127.0.0.1:18741` для
-прод-сборки). Английские кадры — файлы `*-en.webp`, русские — без суффикса. Скрипт
-выбирает чаты, чей текст совпадает с языком кадра.
+Переснять скриншоты после изменений UI: `node scripts/demo-data.mjs --locale ru` сеет
+одноразовую базу в `tmp/demo-ru` промптами из `scripts/demo-agent.mjs` — настоящий чат в
+кадр не попадает никогда, — а затем `SCREEN_BASE_URL=http://127.0.0.1:18773 npm run screens`
+снимает её (`npx playwright install chromium` один раз). Английские кадры — файлы
+`*-en.webp` (то же самое с `--locale en` и портом 18772), русские — без суффикса.
+`node scripts/capture-demo.mjs --locale ru` записывает клип под шапкой из той же базы.
 
 ## Харнессы
 
@@ -334,10 +363,17 @@ CI запускает их после `npm test` в той же job `ci`, поэ
 С `ACPIO_TAKEOVER=1` отказ заменяется на «убить и захватить» — проверить, что владелец
 действительно acpio, убить **всё дерево** его процессов и забрать лок.
 
-**Этой возможностью может пользоваться только человек.** Агентам и CI использовать её
-нельзя: она силой убивает того, кто держит лок, а два живых сервера на одной базе — ровно та
-порча данных, от которой лок и существует. Без переменной поведение прежнее: отказ.
+> [!CAUTION]
+> **Этой возможностью может пользоваться только человек.** Агентам и CI использовать её
+> нельзя: она силой убивает того, кто держит лок, а два живых сервера на одной базе — ровно та
+> порча данных, от которой лок и существует. Без переменной поведение прежнее: отказ.
 
 ## Лицензия
 
 MIT — см. [LICENSE](LICENSE).
+
+<div align="center">
+
+[История релизов](VERSIONS.md) · [Релизы](https://github.com/Alek7eeey/acpio/releases) · [↑ Наверх](#acpio)
+
+</div>
