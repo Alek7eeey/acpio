@@ -1,6 +1,8 @@
 /* The mode picker, opened by a rest on the board's paperclip and by a press on
    the chat's mode chip: the field's mode rows, small enough to sit beside the
-   control it hangs from. */
+   control it hangs from. The chat's chip asks for the comfortable dressing —
+   the same rows with a word per mode, sized like something the reader is
+   expected to read before choosing. */
 .wrap {
   position: fixed;
   z-index: 120;
@@ -21,6 +23,26 @@
   box-shadow: var(--shadow);
 }
 
+.menuComfortable {
+  gap: 2px;
+  padding: 6px;
+  border-radius: 14px;
+  box-shadow:
+    0 12px 32px color-mix(in srgb, var(--bg) 42%, transparent),
+    0 2px 8px color-mix(in srgb, var(--bg) 24%, transparent);
+}
+
+.section {
+  margin: 0;
+  padding: 4px 9px 6px;
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  line-height: 1;
+}
+
 .row {
   display: flex;
   align-items: center;
@@ -37,10 +59,21 @@
   cursor: pointer;
 }
 
+.rowComfortable {
+  align-items: flex-start;
+  gap: 9px;
+  padding: 8px 9px;
+  border-radius: 9px;
+}
+
 .row:hover,
 .row:focus-visible {
   background: color-mix(in srgb, var(--mode-tint, var(--accent)) 16%, transparent);
   outline: none;
+}
+
+.row[aria-current="true"] {
+  background: color-mix(in srgb, var(--mode-tint, var(--accent)) 10%, transparent);
 }
 
 .dot {
@@ -52,13 +85,45 @@
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--mode-tint, var(--accent)) 18%, transparent);
 }
 
-.label {
+.rowComfortable .dot {
+  width: 8px;
+  height: 8px;
+  margin-top: 5px;
+}
+
+/* The row's words: the mode's name, and — in the comfortable dressing — the
+   line that says what picking it does. */
+.text {
+  display: flex;
   flex: 1;
   min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.label {
+  min-width: 0;
+  line-height: 1.15;
+}
+
+.rowComfortable .label {
+  font-size: 0.82rem;
+  font-weight: 620;
+}
+
+.hint {
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  line-height: 1.25;
 }
 
 .check {
   margin-left: auto;
   color: var(--mode-tint, var(--accent));
   font-weight: 700;
+}
+
+.rowComfortable .check {
+  margin-top: 2px;
+  font-size: 0.8rem;
 }

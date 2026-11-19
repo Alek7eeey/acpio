@@ -219,9 +219,15 @@ describe("right click in the composer", () => {
 
     await userEvent.click(chip);
     expect(chip.getAttribute("aria-expanded")).toBe("true");
-    expect(
-      screen.getAllByRole("menuitem").map((item) => item.textContent?.replace("✓", "")),
-    ).toEqual(["Агент", "План", "Вопрос", "Разбор"]);
+    // The row's name is the mode itself: the line under it is a description,
+    // so a screen reader reads the picker as four modes and not as four
+    // paragraphs.
+    expect(screen.getAllByRole("menuitem").map((item) => item.getAttribute("aria-label"))).toEqual([
+      "Агент",
+      "План",
+      "Вопрос",
+      "Разбор",
+    ]);
 
     await userEvent.click(screen.getByRole("menuitem", { name: "План" }));
     // The chip is where the mode is read now, and the popup went with the pick.

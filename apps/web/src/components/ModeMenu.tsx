@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -15,8 +16,23 @@ import {
 import { useT } from "../lib/i18n";
 import styles from "./ModeMenu.module.css";
 
-/** The popup's width, and how much of it a narrow screen may take. */
-const MENU_WIDTH = 148;
+/**
+ * How the popup is dressed. The chat's chip is the reader's picker and gets a
+ * word of its own per mode; the board's paperclip opens the same four rows on
+ * hover, where a strip beside a control is all it should be.
+ */
+export type ModeMenuVariant = "compact" | "comfortable";
+
+/** One line under each mode name, saying what that mode does. */
+const MODE_HINT_KEY: Record<ComposerMode, string> = {
+  agent: "chat.modeHintAgent",
+  plan: "chat.modeHintPlan",
+  ask: "chat.modeHintAsk",
+  investigate: "chat.modeHintInvestigate",
+};
+
+/** The popup's width per dressing, and how much of it a narrow screen may take. */
+const MENU_WIDTH: Record<ModeMenuVariant, number> = { compact: 148, comfortable: 276 };
 const VIEWPORT_GAP = 8;
 /** The strip under the menu that joins it to its anchor — see the styles. */
 const BRIDGE_PX = 8;
@@ -38,6 +54,7 @@ export function ModeMenu({
   onPick,
   onClose,
   menuRef,
+  variant = "compact",
 }: {
   /** The element the popup hangs from; `null` while it is closed. */
   anchor: HTMLElement | null;
@@ -47,8 +64,12 @@ export function ModeMenu({
   onClose: () => void;
   /** The hover door watches the popup's own pointer events (ModeHoverMenu). */
   menuRef?: RefObject<HTMLDivElement | null>;
+  /** Compact beside the board's paperclip, comfortable under the chat's chip. */
+  variant?: ModeMenuVariant;
 }) {
   const t = useT();
+  /** The hint's id per row: the name stays the mode, the line is the description. */
+  const hintIdBase = useId();
   const ownRef = useRef<HTMLDivElement>(null);
   const ref = menuRef ?? ownRef;
   const [pos, setPos] = useState<{ anchor: HTMLElement; left: number; top: number } | null>(
@@ -95,7 +116,7 @@ export function ModeMenu({
       const menu = ref.current;
       if (!menu) return;
       const box = anchor.getBoundingClientRect();
-      const width = menu.offsetWidth || MENU_WIDTH;
+      const width = menu.offsetWidth || MENU_WIDTH[variant];
       const height = menu.offsetHeight - BRIDGE_PX;
       const left = Math.max(
         VIEWPORT_GAP,
@@ -115,7 +136,7 @@ export function ModeMenu({
       window.removeEventListener("resize", place);
       window.visualViewport?.removeEventListener("resize", place);
     };
-  }, [anchor, ref]);
+  }, [anchor, ref, variant]);
 
   if (!anchor) return null;
   // The place is the anchor's own: a measurement taken for the chip the reader
@@ -128,25 +149,41 @@ export function ModeMenu({
       style={{
         left: placed?.left ?? 0,
         top: placed?.top ?? 0,
-        width: Math.min(MENU_WIDTH, window.innerWidth - VIEWPORT_GAP * 2),
+        width: Math.min(MENU_WIDTH[variant], window.innerWidth - VIEWPORT_GAP * 2),
         visibility: placed ? "visible" : "hidden",
       }}
     >
-      <div className={styles.menu} role="menu" aria-label={t("chat.modeSection")}>
+      <div
+        className={`${styles.menu} ${variant === "comfortable" ? styles.menuComfortable : ""}`}
+        role="menu"
+        aria-label={t("chat.modeSection")}
+      >
+        {variant === "comfortable" ? (
+          <p className={styles.section}>{t("chat.modeSection")}</p>
+        ) : null}
         {COMPOSER_MODES.map((option) => (
           <button
             key={option}
             type="button"
             role="menuitem"
             aria-current={option === mode ? "true" : undefined}
-            className={styles.row}
+            aria-label={t(COMPOSER_MODE_LABEL_KEY[option])}
+            aria-describedby={variant === "comfortable" ? `${hintIdBase}-${option}` : undefined}
+            className={`${styles.row} ${variant === "comfortable" ? styles.rowComfortable : ""}`}
             onClick={() => {
               onPick(option);
               onClose();
             }}
           >
             <span className={styles.dot} data-composer-mode={option} aria-hidden />
-            <span className={styles.label}>{t(COMPOSER_MODE_LABEL_KEY[option])}</span>
+            <span className={styles.text}>
+              <span className={styles.label}>{t(COMPOSER_MODE_LABEL_KEY[option])}</span>
+              {variant === "comfortable" ? (
+                <span className={styles.hint} id={`${hintIdBase}-${option}`}>
+                  {t(MODE_HINT_KEY[option])}
+                </span>
+              ) : null}
+            </span>
             {option === mode ? (
               <span className={styles.check} aria-hidden>
                 ✓

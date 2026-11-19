@@ -83,7 +83,8 @@ describe("PromptQueueBar", () => {
   });
 
   // The mode travels with the request, not with the field: the chip above the
-  // composer talks about the *next* prompt, so a row has to say its own.
+  // composer talks about the *next* prompt, so a row that goes out under a
+  // skill has to say its own. Agent is the default and stays unsaid.
   it("names the mode each request was written in", () => {
     useAppStore.setState({
       promptQueue: [
@@ -97,11 +98,8 @@ describe("PromptQueueBar", () => {
     expect(rowOf("First queued").querySelector('[data-composer-mode="plan"]')?.textContent).toBe(
       "Plan",
     );
-    // Agent is the default and says so in its quiet grey rather than nothing at
-    // all: a row with no mode at all would read as a request of unknown kind.
-    expect(rowOf("Second queued").querySelector('[data-composer-mode="agent"]')?.textContent).toBe(
-      "Agent",
-    );
+    // Agent is how a prompt leaves by default: the row says nothing about it.
+    expect(rowOf("Second queued").querySelector("[data-composer-mode]")).toBeNull();
   });
 
   it("deletes a request from the queue", async () => {

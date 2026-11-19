@@ -148,16 +148,21 @@ export function PromptQueueBar({
                   <circle cx="7.5" cy="11.5" r="1.2" />
                 </svg>
               </button>
-              <span
-                className={styles.queueItemMode}
-                data-composer-mode={item.mode ?? "agent"}
-                title={t("chat.modeChipTitle", {
-                  name: t(COMPOSER_MODE_LABEL_KEY[item.mode ?? "agent"]),
-                })}
-              >
-                <span className={styles.queueItemModeDot} aria-hidden />
-                {t(COMPOSER_MODE_LABEL_KEY[item.mode ?? "agent"])}
-              </span>
+              {/* Only a request that goes out under a skill says so: `agent` is
+                  how a prompt leaves by default, and a word for it on every row
+                  spent the queue's width on the case that needed no notice. */}
+              {item.mode && item.mode !== "agent" ? (
+                <span
+                  className={styles.queueItemMode}
+                  data-composer-mode={item.mode}
+                  title={t("chat.modeChipTitle", {
+                    name: t(COMPOSER_MODE_LABEL_KEY[item.mode]),
+                  })}
+                >
+                  <span className={styles.queueItemModeDot} aria-hidden />
+                  {t(COMPOSER_MODE_LABEL_KEY[item.mode])}
+                </span>
+              ) : null}
               <span
                 className={styles.queueItemText}
                 title={item.text}

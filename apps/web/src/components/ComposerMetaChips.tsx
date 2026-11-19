@@ -130,6 +130,32 @@ function folderName(cwd: string): string {
   return parts[parts.length - 1] || cwd;
 }
 
+/**
+ * The chip above the field is one icon in every mode — the mode itself is told
+ * by its colour, the way the dot told it before: the button carries
+ * `data-composer-mode`, and `--mode-tint` paints this glyph.
+ */
+function ModeIcon() {
+  return (
+    <span className={styles.modeIcon} aria-hidden>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+        <path
+          d="m12 4.4 7.6 3.7-7.6 3.7-7.6-3.7 7.6-3.7Z"
+          stroke="currentColor"
+          strokeWidth="1.7"
+          strokeLinejoin="round"
+        />
+        <path
+          d="m4.6 12.2 7.4 3.6 7.4-3.6M4.6 15.8l7.4 3.6 7.4-3.6"
+          stroke="currentColor"
+          strokeWidth="1.7"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </span>
+  );
+}
+
 type MetaChipId = ChatMetaChipId | "plan";
 
 type MetaChipItem = {
@@ -351,10 +377,10 @@ export function ComposerMetaChips({
       } else if (id === "promptMode") {
         const label = t(COMPOSER_MODE_LABEL_KEY[promptMode]);
         const title = t("chat.modeChipTitle", { name: label });
-        // In the row this chip is its dot alone — the field's own pill right
-        // under it already spells the mode out. The word stays in the tree for
-        // the "…" menu, which is outside the row and needs it: there the chip
-        // is the row's mode with no pill in sight.
+        // An icon, not a pill: the row above the field is a line of chips, and a
+        // fifth one carrying a word read as a status shouting over the field it
+        // belongs to. The glyph changes with the mode; the word lives in the
+        // tooltip and in the popup the press opens.
         node = (
           <button
             type="button"
@@ -370,8 +396,7 @@ export function ComposerMetaChips({
               setModeMenuAnchor((current) => (current ? null : el));
             }}
           >
-            <span className={styles.modeDot} aria-hidden />
-            <span className={styles.metaChipLabel}>{label}</span>
+            <ModeIcon />
           </button>
         );
       } else if (id === "board") {
@@ -1231,6 +1256,7 @@ export function ComposerMetaChips({
         mode={promptMode}
         onPick={onPickPromptMode}
         onClose={closeModeMenu}
+        variant="comfortable"
       />
 
       {overflowOpen && overflowItems.length > 0
