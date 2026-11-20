@@ -4881,7 +4881,6 @@ function ChatThread() {
     return p;
   });
   const answerQuestion = useAppStore((s) => s.answerQuestion);
-  const setSessionPlan = useAppStore((s) => s.setSessionPlan);
   const promptQueueAll = useAppStore((s) => s.promptQueue);
   const promptQueue = useMemo(
     () =>
@@ -5259,6 +5258,11 @@ function ChatThread() {
     payload: PlanPayload;
   } | null>(null);
   const planPartSignature = planPayloadSignature(activePlanPart?.payload);
+  /** The plan whose file answered "no plan file": a folder keeps one file and a
+   *  chat's history outlives it, so a plan on screen can be the one thing left
+   *  of a file that is gone — or another chat's by now. The switches it cannot
+   *  move are not drawn, and only for that very plan. */
+  const [filelessPlan, setFilelessPlan] = useState<string | null>(null);
   const activePlan =
     (handEditedPlan && handEditedPlan.base === planPartSignature
       ? handEditedPlan.payload
@@ -5297,6 +5301,38 @@ function ChatThread() {
    */
   const planHasFile = Boolean(activePlan?.stage && activePlan?.path);
 
+  /** Write the plan's own switches into `.acpio/plan.md`. A file that is gone, or
+   *  another chat's, answers 404 — a switch with nothing to move, which is not an
+   *  application error to report over the chat. */
+  const writePlanFile = async (patch: {
+    stage?: "draft" | "applying";
+    pacing?: "whole" | "step";
+  }) => {
+    const sid = activeSession?.id;
+    if (!sid) return false;
+    try {
+      await api.setSessionPlan(sid, patch);
+      return true;
+    } catch {
+      setFilelessPlan(planPartSignature);
+      return false;
+    }
+  };
+
+  /**
+   * The pace, pressed before the work starts: the pick is the panel's at once.
+   * The panel draws the plan the parked card asked about, and that snapshot never
+   * learns a pace the file took afterwards — a switch reading it back used to sit
+   * on the old value however many times it was pressed.
+   */
+  const pickPlanPace = (pacing: "whole" | "step") => {
+    const onFile = activePlan?.pacing === "step" ? "step" : "whole";
+    setPlanPace(pacing);
+    void writePlanFile({ pacing }).then((written) => {
+      if (!written) setPlanPace(onFile);
+    });
+  };
+
   useEffect(() => {
     setPlanPace(activePlan?.pacing === "step" ? "step" : "whole");
   }, [activePlan?.pacing]);
@@ -5331,7 +5367,7 @@ function ChatThread() {
     // never from the default the file happens to carry.
     const pace = pacing ?? planPace;
     // The write is awaited: an answer that overtakes it starts at the old pace.
-    if (planHasFile) await setSessionPlan({ stage: "applying", pacing: pace }, sid);
+    if (planHasFile) await writePlanFile({ stage: "applying", pacing: pace });
     if (target === "pending") {
       void answerQuestion({ outcome: { outcome: "accepted" } });
       return;
@@ -5379,6 +5415,7 @@ function ChatThread() {
     setPlanPanelOpen(false);
     setApprovedPlanKey(null);
     setHandEditedPlan(null);
+    setFilelessPlan(null);
   }, [activeSession?.id]);
 
   /** The panel opens itself once per plan: the chat it belongs to, the plan it
@@ -9092,16 +9129,14 @@ function ChatThread() {
               ? () => void approvePlan("draft")
               : undefined
           }
+          /* Remembered here as well: the approval right after the switch must use
+             the pick, not the file the agent has not read yet. */
           onPacing={
-            activePlan?.stage && activeSession
-              ? (pacing) => {
-                  // Remembered here as well: the approval right after the switch
-                  // must use the pick, not the file the agent has not read yet.
-                  setPlanPace(pacing);
-                  void setSessionPlan({ pacing }, activeSession.id);
-                }
+            planHasFile && activeSession && filelessPlan !== planPartSignature
+              ? pickPlanPace
               : undefined
           }
+          pacing={planPace}
           onReadText={activeSession ? readPlanText : undefined}
           onWriteText={activeSession ? writePlanText : undefined}
           approving={planApproving}

@@ -422,6 +422,33 @@ describe("the plan's approval", () => {
     await waitFor(() => expect(screen.getByText("Правка руками")).toBeTruthy());
   });
 
+  it("moves the panel's switch as it is pressed, before the approval and the file", async () => {
+    park(session(), true);
+    renderChat();
+
+    // The panel draws the plan the parked card asked about, and that snapshot
+    // never changes: a switch reading the file back would sit on `whole` until
+    // the approval, however many times it is pressed.
+    const step = (await screen.findByText("По одному")).closest("button") as HTMLButtonElement;
+    expect(step.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(step);
+    await waitFor(() => expect(step.getAttribute("aria-pressed")).toBe("true"));
+    expect(api.setSessionPlan).toHaveBeenCalledWith("s1", { pacing: "step" });
+  });
+
+  it("takes a plan whose file is gone as a switch with nothing to move, not a red error", async () => {
+    park(session(), true);
+    // One refusal only: the switch is asked once and never offered again.
+    vi.mocked(api.setSessionPlan).mockRejectedValueOnce(new Error("No plan file"));
+    renderChat();
+
+    fireEvent.click(await screen.findByText("По одному"));
+    // Nothing was written, so the pick is not the plan's any more — and the
+    // panel stops offering a switch this chat cannot reach.
+    await waitFor(() => expect(screen.queryByText("По одному")).toBeNull());
+    expect(useAppStore.getState().error).toBeNull();
+  });
+
   it("turns the card's approve into the plan's stage and the parked turn's answer", async () => {
     park(session(), true);
     renderChat();

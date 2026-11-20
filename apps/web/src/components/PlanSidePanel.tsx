@@ -39,6 +39,7 @@ export function PlanSidePanel({
   onReject,
   onApprove,
   onPacing,
+  pacing: pickedPacing,
   onReadText,
   onWriteText,
   approving = false,
@@ -58,6 +59,10 @@ export function PlanSidePanel({
   onApprove?: () => void;
   /** Switch the pace the steps are done at — before the work starts or during it. */
   onPacing?: (pacing: "whole" | "step") => void;
+  /** The pace the reader picked here, which the plan it draws may not hold yet:
+   *  the agent republishes the file a second later, and a plan parked on its card
+   *  draws the snapshot the card asked about — never one the file learned after. */
+  pacing?: "whole" | "step";
   /** The plan file on disk, verbatim: what the manual editor opens. */
   onReadText?: () => Promise<string>;
   /** Replace the plan file with the reader's own text. */
@@ -150,7 +155,8 @@ export function PlanSidePanel({
   if (!open || !plan) return null;
 
   const stage = String(plan.stage ?? "").trim();
-  const pacing = String(plan.pacing ?? "").trim() === "step" ? "step" : "whole";
+  const pacing =
+    pickedPacing ?? (String(plan.pacing ?? "").trim() === "step" ? "step" : "whole");
   const todos = plan.todos ?? [];
   const done = todos.filter((todo) =>
     /^(completed|complete)$/i.test(String(todo.status ?? "")),

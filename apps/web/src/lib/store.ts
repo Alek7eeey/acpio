@@ -591,11 +591,6 @@ type AppState = {
     requestId: string,
     result: Record<string, unknown>,
   ) => Promise<void>;
-  /** Flip the plan's stage or pace in `.acpio/plan.md`, or replace the whole file (`text`) — the agent republishes it. */
-  setSessionPlan: (
-    patch: { stage?: "draft" | "applying"; pacing?: "whole" | "step"; text?: string },
-    sessionId?: string,
-  ) => Promise<void>;
   saveSettings: (patch: Partial<AppSettings>) => Promise<void>;
   /** Add/remove a model from the per-harness favorites list (right-click in the picker). */
   toggleFavoriteModel: (provider: AgentProvider, model: string) => void;
@@ -4713,16 +4708,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     const pending = get().pendingQuestion;
     if (!pending) return;
     await get().answerQuestionFor(pending.sessionId, pending.requestId, result);
-  },
-
-  async setSessionPlan(patch, sessionId) {
-    const id = sessionId ?? get().activeSessionId;
-    if (!id) return;
-    try {
-      await api.setSessionPlan(id, patch);
-    } catch (err) {
-      set({ error: err instanceof Error ? err.message : String(err) });
-    }
   },
 
   toggleFavoriteModel(provider, model) {
