@@ -1146,20 +1146,23 @@
   -webkit-text-fill-color: var(--text);
 }
 
+/* The running mark belongs to the card's own state, so it wears the same
+   colour as the border above it: a plan card whose frame is blue and whose
+   "In Progress" row stayed accent read as two different states on one card. */
 .liveRow {
   display: flex;
   align-items: center;
   gap: 6px;
   font-size: 0.72rem;
   font-weight: 600;
-  color: var(--accent);
+  color: var(--mode-tint, var(--accent));
 }
 
 .pulse {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--mode-tint, var(--accent));
   animation: boardPulse 1.2s ease-in-out infinite;
 }
 
