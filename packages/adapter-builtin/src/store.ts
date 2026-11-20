@@ -54,6 +54,13 @@ export interface BuiltinStoredSession {
    * request and drops the cached prefix at the digest.
    */
   maskUpTo?: number;
+  /**
+   * Where each of the harness's user turns begins in `messages`, keyed by that
+   * turn's id in the chat. Stored so an edit can cut this history at the turn it
+   * rewrites instead of throwing the whole session away: the chat's message id
+   * is the only name the two sides share.
+   */
+  turns?: Record<string, number>;
   /** Where the prune mode view starts; sticky until the view outgrows the line. */
   prunedFrom?: number;
   /**
@@ -168,6 +175,23 @@ export function loadBuiltinSession(stateDir: string, sessionId: string): Builtin
         ? (value as number)
         : undefined;
     const maskUpTo = startedAt(parsed.maskUpTo, parsed.messages.length);
+    // A point outside the stored history describes a file that has since been
+    // cut — dropping it is what makes a rewind of a rewound file read as
+    // "unknown point" instead of cutting at the wrong message.
+    const storedCount = parsed.messages.length;
+    const turns = Object.fromEntries(
+      Object.entries(
+        parsed.turns && typeof parsed.turns === "object" && !Array.isArray(parsed.turns)
+          ? (parsed.turns as Record<string, unknown>)
+          : {},
+      ).filter(
+        ([id, at]) =>
+          /^[A-Za-z0-9_-]{1,64}$/.test(id) &&
+          Number.isInteger(at) &&
+          (at as number) >= 0 &&
+          (at as number) < storedCount,
+      ),
+    ) as Record<string, number>;
     const prunedFrom = startedAt(parsed.prunedFrom, parsed.messages.length);
     const offloadUpTo = startedAt(parsed.offloadUpTo, parsed.messages.length);
     const thinkingOff = parsed.thinkingOff === true;
@@ -264,6 +288,7 @@ export function loadBuiltinSession(stateDir: string, sessionId: string): Builtin
         ? { compaction: { summary: compaction.summary, covered: compaction.covered } }
         : {}),
       ...(maskUpTo !== undefined ? { maskUpTo } : {}),
+      ...(Object.keys(turns).length ? { turns } : {}),
       ...(prunedFrom !== undefined ? { prunedFrom } : {}),
       ...(offloadUpTo !== undefined ? { offloadUpTo } : {}),
       ...(echoReasoning !== undefined ? { echoReasoning } : {}),

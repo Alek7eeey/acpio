@@ -21,7 +21,7 @@
 [![stars](https://img.shields.io/github/stars/Alek7eeey/acpio?logo=github&label=stars&labelColor=555&color=blue)](https://github.com/Alek7eeey/acpio/stargazers)
 [![node](https://img.shields.io/badge/node-%E2%89%A520-blue?labelColor=555)](package.json)
 
-**Актуальная версия:** 0.1.48
+**Актуальная версия:** 0.1.49
 
 </div>
 

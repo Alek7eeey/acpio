@@ -595,6 +595,33 @@ export function withWireLog(
   };
 }
 
+/**
+ * Forget the last requests of this session, because the history they described
+ * no longer exists: an edit resumed the session with its transcript cut at the
+ * rewritten turn, so the first request after it has fewer messages than the one
+ * before it and would read as a moved head — a `context_drift` card on an edit
+ * the reader asked for. The provider's cache is unaffected; only our idea of
+ * "the request before" has to start over. Every lane of the session goes, the
+ * compaction pass included: the cut history is behind all of them.
+ */
+export function forgetWireLogHeads(sessionId: string): void {
+  const suffix = `\u0000${sessionId}\u0000`;
+  for (const chatKey of [...previous.keys()]) {
+    if (chatKey.includes(suffix)) previous.delete(chatKey);
+  }
+  try {
+    const file = headFile(sessionId);
+    const all = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, Previous>;
+    if (!all || typeof all !== "object") return;
+    const kept = Object.fromEntries(
+      Object.entries(all).filter(([chatKey]) => !chatKey.includes(suffix)),
+    );
+    fs.writeFileSync(file, JSON.stringify(kept), "utf8");
+  } catch {
+    /* no head on disk: nothing to forget */
+  }
+}
+
 /** Forget what the previous requests looked like — a test's clean slate. */
 export function resetWireLogState(): void {
   previous.clear();

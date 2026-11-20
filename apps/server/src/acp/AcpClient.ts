@@ -1034,6 +1034,12 @@ export class AcpClient extends EventEmitter {
       catalogOnly?: boolean;
       /** Reattach an existing agent session instead of creating a new one. */
       resume?: { sessionId: string; mode: "resume" | "load" };
+      /**
+       * The chat row an edit rewrites: a loading agent cuts its stored history
+       * right before that turn instead of resuming on the answer being replaced
+       * (see the built-in agent's `session/load`). Our own `_meta`, not ACP.
+       */
+      rewindTo?: string;
       /** When loading a session our DB does not yet have, persist the replay. */
       ingestReplay?: boolean;
       /** Model applied at boot (defaults to settings.defaultModel). */
@@ -1070,6 +1076,7 @@ export class AcpClient extends EventEmitter {
   private async launch(opts?: {
     catalogOnly?: boolean;
     resume?: { sessionId: string; mode: "resume" | "load" };
+    rewindTo?: string;
     ingestReplay?: boolean;
     model?: string;
     modelParams?: Record<string, string>;
@@ -1215,6 +1222,7 @@ export class AcpClient extends EventEmitter {
             sessionId: resume.sessionId,
             cwd,
             mcpServers,
+            ...(opts?.rewindTo ? { _meta: { rewindTo: opts.rewindTo } } : {}),
           })) as { configOptions?: ConfigOption[]; modes?: unknown };
         } finally {
           this.suppressUpdates = false;
@@ -1447,6 +1455,12 @@ export class AcpClient extends EventEmitter {
   async prompt(
     text: string,
     images: PromptImageBlock[] = [],
+    /**
+     * The chat row this prompt is. Only an in-process agent reads it (it is our
+     * own `_meta`, not ACP) — and it is how that agent later cuts its history at
+     * the turn an edit rewrites instead of starting a session from nothing.
+     */
+    messageId = "",
   ): Promise<{ stopReason?: string; raw: unknown }> {
     if (!this.sessionId) throw new Error("ACP session not started");
     // A second session/prompt while one is open cancels/queues the in-flight turn in OMP
@@ -1467,6 +1481,7 @@ export class AcpClient extends EventEmitter {
     const { id, promise } = this.request("session/prompt", {
       sessionId: this.sessionId,
       prompt,
+      ...(messageId ? { _meta: { messageId } } : {}),
     });
     this.promptRequestId = id;
     try {

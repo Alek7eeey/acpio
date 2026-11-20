@@ -30,6 +30,7 @@ import {
 import { createHostRpc } from "./host.js";
 import { providerFetch } from "./keys.js";
 import {
+  forgetWireLogHeads,
   isContextDriftStop,
   withWireLog,
   wireLogState,
@@ -78,6 +79,7 @@ import {
   loadBuiltinSession,
   PROMPT_THINKING_MODES,
   saveBuiltinSession,
+  type BuiltinStoredSession,
   type PromptThinkingMode,
 } from "./store.js";
 import {
@@ -173,6 +175,51 @@ function promptText(parts: unknown): string {
     }
   }
   return "";
+}
+
+/**
+ * The harness's own id for the user turn a `session/prompt` carries, or "" for a
+ * prompt that named none (an internal note, a background job's follow-up). The
+ * id is a chat row, so it is used as a key and never trusted beyond its shape.
+ */
+function turnMessageId(params: Record<string, unknown>): string {
+  const meta = params._meta;
+  if (!meta || typeof meta !== "object") return "";
+  const id = (meta as Record<string, unknown>).messageId;
+  return typeof id === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(id) ? id : "";
+}
+
+/** The point an edit asked to cut this session's history at, or "". */
+function rewindPoint(params: Record<string, unknown>): string {
+  const meta = params._meta;
+  if (!meta || typeof meta !== "object") return "";
+  const id = (meta as Record<string, unknown>).rewindTo;
+  return typeof id === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(id) ? id : "";
+}
+
+/**
+ * The stored session cut right before `cut`: the messages themselves, every
+ * boundary that indexes them (an index past the end would mask or archive the
+ * wrong turn) and the turn map, whose later points describe messages that are
+ * gone.
+ */
+function rewindStored(stored: BuiltinStoredSession, cut: number): BuiltinStoredSession {
+  const clamp = (value: number | undefined) =>
+    value === undefined ? undefined : Math.min(value, cut);
+  const compaction = stored.compaction;
+  return {
+    ...stored,
+    messages: stored.messages.slice(0, cut),
+    turns: Object.fromEntries(
+      Object.entries(stored.turns ?? {}).filter(([, at]) => (at as number) < cut),
+    ),
+    ...(stored.maskUpTo !== undefined ? { maskUpTo: clamp(stored.maskUpTo) } : {}),
+    ...(stored.prunedFrom !== undefined ? { prunedFrom: clamp(stored.prunedFrom) } : {}),
+    ...(stored.offloadUpTo !== undefined ? { offloadUpTo: clamp(stored.offloadUpTo) } : {}),
+    // A digest covering messages the edit removed would summarise a history that
+    // no longer exists: dropping it re-summarises the shorter one instead.
+    ...(compaction && compaction.covered <= cut ? { compaction } : { compaction: undefined }),
+  };
 }
 
 /**
@@ -843,6 +890,13 @@ export class BuiltinAgent implements InProcessAgentTransport {
   /** Stored-message boundary the mask covers; advanced only when a pass runs. */
   private maskUpTo = 0;
   /**
+   * Where each of the harness's user turns begins in `messages`, keyed by the id
+   * that turn has in the chat. The id is the only name both sides share, and an
+   * edit names the turn it rewrites with it: without this map the agent can cut
+   * its history nowhere, so the harness has to throw the whole session away.
+   */
+  private turnIndex: Record<string, number> = {};
+  /**
    * Stored-message boundary whose archive decision is taken, pinned for the same
    * reason as `maskUpTo`: a tool answer below it has already gone out with the
    * shape it has. Deciding it again was how a lowered threshold rewrote a
@@ -1172,6 +1226,9 @@ export class BuiltinAgent implements InProcessAgentTransport {
           true,
           params.mcpServers,
           carriedSpend(params),
+          // An edit names the turn it rewrites; the history is cut there instead
+          // of being thrown away with the session (see `openSession`).
+          rewindPoint(params),
         );
       }
       case "session/prompt":
@@ -1230,8 +1287,27 @@ export class BuiltinAgent implements InProcessAgentTransport {
     mcpServers?: unknown,
     /** The chat's spend to date, as the harness remembers it (see `sessionUsage`). */
     carried?: SpendTotals | undefined,
+    /**
+     * The chat row an edit rewrites. A restore cuts the stored history right
+     * before that turn instead of loading all of it: the agent's own transcript
+     * still holds the answer being replaced, and the harness's DB has already
+     * dropped it — resuming in full would hand the model an answer the reader
+     * cannot see, while a fresh session would hand it no history at all (chat
+     * 655f80a6 asked `/grill-me` after an edit and got "назовите предмет").
+     */
+    rewindTo = "",
   ) {
-    const stored = restore ? loadBuiltinSession(this.opts.stateDir, sessionId) : undefined;
+    const loaded = restore ? loadBuiltinSession(this.opts.stateDir, sessionId) : undefined;
+    const cut = rewindTo ? loaded?.turns?.[rewindTo] : undefined;
+    // An unknown point is not a guess: a file older than this feature has no
+    // map, and loading it whole is exactly what the edit set out to undo — so
+    // the session opens empty, as it did before the rewind existed, and the
+    // diagnostic below says why.
+    const stored = !rewindTo
+      ? loaded
+      : cut === undefined
+        ? (loaded ? { ...loaded, messages: [], turns: {} } : undefined)
+        : rewindStored(loaded!, cut);
     this.mcp.close();
     this.mcp = new McpManager(
       parseMcpServers(mcpServers),
@@ -1252,7 +1328,17 @@ export class BuiltinAgent implements InProcessAgentTransport {
     if (storedModel) {
       this.modelId = resolveBuiltinModel(this.opts.settings, storedModel)?.value ?? storedModel;
     }
-    this.messages = repairToolPairs(stored?.messages ?? []);
+    const beforeRepair = stored?.messages;
+    this.messages = repairToolPairs(beforeRepair ?? []);
+    // The requests this session already sent described a longer history: leaving
+    // their head in place makes the first request after the cut report a moved
+    // head, which is a card on a drift the reader asked for (see
+    // `forgetWireLogHeads`).
+    if (cut !== undefined) forgetWireLogHeads(sessionId);
+    // A rewind point indexes the stored array: a repair that dropped messages
+    // moved every point behind it, and a moved point cuts at the wrong turn.
+    this.turnIndex =
+      beforeRepair && beforeRepair.length === this.messages.length ? { ...(stored?.turns ?? {}) } : {};
     // A restore that came back empty is indistinguishable from a brand-new chat
     // in every artifact the host has — the wire log shows a short request, the
     // chat shows its own transcript. Chat 8294560b resumed by `load` and sent
@@ -1271,6 +1357,7 @@ export class BuiltinAgent implements InProcessAgentTransport {
           messages: this.messages.length,
           repaired: (stored?.messages.length ?? 0) - this.messages.length,
           modelId: stored?.modelId ?? null,
+          ...(rewindTo ? { rewind: { requested: rewindTo, cut: cut ?? null } } : {}),
         },
       });
     }
@@ -1410,6 +1497,7 @@ export class BuiltinAgent implements InProcessAgentTransport {
       ...(this.thinkingLimitOverride !== undefined ? { thinkingLimit: this.thinkingLimitOverride } : {}),
       ...(this.compaction ? { compaction: this.compaction } : {}),
       ...(this.maskUpTo > 0 ? { maskUpTo: this.maskUpTo } : {}),
+      ...(Object.keys(this.turnIndex).length ? { turns: this.turnIndex } : {}),
       ...(this.offloadUpTo > 0 ? { offloadUpTo: this.offloadUpTo } : {}),
       ...(this.prunedFrom > 0 ? { prunedFrom: this.prunedFrom } : {}),
       ...(this.frozenSkills
@@ -2815,6 +2903,10 @@ export class BuiltinAgent implements InProcessAgentTransport {
       this.opts.settings.builtinSkillModes,
       this.opts.settings.locale,
     );
+    // Recorded before the push, so the point names this turn's own first
+    // message — the index an edit rewinds to (see `openSession`).
+    const turnId = turnMessageId(params);
+    if (turnId) this.turnIndex[turnId] = this.messages.length;
     this.messages.push(userContent(expanded ? [{ type: "text", text: expanded }] : promptParts));
     this.persist();
     // A steer aimed at an earlier turn must not ride into this one.

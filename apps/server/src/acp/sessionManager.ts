@@ -946,6 +946,27 @@ function carriedSpend(usage: AcpUsage | null | undefined): AcpSpendTotals | unde
   return totals.inputTokens || totals.outputTokens || totals.cachedInputTokens ? totals : undefined;
 }
 
+/**
+ * How an edit boots the agent, and why the two halves differ.
+ *
+ * An in-process agent can cut its own transcript at the edited turn, so it
+ * resumes on the history the chat still shows (`rewindTo`). No other harness
+ * has that verb: its stored session holds the answer being replaced, and a
+ * resume would hand the model a message the reader cannot see — so those boot a
+ * fresh session and get the transcript as a note instead (see `priorTranscript`).
+ */
+export function editBoot(
+  provider: AgentProvider,
+  editMessageId: string | undefined,
+): { rewinds: boolean; preferResume: boolean; rewindTo?: string } {
+  const rewinds = Boolean(editMessageId) && isBuiltinFamily(provider);
+  return {
+    rewinds,
+    preferResume: rewinds || !editMessageId,
+    ...(rewinds && editMessageId ? { rewindTo: editMessageId } : {}),
+  };
+}
+
 export async function ensureAcp(
   sessionId: string,
   opts: { provider: AgentProvider; cwd: string; mode: AgentMode },
@@ -956,6 +977,12 @@ export async function ensureAcp(
     modelParams?: Record<string, string>;
     /** Open a stored harness session even if resume-on-restart is off. */
     forceRestore?: boolean;
+    /**
+     * The chat row an edit rewrites: the agent cuts its stored history there
+     * instead of starting from nothing. Only an in-process agent understands
+     * the point — see the built-in agent's `session/load`.
+     */
+    rewindTo?: string;
   },
 ): Promise<AcpClient> {
   const rt = getRuntime(sessionId);
@@ -1001,6 +1028,8 @@ async function bootAcp(
     modelParams?: Record<string, string>;
     /** Open a stored harness session even if resume-on-restart is off. */
     forceRestore?: boolean;
+    /** Cut the agent's stored history at this chat row (an edit; see `ensureAcp`). */
+    rewindTo?: string;
   },
 ): Promise<AcpClient> {
   const settings = await getSettings();
@@ -1219,6 +1248,7 @@ async function bootAcp(
               ? { ...bootModelOpts, mcpServers, spend }
               : {
                   resume: { sessionId: storedSessionId!, mode },
+                  ...(boot?.rewindTo ? { rewindTo: boot.rewindTo } : {}),
                   ingestReplay,
                   ...bootModelOpts,
                   mcpServers,
@@ -2915,6 +2945,11 @@ export async function runPrompt(
   const promptImages: PromptImageBlock[] = [];
   let priorTranscript = "";
   let userMessageId: string | null = null;
+  // An edit keeps the chat's context only where the agent can cut its own
+  // transcript at that turn — an in-process agent, whose history we wrote and
+  // can therefore trim (see `AcpClient.start`'s `rewindTo`).
+  const editBootPlan = editBoot(opts.provider, opts.editMessageId);
+  const rewinds = editBootPlan.rewinds;
 
   if (opts.editMessageId) {
     const detailBefore = await getSessionDetail(sessionId);
@@ -2945,7 +2980,9 @@ export async function runPrompt(
     await truncateMessagesAfter(sessionId, opts.editMessageId);
     await replaceUserMessageText(sessionId, opts.editMessageId, text);
     const detailAfter = await getSessionDetail(sessionId);
-    priorTranscript = buildPriorTranscript(detailAfter?.messages ?? [], opts.editMessageId);
+    // An agent that can cut its own transcript resumes it here, and a note
+    // summarising that transcript would be a second, poorer copy of it.
+    priorTranscript = rewinds ? "" : buildPriorTranscript(detailAfter?.messages ?? [], opts.editMessageId);
     promptUserText = text;
 
     // The halt above is this prompt's own doing — it must not read as a Stop
@@ -2977,10 +3014,15 @@ export async function runPrompt(
   // Kick off ACP as early as possible (spawn overlaps with persisting the user message).
   // Edit/regenerate must NOT resume: the agent's on-disk session still holds the
   // OLD transcript (including the reply being replaced) — fresh context is correct.
+  // An in-process agent is the exception, because its transcript is our own file:
+  // it resumes with the history cut at the edited turn (`rewindTo`), which is the
+  // difference between an edit that keeps the chat's context and one that leaves
+  // the model with a bare `/name` and nothing to apply it to.
   const acpReady = observedBoot(
     ensureAcp(sessionId, opts, {
-      preferResume: !opts.editMessageId,
+      preferResume: editBootPlan.preferResume,
       forceRestore: opts.forceRestore,
+      ...(editBootPlan.rewindTo ? { rewindTo: editBootPlan.rewindTo } : {}),
     }),
   );
   // Failures before runTurn never hit its finalize path — without restoring the
@@ -3200,6 +3242,7 @@ export async function runPrompt(
       promptUserText,
       promptImages,
       priorTranscript,
+      userMessageId ?? "",
       opts,
       settings,
       acpReady,
@@ -3915,11 +3958,12 @@ async function promptAwaitingAgentIdle(
   client: AcpClient,
   promptText: string,
   images: PromptImageBlock[],
+  messageId: string,
 ): Promise<{ stopReason?: string; raw: unknown }> {
   const deadline = Date.now() + PROMPT_BUSY_MAX_WAIT_MS;
   for (;;) {
     try {
-      return await client.prompt(promptText, images);
+      return await client.prompt(promptText, images, messageId);
     } catch (err) {
       if (!rt.acceptingStream) return { stopReason: "cancelled", raw: null };
       if (!isSessionBusyError(err)) throw err;
@@ -3941,6 +3985,8 @@ async function runTurn(
   promptUserText: string,
   images: PromptImageBlock[],
   priorTranscript: string,
+  /** The chat row this turn is — its name for the turn in the agent's history. */
+  userMessageId: string,
   opts: TurnOpts,
   settings: AppSettings,
   acpReady: Promise<AcpClient>,
@@ -4049,7 +4095,7 @@ async function runTurn(
     }
     // Measure the actual ACP request, not time spent creating UI/DB messages.
     agentStartedAt = Date.now();
-    const result = await promptAwaitingAgentIdle(rt, client, promptText, images);
+    const result = await promptAwaitingAgentIdle(rt, client, promptText, images, userMessageId);
     appendDeepLog({
       kind: "prompt-complete",
       sessionId,
@@ -4222,7 +4268,7 @@ async function dequeueTurn(rt: SessionRuntime) {
     const settings = await getSettings();
     const acpReady = observedBoot(ensureAcp(rt.sessionId, next.opts));
     started = true;
-    await runTurn(rt, rt.sessionId, next.text, next.images, "", next.opts, settings, acpReady);
+    await runTurn(rt, rt.sessionId, next.text, next.images, "", next.userMessageId ?? "", next.opts, settings, acpReady);
   } catch (err) {
     if (!rt.disposing && !(err instanceof AcpClosedError)) {
       console.error(`[acp:${rt.sessionId}] queued turn failed`, err);

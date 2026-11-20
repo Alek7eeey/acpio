@@ -1091,6 +1091,116 @@ describe("builtin provider routing", () => {
     }
   });
 
+  // An edit used to cost the chat its whole history: the harness cut its own
+  // rows and booted a fresh session, and a slash prompt had no "earlier
+  // conversation" note either (it would have broken the `/name` match). Chat
+  // 655f80a6 re-ran `/grill-me` that way and the model answered "назовите
+  // предмет" about a design it had just summarised in 36 messages.
+  it("loads a session with the history cut at the turn an edit rewrites", async () => {
+    const stub = await startStub();
+    const dir = tempDir();
+    const first = "11111111-1111-4111-8111-111111111111";
+    const edited = "22222222-2222-4222-8222-222222222222";
+    saveBuiltinSession(dir, "rewind-1", {
+      version: 1,
+      cwd: "/w",
+      modelId: "p1::m1",
+      messages: [
+        { role: "user", content: "первый вопрос" },
+        { role: "assistant", content: "первый ответ" },
+        { role: "user", content: "переписанный ход" },
+        { role: "assistant", content: "ответ, который перепишут" },
+      ],
+      turns: { [first]: 0, [edited]: 2 },
+    });
+    try {
+      const { call } = boot(
+        {
+          builtinProviders: [
+            {
+              id: "p1",
+              name: "Test",
+              url: stub.url,
+              apiKey: "",
+              models: [{ id: "m1", label: "M1", contextWindow: 8_000 }],
+            },
+          ],
+        },
+        dir,
+      );
+      await call("session/load", {
+        sessionId: "rewind-1",
+        cwd: "/w",
+        _meta: { rewindTo: edited },
+      });
+      await call("session/prompt", {
+        prompt: [{ type: "text", text: "продолжим" }],
+        _meta: { messageId: edited },
+      });
+      const sent = JSON.stringify(stub.bodies.at(-1)?.messages ?? []);
+      // What the edit kept is the point of the whole thing: the agent answers
+      // with the chat's history instead of a bare prompt.
+      expect(sent).toContain("первый вопрос");
+      expect(sent).toContain("первый ответ");
+      // What it dropped is the answer being replaced — keeping it would carry
+      // the model on from a message the chat no longer shows.
+      expect(sent).not.toContain("ответ, который перепишут");
+      // The edited turn took the same point again, so editing it twice cuts in
+      // the same place.
+      expect(loadBuiltinSession(dir, "rewind-1")?.turns?.[edited]).toBe(2);
+    } finally {
+      await stub.close();
+    }
+  });
+
+  it("opens a session empty when the rewind point is not in the stored history", async () => {
+    const stub = await startStub();
+    const dir = tempDir();
+    const unknown = "33333333-3333-4333-8333-333333333333";
+    saveBuiltinSession(dir, "rewind-2", {
+      version: 1,
+      cwd: "/w",
+      modelId: "p1::m1",
+      messages: [
+        { role: "user", content: "старый вопрос" },
+        { role: "assistant", content: "старый ответ" },
+      ],
+    });
+    const diagnostics: Array<{ kind: string; data?: Record<string, unknown> }> = [];
+    try {
+      const { call } = boot(
+        {
+          builtinProviders: [
+            {
+              id: "p1",
+              name: "Test",
+              url: stub.url,
+              apiKey: "",
+              models: [{ id: "m1", label: "M1", contextWindow: 8_000 }],
+            },
+          ],
+        },
+        dir,
+        undefined,
+        undefined,
+        diagnostics,
+      );
+      // A file older than the turn map has no point to cut at. Guessing is the
+      // one thing it must not do: loading it whole hands back the answer the
+      // edit replaced.
+      await call("session/load", { sessionId: "rewind-2", cwd: "/w", _meta: { rewindTo: unknown } });
+      await call("session/prompt", { prompt: [{ type: "text", text: "продолжим" }] });
+      const messages = (stub.bodies.at(-1)?.messages ?? []) as Array<{ role?: string }>;
+      expect(messages).toHaveLength(2);
+      expect(JSON.stringify(messages)).not.toContain("старый ответ");
+      expect(diagnostics.find((d) => d.kind === "session-load")?.data).toMatchObject({
+        rewind: { requested: unknown, cut: null },
+      });
+    } finally {
+      await stub.close();
+    }
+  });
+
   it("arms /thinking-limit, cuts a runaway thinker and carries the turn on", async () => {
     // The fuse: a step that only thinks past the cap is cut mid-stream, the
     // thinking it produced is sent back with the reminder (the provider

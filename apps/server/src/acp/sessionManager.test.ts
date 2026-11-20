@@ -8,6 +8,7 @@ import {
 } from "@acpio/shared";
 import {
   coerceUiMode,
+  editBoot,
   normalizePlanPartPayload,
   paramsFromModelWire,
   parseRpcId,
@@ -338,6 +339,19 @@ describe("pickRestoreMode", () => {
     [{ ...base, provider: "cursor", restoreMode: "load", toggle: false, forceRestore: true }, "load"],
   ] as const)("pickRestoreMode(%j) === %j", (input, expected) => {
     expect(pickRestoreMode({ ...input })).toBe(expected);
+  });
+});
+
+describe("editBoot", () => {
+  // An edit keeps the chat's context only where the agent can cut its own
+  // transcript. The built-in agent is that case; every other harness still
+  // boots fresh, because its stored session holds the answer being replaced.
+  it.each([
+    ["builtin", "msg-1", { rewinds: true, preferResume: true, rewindTo: "msg-1" }],
+    ["cursor", "msg-1", { rewinds: false, preferResume: false }],
+    ["builtin", undefined, { rewinds: false, preferResume: true }],
+  ] as const)("editBoot(%s, %s)", (provider, editMessageId, expected) => {
+    expect(editBoot(provider, editMessageId)).toEqual(expected);
   });
 });
 

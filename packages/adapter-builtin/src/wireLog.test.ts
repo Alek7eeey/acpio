@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetProviderKeyCursors, providerFetch } from "./keys.js";
 import {
   ContextDriftStop,
+  forgetWireLogHeads,
   isContextDriftStop,
   resetWireLogState,
   sharedPrefix,
@@ -228,6 +229,48 @@ describe("wire log", () => {
     });
     // Nothing was written: the report does not depend on the log.
     expect(fs.existsSync(path.join(wireLogDir(), "sess-1.jsonl"))).toBe(false);
+  });
+
+  it("forgets a session's head when an edit cut its history", async () => {
+    // An edit resumes the session on a shorter transcript. Comparing against the
+    // request that had the longer one reports a moved head, and the reader gets
+    // a `context_drift` card for an edit they asked for.
+    const drifts: ContextDrift[] = [];
+    const call = withWireLog(
+      { sessionId: "sess-1", providerId: "builtin" },
+      (async () => jsonResponse({})) as typeof globalThis.fetch,
+      { onDrift: (drift) => drifts.push(drift) },
+    );
+    const send = (messages: unknown[]) =>
+      call("https://relay.test/v1/chat/completions", {
+        method: "POST",
+        body: JSON.stringify({ model: "m", messages }),
+      });
+    const one = { role: "user", content: "one" };
+    const two = { role: "assistant", content: "two" };
+    const three = { role: "user", content: "three" };
+    const four = { role: "assistant", content: "four" };
+
+    await send([one, two, three, four]);
+    // Without the cut the shorter history is a drift, which is what the card is for.
+    forgetWireLogHeads("sess-2");
+    await send([one, two]);
+    expect(drifts).toHaveLength(1);
+
+    // With it, the edited chat starts its comparison over instead of crying wolf.
+    drifts.length = 0;
+    await send([one, two, three, four]);
+    forgetWireLogHeads("sess-1");
+    await send([one, two]);
+    expect(drifts).toEqual([]);
+    const head = JSON.parse(
+      fs.readFileSync(path.join(wireLogDir(), "sess-1.head.json"), "utf8"),
+    ) as Record<string, unknown>;
+    // The next request wrote its own head, and it is the only one left. The
+    // request counter keeps running — it names this chat's body files, and two
+    // requests of one chat must never share a name.
+    expect(Object.keys(head)).toHaveLength(1);
+    expect(Object.values(head)[0]).toMatchObject({ seq: 4 });
   });
 
   // The tokens panel splits a chat's bill into "the head moved" and "the provider's
