@@ -113,8 +113,11 @@
   cursor: pointer;
 }
 
+/* Not `--bg-secondary`: the dark theme paints the rail with it too, so a
+   project row went unlit under the pointer. A tint of the text reads the same
+   in both themes, and faintly — the row is a filter, not a destination. */
 .railItem:hover {
-  background: var(--bg-secondary);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
 }
 
 /* Row entries share the line with their "+" button; the "all projects" item is
