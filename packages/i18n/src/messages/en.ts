@@ -178,6 +178,8 @@ export const en = {
     durationMinSec: "{{value}}m {{seconds}}s",
     ttftBadge: "ttft {{value}}",
     ttftHint: "ttft: {{value}} from the tool result to the model's first token",
+    firstTokenRow: "first token {{value}}",
+    firstTokenHint: "first token: {{value}} from your message to the model's first token",
     working: "Working…",
     worked: "Worked",
     reasoning: "Reasoning",

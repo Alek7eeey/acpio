@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { MessagePartDto } from "@acpio/shared";
 import type { TranslateFn } from "@acpio/i18n";
-import { formatDuration, partDurations, sumDurations } from "./partTiming.js";
+import {
+  formatDuration,
+  partDurations,
+  partTtfts,
+  sumDurations,
+  turnFirstTokenMs,
+} from "./partTiming.js";
 
 const base = Date.parse("2026-01-01T00:00:00.000Z");
 
@@ -116,6 +122,43 @@ describe("partDurations", () => {
   it("orders by `order`, not by array position", () => {
     const parts = [part("text", 1, 2000), part("thought", 0, 0)];
     expect(partDurations(parts).get("thought-0")).toBe(2000);
+  });
+});
+
+describe("turnFirstTokenMs", () => {
+  // The server stamps the turn's own wait on whichever part came first — a
+  // thought, a text chunk, or the tool call the model opened with. The reader's
+  // "how long did it make me wait" is that one number, not a tool's ttft.
+  it("reads the stamp off the turn's first part, whatever type it was", () => {
+    expect(turnFirstTokenMs([part("thought", 0, 0, { firstTokenMs: 1400 })])).toBe(1400);
+    expect(turnFirstTokenMs([part("tool_call", 0, 0, { firstTokenMs: 1400 })])).toBe(1400);
+  });
+
+  it("finds it even when later parts carry their own marks", () => {
+    const parts = [
+      part("tool_call", 0, 0, { ttftMs: 900 }),
+      part("thought", 1, 1500, { firstTokenMs: 1400 }),
+    ];
+    expect(turnFirstTokenMs(parts)).toBe(1400);
+  });
+
+  it("returns nothing when no part carries the stamp", () => {
+    expect(turnFirstTokenMs([part("thought", 0, 0, { ttftMs: 900 })])).toBeUndefined();
+    expect(turnFirstTokenMs([])).toBeUndefined();
+  });
+
+  it("ignores an unusable value instead of printing it", () => {
+    expect(turnFirstTokenMs([part("thought", 0, 0, { firstTokenMs: Number.NaN })])).toBeUndefined();
+    expect(turnFirstTokenMs([part("thought", 0, 0, { firstTokenMs: -5 })])).toBeUndefined();
+  });
+
+  // The badge belongs to tools; a turn-wide stamp must never light one up.
+  it("does not turn the turn's stamp into a tool badge", () => {
+    const parts = [
+      part("tool_call", 0, 0, { firstTokenMs: 1400 }),
+      part("text", 1, 2000, { firstTokenMs: 1500 }),
+    ];
+    expect(partTtfts(parts).size).toBe(0);
   });
 });
 

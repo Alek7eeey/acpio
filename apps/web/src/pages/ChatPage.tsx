@@ -74,7 +74,13 @@ import { useChatSplitAllowed } from "../lib/panelLayout";
 import { isTypingKey, useFixedMenuPlacement } from "../lib/menuPosition";
 import { sanitizeCatalogModes, selectLiveSessionDetail, useAppStore, type PendingAttachment } from "../lib/store";
 import { buildAgentTimeline, finalAnswerPart, isSingleItemTimeline, splitQuestionPreamble, stepsPartsStillLive, turnAnswerVisible, unansweredQuestionParts, type AgentQuestionItem, type AgentTimelineItem } from "../lib/assistantTurnTimeline.js";
-import { formatDuration, partDurations, partTtfts, sumDurations } from "../lib/partTiming.js";
+import {
+  formatDuration,
+  partDurations,
+  partTtfts,
+  sumDurations,
+  turnFirstTokenMs,
+} from "../lib/partTiming.js";
 import { messagePlainText } from "../lib/messageText.js";
 import { buildPromptRailItems } from "../lib/promptRail.js";
 import {
@@ -2987,6 +2993,7 @@ function StepsSpoiler({
   timeMs,
   body,
   skipOuter,
+  firstTokenMs,
 }: {
   parts: MessagePartDto[];
   streaming: boolean;
@@ -3008,6 +3015,9 @@ function StepsSpoiler({
    *  text/question). The outer header would only wrap that single inner
    *  spoiler, so the caller lets the body render directly instead. */
   skipOuter?: boolean;
+  /** Time from the prompt to the turn's first token. The phased caller renders
+   *  it inside its own body; the flat body above needs it here. */
+  firstTokenMs?: number;
 }) {
   const t = useT();
   const locale = useLocale();
@@ -3162,10 +3172,14 @@ function StepsSpoiler({
       ) : null}
       {open && parts.length > 0 && (
         <div className={styles.stepsBody}>
-          {body ??
-            [...parts]
-              .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-              .map((part, idx) => renderFlatPart(part, idx))}
+          {body ?? (
+            <>
+              <FirstTokenRow ms={firstTokenMs} />
+              {[...parts]
+                .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+                .map((part, idx) => renderFlatPart(part, idx))}
+            </>
+          )}
           <StepsCollapseButton onClick={collapseBlock} />
         </div>
       )}
@@ -3188,6 +3202,40 @@ function renderTimelineAction(
     return <SubagentPartView part={part} streaming={live} sessionId={sessionId} />;
   }
   return <ToolCallRow part={part} streaming={live} durationMs={durationMs} ttftMs={ttftMs} />;
+}
+
+/**
+ * The turn's first token, on a line of its own above the work.
+ *
+ * A row badge would lie here: every `ttftMs` in the transcript measures a tool
+ * (tool result → next token), and the very first request of a turn has no tool
+ * behind it — which is exactly why the wait that a reader stares at was the one
+ * wait with no number on screen. The server stamps this one on the turn's first
+ * part (`firstTokenMs`), so it says the same thing for a turn that opened with
+ * reasoning, with a tool call, or with plain text.
+ */
+function FirstTokenRow({ ms }: { ms?: number }) {
+  const t = useT();
+  const locale = useLocale();
+  const value = ms == null ? "" : formatDuration(ms, locale, t);
+  if (!value) return null;
+  return (
+    <div className={styles.stepsLeadRow} title={t("common.firstTokenHint", { value })}>
+      <span className={styles.stepsLeadIcon} aria-hidden>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+          <circle cx="12" cy="12" r="8.4" stroke="currentColor" strokeWidth="1.7" />
+          <path
+            d="M12 7.6V12l3 1.9"
+            stroke="currentColor"
+            strokeWidth="1.7"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </span>
+      {t("common.firstTokenRow", { value })}
+    </div>
+  );
 }
 
 /** A single thought block: its own spoiler, because a reasoning block is often
@@ -3289,6 +3337,7 @@ function ActivityRunBlock({
   stepsGlobalTick,
   sticky = true,
   stickyCollapse = sticky,
+  firstTokenMs,
 }: {
   parts: MessagePartDto[];
   streaming: boolean;
@@ -3307,6 +3356,10 @@ function ActivityRunBlock({
   /** Pin the floating bottom button too — live run only, or two of them would
    *  land on top of each other while their bodies are both on screen. */
   stickyCollapse?: boolean;
+  /** Time from the prompt to the turn's first token. Only the turn's FIRST run
+   *  gets it, and it sits inside the body: it is a fact about the work, so it
+   *  opens and closes with the work. */
+  firstTokenMs?: number;
 }) {
   const t = useT();
   const locale = useLocale();
@@ -3352,6 +3405,7 @@ function ActivityRunBlock({
       />
       {open && parts.length > 0 ? (
         <div className={styles.stepsBody}>
+          <FirstTokenRow ms={firstTokenMs} />
           {parts.map((part, idx) => {
             const isLast = idx === parts.length - 1;
             return (
@@ -3385,6 +3439,7 @@ function AgentTimelineItems({
   sessionId,
   durations,
   stepsGlobalTick,
+  firstTokenMs,
   stickyRuns = true,
 }: {
   items: AgentTimelineItem[];
@@ -3396,6 +3451,10 @@ function AgentTimelineItems({
   sessionId: string;
   durations: Map<string, number>;
   stepsGlobalTick: number;
+  /** Time from the prompt to the turn's first token. It rides on the first run
+   *  block, not on this list: a row outside the blocks would sit above a
+   *  collapsed header, and the reader asked for it to live under one. */
+  firstTokenMs?: number;
   /** Pinned phase headers belong to the block the reader is inside: whichever
    *  run sits under the top edge of the scrollport keeps its header (and its
    *  collapse control) reachable without scrolling back up — live turns and the
@@ -3420,6 +3479,10 @@ function AgentTimelineItems({
     streaming && tail && !tailHolds && tail.kind !== "run" && tail.kind !== "text"
       ? [...items, EMPTY_LIVE_RUN]
       : items;
+  // The first-token row goes inside the turn's first run — a turn can open on a
+  // text item (a preamble the model streamed before its first tool), and the
+  // number belongs with the work, not above an answer.
+  const firstRunIdx = shown.findIndex((item) => item.kind === "run");
   return (
     <>
       {shown.map((item, idx) => {
@@ -3444,6 +3507,7 @@ function AgentTimelineItems({
               stepsGlobalTick={stepsGlobalTick}
               sticky={stickyRuns}
               stickyCollapse={stickyRuns && isLast}
+              firstTokenMs={idx === firstRunIdx ? firstTokenMs : undefined}
             />
           );
         }
@@ -3509,6 +3573,7 @@ function AgentTurnTimeline({
   sessionId,
   durations,
   stepsGlobalTick,
+  firstTokenMs,
 }: {
   parts: MessagePartDto[];
   streaming: boolean;
@@ -3521,6 +3586,8 @@ function AgentTurnTimeline({
   sessionId: string;
   durations: Map<string, number>;
   stepsGlobalTick: number;
+  /** Time from the prompt to the turn's first token — drawn above the work. */
+  firstTokenMs?: number;
 }) {
   const items = useMemo(() => buildAgentTimeline(parts), [parts]);
   const [holdEmptyLive, setHoldEmptyLive] = useState(streaming);
@@ -3556,6 +3623,7 @@ function AgentTurnTimeline({
         sessionId={sessionId}
         durations={durations}
         stepsGlobalTick={stepsGlobalTick}
+        firstTokenMs={firstTokenMs}
       />
     </div>
   );
@@ -4574,6 +4642,7 @@ function AssistantParts({
     () => partDurations(parts, { now: live ? now : undefined }),
     [parts, now, live],
   );
+  const firstTokenMs = useMemo(() => turnFirstTokenMs(parts), [parts]);
   // Agent-turn timeline — the only reading of a turn. While the agent is still
   // generating (state 1) the turn reads as spoiler → text → spoiler → text …,
   // and it stays that way until the last token. Once generation stops (state 2)
@@ -4618,6 +4687,7 @@ function AssistantParts({
           sessionId={message.sessionId}
           durations={durations}
           stepsGlobalTick={stepsGlobalTick}
+          firstTokenMs={firstTokenMs}
         />
       ) : timelineItems.length > 0 ? (
         <StepsSpoiler
@@ -4640,6 +4710,7 @@ function AssistantParts({
               sessionId={message.sessionId}
               durations={durations}
               stepsGlobalTick={stepsGlobalTick}
+              firstTokenMs={firstTokenMs}
             />
           }
         />
@@ -4653,6 +4724,7 @@ function AssistantParts({
           sessionId={message.sessionId}
           durations={durations}
           stepsGlobalTick={stepsGlobalTick}
+          firstTokenMs={firstTokenMs}
         />
       ) : null}
       {generatedImages.map((part) => (

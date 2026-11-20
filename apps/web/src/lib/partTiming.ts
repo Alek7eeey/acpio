@@ -89,6 +89,23 @@ export function partTtfts(parts: MessagePartDto[]): Map<string, number> {
 }
 
 /**
+ * The turn's own first token: the server stamps `payload.firstTokenMs` on the
+ * first part a turn creates — from the reader's prompt to the model's first
+ * streamed token, whether that was a thought, a text chunk, or the tool call it
+ * opened with. Every later `ttftMs` measures a tool instead, so this is the one
+ * number that says how long the model itself made the reader wait — and the
+ * only timing a turn gets when no tool ran before its first token.
+ */
+export function turnFirstTokenMs(parts: MessagePartDto[]): number | undefined {
+  const sorted = [...parts].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  for (const part of sorted) {
+    const ms = part.payload?.firstTokenMs;
+    if (typeof ms === "number" && Number.isFinite(ms) && ms >= 0) return ms;
+  }
+  return undefined;
+}
+
+/**
  * Compact span for a spoiler header: `0,4 с`, `3,7 с`, `42 с`, `1 мин 12 с`.
  * Sub-10-second spans keep one decimal — most tool calls live there, and
  * rounding them all to "1 с" would flatten the difference between a 200 ms read

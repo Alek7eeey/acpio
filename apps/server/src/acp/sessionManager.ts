@@ -669,6 +669,10 @@ class SessionRuntime {
   lastToolFinishedAt: number | null = null;
   /** A tool finished but no assistant token streamed yet — the next new part carries `ttftMs`. */
   ttftPending = false;
+  /** When this turn's prompt was taken; the turn's FIRST token anchors here. */
+  turnStartedAt: number | null = null;
+  /** The turn's first new part already carries `firstTokenMs` — stamp once per turn. */
+  firstTokenStamped = false;
   /** omp `_omp/agents/update` subagent cards, keyed by registry agent id. */
   subagentPartByAgentId = new Map<string, string>();
   /**
@@ -1719,7 +1723,7 @@ export async function handleUpdate(rt: SessionRuntime, update: import("./AcpClie
       "text",
       update.text,
       rt.openTextPartId,
-      rt.openTextPartId ? undefined : takeTtftPayload(rt),
+      rt.openTextPartId ? undefined : takeNewPartMarks(rt),
     );
     return;
   }
@@ -1739,7 +1743,7 @@ export async function handleUpdate(rt: SessionRuntime, update: import("./AcpClie
         "thought",
         update.thought,
         rt.turnThoughtPartId ?? rt.openThoughtPartId,
-        (rt.turnThoughtPartId ?? rt.openThoughtPartId) ? undefined : takeTtftPayload(rt),
+        (rt.turnThoughtPartId ?? rt.openThoughtPartId) ? undefined : takeNewPartMarks(rt),
       );
       rt.turnThoughtPartId = partId;
       rt.openThoughtPartId = partId;
@@ -1752,7 +1756,7 @@ export async function handleUpdate(rt: SessionRuntime, update: import("./AcpClie
         "text",
         update.text,
         rt.openTextPartId,
-        rt.openTextPartId ? undefined : takeTtftPayload(rt),
+        rt.openTextPartId ? undefined : takeNewPartMarks(rt),
       );
     }
     return;
@@ -1774,7 +1778,7 @@ export async function handleUpdate(rt: SessionRuntime, update: import("./AcpClie
       "thought",
       update.text,
       rt.turnThoughtPartId ?? rt.openThoughtPartId,
-      (rt.turnThoughtPartId ?? rt.openThoughtPartId) ? undefined : takeTtftPayload(rt),
+      (rt.turnThoughtPartId ?? rt.openThoughtPartId) ? undefined : takeNewPartMarks(rt),
     );
     rt.turnThoughtPartId = partId;
     rt.openThoughtPartId = partId;
@@ -1875,7 +1879,7 @@ export async function handleUpdate(rt: SessionRuntime, update: import("./AcpClie
       rt.sessionId,
       messageId,
       isSubagent ? "subagent" : "tool_call",
-      payload,
+      { ...payload, ...takeNewPartMarks(rt) },
     );
     if (toolCallId) rt.toolPartByCallId.set(toolCallId, part.id);
     if (isSubagent && toolCallId) {
@@ -1996,6 +2000,7 @@ export async function handleUpdate(rt: SessionRuntime, update: import("./AcpClie
         raw: mergedRaw,
         ...extra,
         ...livePatch,
+        ...takeNewPartMarks(rt),
         title: displayTitle,
         description: displayTitle,
       });
@@ -3576,6 +3581,28 @@ function takeTtftPayload(rt: SessionRuntime): Record<string, unknown> | undefine
   return { ttftMs };
 }
 
+/**
+ * Consume the turn's own start mark: the first NEW part carries `firstTokenMs`
+ * — from the prompt being taken to the model's first streamed token, whatever
+ * that token was (a thought, a text chunk, or the tool call the model opened
+ * with). Only that mark answers "how long did the model make me wait", because
+ * every `ttftMs` after it measures a tool instead; the reader sees it as the
+ * turn's first-token row, and it is the only timing a first request has at all.
+ */
+function takeFirstTokenPayload(rt: SessionRuntime): Record<string, unknown> | undefined {
+  if (rt.firstTokenStamped || rt.turnStartedAt == null || rt.ingestingReplay) return undefined;
+  rt.firstTokenStamped = true;
+  return { firstTokenMs: Math.max(0, Date.now() - rt.turnStartedAt) };
+}
+
+/** Whatever new-part marks this moment earned — the turn's start and/or a tool's end. */
+function takeNewPartMarks(rt: SessionRuntime): Record<string, unknown> | undefined {
+  const first = takeFirstTokenPayload(rt);
+  const afterTool = takeTtftPayload(rt);
+  if (!first && !afterTool) return undefined;
+  return { ...first, ...afterTool };
+}
+
 function trackToolFlight(rt: SessionRuntime, toolCallId: string, status: string | undefined) {
   if (!toolCallId) return;
   const next = String(status ?? "pending").toLowerCase();
@@ -3831,6 +3858,10 @@ function adoptAutonomousTurn(rt: SessionRuntime) {
   rt.toolStatusByCallId.clear();
   rt.toolStartedAtByCallId.clear();
   rt.ttftPending = false;
+  // A turn the agent started on its own has no prompt to measure from — the
+  // first-token row stays silent instead of counting from adoption.
+  rt.turnStartedAt = null;
+  rt.firstTokenStamped = true;
   rt.interactiveAnswerAt = null;
   rt.streamedAfterInteractiveAnswer = false;
   rt.elicitationThisTurn = false;
@@ -3935,6 +3966,10 @@ async function runTurn(
   rt.toolStatusByCallId.clear();
   rt.toolStartedAtByCallId.clear();
   rt.ttftPending = false;
+  // The reader's wait starts when their prompt is taken, not when the agent's
+  // first token lands: this anchor is what the turn's first-token row reports.
+  rt.turnStartedAt = Date.now();
+  rt.firstTokenStamped = false;
   rt.interactiveAnswerAt = null;
   rt.streamedAfterInteractiveAnswer = false;
   rt.elicitationThisTurn = false;

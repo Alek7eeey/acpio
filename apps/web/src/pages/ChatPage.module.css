@@ -1378,6 +1378,25 @@
   font-weight: 500;
 }
 
+/* The turn's first token: a line of its own above the work, muted like the
+   per-row spans and deliberately not a button — it states a fact, it is not
+   another spoiler to open. `4px` lines it up with the labels of the rows below. */
+.stepsLeadRow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 1px 0 3px 4px;
+  font-size: 0.76rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--text-secondary) 82%, transparent);
+}
+
+.stepsLeadIcon {
+  display: inline-flex;
+  opacity: 0.8;
+}
+
 .thoughtChevron {
   color: var(--text-secondary);
   font-size: 0.75rem;
