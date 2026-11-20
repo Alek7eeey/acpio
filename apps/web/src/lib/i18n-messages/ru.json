@@ -518,6 +518,7 @@
     "contextDriftSystem": "изменён системный промпт",
     "contextDriftTools": "изменён набор инструментов",
     "contextDriftDownload": "скачать логи чата (zip)",
+    "contextDriftFile": "событие: {{file}}",
     "contextDriftNoLog": "включи полное логирование, чтобы скачать тела запросов",
     "contextDriftParked": "Ход приостановлен",
     "contextDriftYourAnswer": "Ваш ответ:",

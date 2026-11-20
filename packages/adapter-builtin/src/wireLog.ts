@@ -78,6 +78,12 @@ export interface ContextDrift {
   systemChanged: boolean;
   /** The tool declarations changed, which also sits ahead of every message. */
   toolsChanged: boolean;
+  /**
+   * The file this drift was written to, when the wire log is in `full` and the
+   * head switch is on. Absent otherwise — the card names it rather than making
+   * the reader hunt the log folder for the one record that explains the bill.
+   */
+  driftFile?: string;
 }
 
 /**
@@ -208,6 +214,15 @@ interface Previous {
   tools: string;
   key: string;
   /**
+   * The body file this request wrote, empty when the mode was not `full`. It is
+   * the only pointer to the bytes of the last request, and it lives in the head
+   * file so the next process — the one that did not see the request — can still
+   * hand them to a drift event (`readPrevBody`).
+   */
+  bodyFile: string;
+  /** When that request was sent, so a missing body can say since when. */
+  at: number;
+  /**
    * The fingerprint scheme that computed the hashes above. A head is only a
    * comparison when both numbers came from the same code: the `system` hash
    * moved from `body.system` to `messages[0]` (see below) and every chat then
@@ -264,6 +279,10 @@ function loadHead(chatKey: string, sessionId: string): void {
         system: String(head.system ?? ""),
         tools: String(head.tools ?? ""),
         key: String(head.key ?? ""),
+        // A head written before these two existed reads as “no body”: an
+        // upgrade must not cost every chat its comparison on the first request.
+        bodyFile: String(head.bodyFile ?? ""),
+        at: Number(head.at ?? 0) || 0,
         scheme: HEAD_SCHEME,
       });
     }
@@ -335,6 +354,110 @@ function appendLine(file: string, line: unknown): void {
   } catch {
     /* a diagnostics write must never fail a chat */
   }
+}
+
+/** A drift event's file name: an entry of its own, never a body's. */
+function freeDriftName(sessionId: string, seq: number, started: number): string {
+  const base = `${shortId(sessionId)}/drift-${String(seq).padStart(4, "0")}-${started}`;
+  let name = `${base}.json`;
+  for (let n = 2; fs.existsSync(path.join(wireLogDir(), name)); n += 1) {
+    name = `${base}-${n}.json`;
+  }
+  return name;
+}
+
+/**
+ * One cache miss, whole: the verdict, both requests' bodies and the first
+ * message that differs, in one file beside the log.
+ *
+ * It exists because the parts it replaces have to be glued by hand — the line
+ * of request N−1, its body file, the line of N, its body file — and that glue
+ * fails exactly when it is needed most: with the switch moved between `summary`
+ * and `full`, one of the two bodies was never written at all.
+ *
+ * Returns the file's name, or `""` when the disk said no: a diagnostics write
+ * must never fail a chat.
+ */
+function writeDriftEvent(
+  sessionId: string,
+  seq: number,
+  started: number,
+  payload: Record<string, unknown>,
+): string {
+  try {
+    const name = freeDriftName(sessionId, seq, started);
+    const file = path.join(wireLogDir(), name);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(payload, null, 2), "utf8");
+    return name;
+  } catch {
+    return "";
+  }
+}
+
+/** A body as an object, or `null` when it is not one. */
+function parseBody(text: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The two things ahead of every message, as they went out — the same rule as the hashes. */
+function headTexts(body: Record<string, unknown>): { system: unknown; tools: unknown } {
+  const first = bodyMessages(body)[0] as { role?: unknown } | undefined;
+  return {
+    system: body.system ?? (first?.role === "system" ? first : ""),
+    tools: body.tools ?? "",
+  };
+}
+
+function roleAt(messages: readonly unknown[], index: number): string {
+  const message = messages[index] as { role?: unknown } | undefined;
+  return typeof message?.role === "string" ? message.role : "";
+}
+
+/**
+ * Where the two requests part ways: the first message whose bytes differ, with
+ * the role on either side, so the file says “the tool result at 41” rather than
+ * “index 41”. `null` when nothing differed.
+ */
+function firstDiff(
+  prevChain: readonly string[],
+  chain: readonly string[],
+  prevMessages: readonly unknown[],
+  messages: readonly unknown[],
+): { index: number; rolePrev: string; roleNext: string; hashPrev: string; hashNext: string } | null {
+  const index = sharedPrefix(prevChain, chain);
+  // The previous head is whole and only the tail grew: the head moved ahead of
+  // the messages (a tool list, the prompt), not inside them, and naming a
+  // "first differing message" there would point at a message nobody rewrote.
+  if (index >= prevChain.length) return null;
+  return {
+    index,
+    rolePrev: roleAt(prevMessages, index),
+    roleNext: roleAt(messages, index),
+    hashPrev: prevChain[index] ?? "",
+    hashNext: chain[index] ?? "",
+  };
+}
+
+/** The previous request's body from its own file, or the honest reason it is not there. */
+function readPrevBody(before: Previous): { body: string } | { missing: true; since: string } {
+  if (before.bodyFile) {
+    try {
+      return { body: fs.readFileSync(path.join(wireLogDir(), before.bodyFile), "utf8") };
+    } catch {
+      /* the body was deleted, or the mode moved on since */
+    }
+  }
+  // `at` is when that request was sent: the mode was not `full` then, so its
+  // body exists nowhere and none may be invented.
+  return { missing: true, since: before.at ? new Date(before.at).toISOString() : "" };
 }
 
 /** The key behind a request, as a fingerprint: enough to spot a switch, no secret. */
@@ -415,7 +538,8 @@ export function withWireLog(
     const logging = mode !== "off";
     // A switch the reader turns must reach the next call, not the next session:
     // the endpoint outlives the turn, so the answer is asked per request.
-    const watching = (options.watch?.() ?? options.onDrift !== undefined) || logging;
+    const watchingHead = options.watch?.() ?? false;
+    const watching = (options.watch ? watchingHead : options.onDrift !== undefined) || logging;
     // A head verdict that only prices a request is not the diagnostic switch's
     // business: the chat's own endpoint asks for it on every call so the tokens
     // panel can say how much of the bill was the provider's cold cache. The
@@ -450,7 +574,20 @@ export function withWireLog(
     const before = previous.get(chatKey);
     const seq = (seqOf.get(chatKey) ?? 0) + 1;
     seqOf.set(chatKey, seq);
-    const head: Previous = { seq, chain, system, tools, key, scheme: HEAD_SCHEME };
+    // Named before the head is saved: the head file is what points the next
+    // process at this request's body, and a body nobody can name is a body the
+    // drift event cannot show.
+    const bodyFile = logging && mode === "full" ? freeBodyName(target.sessionId, seq, started) : "";
+    const head: Previous = {
+      seq,
+      chain,
+      system,
+      tools,
+      key,
+      bodyFile,
+      at: started,
+      scheme: HEAD_SCHEME,
+    };
     previous.set(chatKey, head);
     saveHead(chatKey, target.sessionId, head);
 
@@ -478,8 +615,50 @@ export function withWireLog(
     // written after the answer was simply absent from it — the one body support
     // needs is the request whose head moved (chat 37f44166: “0 of 60” and an
     // archive that could not say what the 2 messages were).
+    // The two switches together, and only together: `full` puts bodies on disk,
+    // the head switch says the head is worth watching. What lands is one
+    // self-contained file per miss (see `writeDriftEvent`), written here rather
+    // than in the drift listener — the compaction pass and a subagent raise the
+    // same drift and have no listener at all, and they are where a broken head
+    // costs the most (see `WireLogTarget.lane`).
+    let driftFile = "";
+    if (logging && mode === "full" && watchingHead && drifted && before) {
+      const prev = readPrevBody(before);
+      const prevBody = "body" in prev ? parseBody(prev.body) : null;
+      driftFile = writeDriftEvent(target.sessionId, seq, started, {
+        ts: new Date(started).toISOString(),
+        kind: "drift",
+        reason: "drift",
+        seq,
+        sessionId: target.sessionId,
+        provider: target.providerId,
+        lane: target.lane ?? "",
+        model: typeof body.model === "string" ? body.model : "",
+        key,
+        // A rotated pool key breaks the cache without touching a byte of the
+        // body: the one cause no diff of the two bodies can show.
+        keyChanged: before.key !== key,
+        messages: messages.length,
+        prevMessages: prevMessagesOf(before),
+        prefixSame: prefixSame ?? 0,
+        systemChanged,
+        toolsChanged,
+        firstDiff: firstDiff(
+          before.chain,
+          chain,
+          prevBody ? bodyMessages(prevBody) : [],
+          messages,
+        ),
+        // Only when the head itself moved: then these two texts are the answer,
+        // and the rest of the time they would double the file to say nothing.
+        ...(systemChanged || toolsChanged
+          ? { head: { prev: prevBody ? headTexts(prevBody) : null, current: headTexts(body) } }
+          : {}),
+        prev,
+        body: rawBody,
+      });
+    }
     const file = path.join(wireLogDir(), `${shortId(target.sessionId)}.jsonl`);
-    const bodyFile = logging && mode === "full" ? freeBodyName(target.sessionId, seq, started) : "";
     if (logging) {
       // A body is megabytes: it rides its own file, and the line carries the name
       // so a reader never has to guess it. The line stays small enough to read
@@ -511,6 +690,17 @@ export function withWireLog(
         ...(bodyFile ? { bodyFile } : {}),
       };
       appendLine(file, entry);
+      // The event's own line: one `kind` to grep, and the request's line stays
+      // the place where a request is priced.
+      if (driftFile) {
+        appendLine(file, {
+          ts: new Date(started).toISOString(),
+          kind: "drift",
+          reason: "drift",
+          seq,
+          driftFile,
+        });
+      }
       if (bodyFile) {
         try {
           const bodyPath = path.join(wireLogDir(), bodyFile);
@@ -536,6 +726,7 @@ export function withWireLog(
             prefixSame: prefixSame!,
             systemChanged,
             toolsChanged,
+            ...(driftFile ? { driftFile } : {}),
           })) !== false;
       } catch {
         /* a warning must never fail the request it describes */
@@ -590,6 +781,50 @@ export function withWireLog(
         contentLength: text.length,
         ...(response.status >= 400 ? { error: text.slice(0, 500) } : {}),
       });
+      // The other half of the bill: the head went out byte-identical and the
+      // provider still charged every token. No diff of the two bodies can
+      // explain that — the key, the routing or the provider's own cache can —
+      // and until now it was a number in the tokens panel (`coldMisses`) with
+      // nothing behind it. Written from the answer, where the usage is, and by
+      // the same writer, so all three lanes get it and not just the chat's turn.
+      if (
+        mode === "full" &&
+        watchingHead &&
+        response.ok &&
+        before &&
+        !drifted &&
+        usage &&
+        usage.input > 0 &&
+        usage.cached === 0
+      ) {
+        const coldFile = writeDriftEvent(target.sessionId, seq, started, {
+          ts: new Date().toISOString(),
+          kind: "drift",
+          reason: "provider_cold",
+          seq,
+          sessionId: target.sessionId,
+          provider: target.providerId,
+          lane: target.lane ?? "",
+          model: typeof body.model === "string" ? body.model : "",
+          key,
+          keyChanged: before.key !== key,
+          messages: messages.length,
+          prevMessages: prevMessagesOf(before),
+          prefixSame: prefixSame ?? 0,
+          systemChanged: false,
+          toolsChanged: false,
+          usage,
+        });
+        if (coldFile) {
+          appendLine(file, {
+            ts: new Date().toISOString(),
+            kind: "drift",
+            reason: "provider_cold",
+            seq,
+            driftFile: coldFile,
+          });
+        }
+      }
     })();
     return response;
   };

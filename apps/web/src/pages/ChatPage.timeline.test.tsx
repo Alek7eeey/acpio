@@ -647,7 +647,7 @@ describe("compaction row", () => {
 
 describe("context drift row", () => {
   /** A turn that reported its own request head moving mid-history. */
-  const drifted = (logMode: string): SessionDetailDto => ({
+  const drifted = (logMode: string, driftFile?: string): SessionDetailDto => ({
     ...detail,
     messages: [
       detail.messages[0]!,
@@ -668,6 +668,7 @@ describe("context drift row", () => {
               prevMessages: 81,
               prefixSame: 77,
               logMode,
+              ...(driftFile ? { driftFile } : {}),
             },
             createdAt: "2026-09-30T10:00:01.000Z",
           },
@@ -711,6 +712,18 @@ describe("context drift row", () => {
     // The bodies behind the warning are one click away, and only that chat's.
     const link = row?.querySelector<HTMLAnchorElement>("a");
     expect(link?.getAttribute("href")).toBe("/api/wire-log/archive?session=s1");
+  });
+
+  // The archive is a zip of the whole folder; the event is the one record that
+  // says why this request was billed in full. The card that showed the miss
+  // names it, or the reader learns a miss happened and then hunts for it.
+  it("names the event file the miss was written to", async () => {
+    const { container } = mount(drifted("full", "s1/drift-0002-1795205758175.json"));
+    await expandSteps(container);
+    await screen.findByText("Контекст изменился в середине");
+
+    const row = container.querySelector<HTMLElement>("[data-context-drift-id]");
+    expect(row?.textContent).toContain("событие: s1/drift-0002-1795205758175.json");
   });
 
   it("holds the turn on its own row instead of asking as the agent", async () => {

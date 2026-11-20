@@ -498,6 +498,7 @@
     "contextDriftSystem": "the system prompt changed",
     "contextDriftTools": "the tool set changed",
     "contextDriftDownload": "download the chat's logs (zip)",
+    "contextDriftFile": "event: {{file}}",
     "contextDriftNoLog": "turn on full logging to download the request bodies",
     "contextDriftParked": "Turn paused",
     "contextDriftYourAnswer": "Your answer:",

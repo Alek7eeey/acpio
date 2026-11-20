@@ -2146,6 +2146,7 @@ function ContextDriftRow({ part, sessionId }: { part: MessagePartDto; sessionId?
     part.payload.toolsChanged === true ? t("chat.contextDriftTools") : "",
   ].filter(Boolean);
   const full = String(part.payload.logMode ?? "") === "full";
+  const driftFile = String(part.payload.driftFile ?? "").trim();
   const archiveHref = sessionId
     ? `/api/wire-log/archive?session=${encodeURIComponent(sessionId)}`
     : "";
@@ -2167,6 +2168,14 @@ function ContextDriftRow({ part, sessionId }: { part: MessagePartDto; sessionId?
         ) : (
           <span className={styles.compactionMeta}>{t("chat.contextDriftNoLog")}</span>
         )}
+        {/* The one record that explains this miss, named where the miss is
+            shown: otherwise the reader learns the card exists and then hunts
+            the log folder for the file that goes with it. */}
+        {driftFile ? (
+          <span className={styles.compactionMeta}>
+            {t("chat.contextDriftFile", { file: driftFile })}
+          </span>
+        ) : null}
       </div>
       {/* The loop held its own next request here — this is not the model
           asking anything, so the decision lives on this row: no question

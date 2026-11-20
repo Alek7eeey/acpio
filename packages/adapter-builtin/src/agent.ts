@@ -2043,6 +2043,9 @@ export class BuiltinAgent implements InProcessAgentTransport {
         messages: drift.messages,
         prevMessages: drift.prevMessages,
         prefixSame: drift.prefixSame,
+        // The file this miss was written to, for a host that has to draw the
+        // card from scratch: the name is what turns a warning into a record.
+        ...(drift.driftFile ? { driftFile: drift.driftFile } : {}),
         questions: [
           {
             id: "drift",

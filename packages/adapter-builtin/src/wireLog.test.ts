@@ -51,6 +51,16 @@ describe("wire log", () => {
       .filter(Boolean)
       .map((line) => JSON.parse(line));
 
+  /** The self-contained cache-miss events written for this chat. */
+  const driftEvents = (): any[] => {
+    const folder = path.join(wireLogDir(), "sess-1");
+    if (!fs.existsSync(folder)) return [];
+    return fs
+      .readdirSync(folder)
+      .filter((name) => name.startsWith("drift-"))
+      .map((name) => JSON.parse(fs.readFileSync(path.join(folder, name), "utf8")));
+  };
+
   it("records the request's head hashes, the key fingerprint and the answer's usage", async () => {
     const fetch = withWireLog(
       { sessionId: "sess-1", providerId: "legacy" },
@@ -651,6 +661,250 @@ describe("wire log", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // The two switches together are the promise: `full` has the bodies, the head
+  // switch says a broken head is worth a record. One file per miss, holding
+  // both requests whole — the reader it is written for was gluing four files by
+  // hand, and after a turn of the mode switch two of them did not exist.
+  it("writes one self-contained event per miss, with both requests' bodies", async () => {
+    process.env.ACPIO_WIRE_LOG = "full";
+    resetWireLogState();
+    const drifts: ContextDrift[] = [];
+    const call = withWireLog(
+      { sessionId: "sess-1", providerId: "legacy" },
+      (async () => jsonResponse({})) as typeof globalThis.fetch,
+      { onDrift: (drift) => drifts.push(drift), watch: () => true },
+    );
+    const send = (messages: unknown[]) =>
+      call("https://relay.test/v1/chat/completions", {
+        method: "POST",
+        body: JSON.stringify({ model: "m", messages }),
+      });
+    const one = { role: "user", content: "one" };
+    const two = { role: "assistant", content: "two" };
+
+    await send([one, two]);
+    await send([one, { role: "assistant", content: "TWO" }]);
+
+    const events = driftEvents();
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      kind: "drift",
+      reason: "drift",
+      seq: 2,
+      prefixSame: 1,
+      prevMessages: 2,
+      messages: 2,
+    });
+    // The message the head moved at, named by role rather than by index alone.
+    expect(events[0].firstDiff).toMatchObject({ index: 1, roleNext: "assistant" });
+    // The previous request comes from its own file on disk, not from memory.
+    expect(JSON.parse(events[0].prev.body).messages[1].content).toBe("two");
+    expect(JSON.parse(events[0].body).messages[1].content).toBe("TWO");
+    // And both the line and the listener point at it.
+    const name = `sess-1/${fs
+      .readdirSync(path.join(wireLogDir(), "sess-1"))
+      .find((entry) => entry.startsWith("drift-"))}`;
+    expect(lines().find((line) => line.kind === "drift")).toMatchObject({ seq: 2, driftFile: name });
+    expect(drifts[0]?.driftFile).toBe(name);
+  });
+
+  it("leaves the previous head's texts out unless the head itself moved", async () => {
+    process.env.ACPIO_WIRE_LOG = "full";
+    resetWireLogState();
+    const call = withWireLog(
+      { sessionId: "sess-1", providerId: "legacy" },
+      (async () => jsonResponse({})) as typeof globalThis.fetch,
+      { watch: () => true },
+    );
+    const messages = [{ role: "user", content: "one" }];
+    const tools = [{ type: "function", function: { name: "read" } }];
+    const send = (next: unknown[], withTools = tools) =>
+      call("https://relay.test/v1/chat/completions", {
+        method: "POST",
+        body: JSON.stringify({ model: "m", messages: next, tools: withTools }),
+      });
+
+    await send(messages);
+    // The tool list changed: that sits ahead of every message, so the file has
+    // to carry both lists — the one thing that explains the miss.
+    await send(messages, [{ type: "function", function: { name: "write" } }]);
+
+    const events = driftEvents();
+    expect(events).toHaveLength(1);
+    expect(events[0].toolsChanged).toBe(true);
+    // No message was rewritten — the head moved ahead of them — so no message
+    // is named as the first difference.
+    expect(events[0].firstDiff).toBeNull();
+    expect(events[0].head.current.tools[0].function.name).toBe("write");
+    expect(events[0].head.prev.tools[0].function.name).toBe("read");
+  });
+
+  it("writes no event when only the summary log is on", async () => {
+    process.env.ACPIO_WIRE_LOG = "1";
+    resetWireLogState();
+    const call = withWireLog(
+      { sessionId: "sess-1", providerId: "legacy" },
+      (async () => jsonResponse({})) as typeof globalThis.fetch,
+      { watch: () => true },
+    );
+    const send = (messages: unknown[]) =>
+      call("https://relay.test/v1/chat/completions", {
+        method: "POST",
+        body: JSON.stringify({ model: "m", messages }),
+      });
+    const one = { role: "user", content: "one" };
+
+    await send([one, { role: "assistant", content: "two" }]);
+    await send([one, { role: "assistant", content: "TWO" }]);
+
+    expect(driftEvents()).toEqual([]);
+    expect(lines().some((line) => line.kind === "drift")).toBe(false);
+  });
+
+  it("writes no event when the head switch is off", async () => {
+    process.env.ACPIO_WIRE_LOG = "full";
+    resetWireLogState();
+    const call = withWireLog(
+      { sessionId: "sess-1", providerId: "legacy" },
+      (async () => jsonResponse({})) as typeof globalThis.fetch,
+      { watch: () => false },
+    );
+    const one = { role: "user", content: "one" };
+
+    await call("https://relay.test/v1/chat/completions", {
+      method: "POST",
+      body: JSON.stringify({ model: "m", messages: [one, { role: "assistant", content: "two" }] }),
+    });
+    await call("https://relay.test/v1/chat/completions", {
+      method: "POST",
+      body: JSON.stringify({ model: "m", messages: [one, { role: "assistant", content: "TWO" }] }),
+    });
+
+    expect(driftEvents()).toEqual([]);
+  });
+
+  it("finds the previous body after a restart, from the head file alone", async () => {
+    process.env.ACPIO_WIRE_LOG = "full";
+    const one = { role: "user", content: "one" };
+    // Each call is a fresh process: the memory copy is gone, the head file is
+    // not — and the head file is the only pointer to the body before this one.
+    const send = async (messages: unknown[]) => {
+      resetWireLogState();
+      const call = withWireLog(
+        { sessionId: "sess-1", providerId: "legacy" },
+        (async () => jsonResponse({})) as typeof globalThis.fetch,
+        { watch: () => true },
+      );
+      await call("https://relay.test/v1/chat/completions", {
+        method: "POST",
+        body: JSON.stringify({ model: "m", messages }),
+      });
+    };
+
+    await send([one, { role: "assistant", content: "two" }]);
+    await send([one, { role: "assistant", content: "TWO" }]);
+
+    const events = driftEvents();
+    expect(events).toHaveLength(1);
+    expect(JSON.parse(events[0].prev.body).messages[1].content).toBe("two");
+  });
+
+  it("compares a head file written before the bodies were named", async () => {
+    process.env.ACPIO_WIRE_LOG = "full";
+    resetWireLogState();
+    const one = { role: "user", content: "one" };
+    const send = async (messages: unknown[]) => {
+      resetWireLogState();
+      const call = withWireLog(
+        { sessionId: "sess-1", providerId: "legacy" },
+        (async () => jsonResponse({})) as typeof globalThis.fetch,
+        { watch: () => true },
+      );
+      await call("https://relay.test/v1/chat/completions", {
+        method: "POST",
+        body: JSON.stringify({ model: "m", messages }),
+      });
+    };
+
+    await send([one, { role: "assistant", content: "two" }]);
+    // What an older build left behind: the hashes are there, the new two fields
+    // are not. An upgrade must not cost the chat its comparison.
+    const headFile = path.join(dir, "sess-1.head.json");
+    const all = JSON.parse(fs.readFileSync(headFile, "utf8")) as Record<string, any>;
+    for (const key of Object.keys(all)) {
+      delete all[key].bodyFile;
+      delete all[key].at;
+    }
+    fs.writeFileSync(headFile, JSON.stringify(all), "utf8");
+
+    await send([one, { role: "assistant", content: "TWO" }]);
+
+    const events = driftEvents();
+    expect(events).toHaveLength(1);
+    // No body to hand over, and the file says so instead of inventing one.
+    expect(events[0].prev).toMatchObject({ missing: true, since: "" });
+  });
+
+  it("records a miss in the compaction lane, which has no card", async () => {
+    process.env.ACPIO_WIRE_LOG = "full";
+    resetWireLogState();
+    // The pass that squeezes the window rewrites the history; it has no drift
+    // listener, and it is where a broken head costs the most.
+    const call = withWireLog(
+      { sessionId: "sess-1", providerId: "legacy", lane: "compaction" },
+      (async () => jsonResponse({})) as typeof globalThis.fetch,
+      { watch: () => true },
+    );
+    const send = (messages: unknown[]) =>
+      call("https://relay.test/v1/chat/completions", {
+        method: "POST",
+        body: JSON.stringify({ model: "m", messages }),
+      });
+    const one = { role: "user", content: "one" };
+
+    await send([one, { role: "assistant", content: "two" }]);
+    await send([{ role: "user", content: "ONE" }, { role: "assistant", content: "two" }]);
+
+    const events = driftEvents();
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ lane: "compaction", reason: "drift" });
+  });
+
+  it("records a cold miss under an intact head, without inventing bodies", async () => {
+    process.env.ACPIO_WIRE_LOG = "full";
+    resetWireLogState();
+    const call = withWireLog(
+      { sessionId: "sess-1", providerId: "legacy" },
+      (async () =>
+        jsonResponse({
+          usage: { prompt_tokens: 100, completion_tokens: 5 },
+        })) as typeof globalThis.fetch,
+      { watch: () => true },
+    );
+    const send = () =>
+      call("https://relay.test/v1/chat/completions", {
+        method: "POST",
+        body: JSON.stringify({
+          model: "m",
+          messages: [{ role: "user", content: "one" }],
+        }),
+      });
+
+    // Byte-identical to the request before it, and the provider charged the
+    // whole prompt: no diff of the two bodies can explain that, so the file
+    // carries none.
+    await send();
+    await send();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const events = driftEvents();
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ reason: "provider_cold", seq: 2 });
+    expect(events[0].usage).toEqual({ input: 100, cached: 0, output: 5 });
+    expect(events[0].prev).toBeUndefined();
+    expect(events[0].body).toBeUndefined();
   });
 
   it("stays silent when the switch is off", async () => {

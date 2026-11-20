@@ -1713,6 +1713,12 @@ export async function handleUpdate(rt: SessionRuntime, update: import("./AcpClie
       ...(raw.systemChanged === true ? { systemChanged: true } : {}),
       ...(raw.toolsChanged === true ? { toolsChanged: true } : {}),
       ...(typeof raw.logMode === "string" ? { logMode: raw.logMode } : {}),
+      // The card names the file the miss was written to: the payload is a
+      // whitelist, so a field the agent sends but this list forgets is a field
+      // the reader never sees (`driftFile`).
+      ...(typeof raw.driftFile === "string" && raw.driftFile
+        ? { driftFile: raw.driftFile }
+        : {}),
     });
     return;
   }
@@ -2327,6 +2333,9 @@ async function handleIncomingRequest(rt: SessionRuntime, req: AcpRequest) {
       pending: true,
       ...(typeof req.params.title === "string" ? { title: req.params.title } : {}),
       ...(Array.isArray(req.params.questions) ? { questions: req.params.questions } : {}),
+      ...(typeof req.params.driftFile === "string" && req.params.driftFile
+        ? { driftFile: req.params.driftFile }
+        : {}),
     };
     const driftPart = findOpenDriftPart(await getSessionDetail(rt.sessionId));
     if (driftPart) {
