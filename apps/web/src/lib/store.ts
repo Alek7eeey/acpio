@@ -1733,6 +1733,22 @@ function clearUnseenFinished(
 const DRAFT_PERSIST_DELAY_MS = 600;
 let draftPersistTimer: number | null = null;
 
+/**
+ * The one way a settings bag from the server reaches the store.
+ *
+ * A reply is written by whatever build the server is running, which is not
+ * always the build the browser was loaded from: a server started before a
+ * setting came back answers without it. Storing such a reply raw blanked the
+ * whole app — the composer's chip row read `chatChipOptions.folder.truncate`,
+ * the render threw, React unmounted the tree, and because a draft is persisted
+ * as a settings write, the crash fed on the reader's first typed word (chat
+ * 1014a346). The merge is the same one the boot payload gets, so every field the
+ * UI reads is present no matter what the reply carried.
+ */
+function savedSettings(reply: unknown): AppSettings {
+  return mergeClientAppSettings(reply);
+}
+
 function scheduleComposerDraftPersist(get: () => AppState) {
   if (typeof window === "undefined") return;
   if (draftPersistTimer !== null) window.clearTimeout(draftPersistTimer);
@@ -1769,7 +1785,7 @@ async function loadAppData(
 ) {
   const storedTheme = localStorage.getItem("acpio.theme") as Theme | null;
   const storedLocale = localStorage.getItem("acpio.locale") as AppLocale | null;
-  const settings = mergeClientAppSettings(await api.getSettings());
+  const settings = savedSettings(await api.getSettings());
   const theme = storedTheme ?? settings.theme ?? "light";
   const locale =
     storedLocale === "en" || storedLocale === "ru" ? storedLocale : settings.locale ?? "en";
@@ -2604,7 +2620,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (settings.connectedProvider !== nextDefault) patch.connectedProvider = nextDefault;
       if (Object.keys(patch).length) {
         try {
-          const saved = await api.updateSettings(patch);
+          const saved = savedSettings(await api.updateSettings(patch));
           set({ settings: saved });
         } catch {
           /* keep local */
@@ -2614,7 +2630,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       void get().ensureModels(focus);
     } else if (settings.connectedProvider) {
       try {
-        const saved = await api.updateSettings({ connectedProvider: null });
+        const saved = savedSettings(await api.updateSettings({ connectedProvider: null }));
         set({ settings: saved });
       } catch {
         /* keep local */
@@ -2809,14 +2825,14 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async setTheme(theme) {
     get().applyTheme(theme);
-    const settings = await api.updateSettings({ theme });
+    const settings = savedSettings(await api.updateSettings({ theme }));
     set({ settings });
     applyAppearance(settings);
   },
 
   async setLocale(locale) {
     get().applyLocale(locale);
-    const settings = await api.updateSettings({ locale });
+    const settings = savedSettings(await api.updateSettings({ locale }));
     set({ settings });
   },
 
@@ -4744,7 +4760,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       providerChanged && patch.defaultModel === undefined
         ? { ...patch, defaultModel: "", defaultModelParams: {} }
         : patch;
-    const settings = await api.updateSettings(nextPatch);
+    const settings = savedSettings(await api.updateSettings(nextPatch));
     let nextSettings =
       typeof nextPatch.chatSplit === "boolean"
         ? { ...settings, chatSplit: nextPatch.chatSplit }
