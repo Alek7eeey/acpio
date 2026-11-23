@@ -56,15 +56,42 @@ describe("ChatInlinePrompt — the plan card", () => {
     expect(useAppStore.getState().pendingQuestion?.requestId).toBe("r1");
   });
 
-  it("answers a rejection on its own: the turn ends and nothing is implemented", () => {
+  it("hands the refusal to the page: the composer takes the reader's words", () => {
+    const answerQuestion = vi.fn(async () => {});
+    const onRejectPlan = vi.fn();
+    useAppStore.setState({ answerQuestion });
+    renderPrompt({ onAcceptPlan: vi.fn(), onRejectPlan });
+
+    fireEvent.click(screen.getByText("Reject"));
+    expect(onRejectPlan).toHaveBeenCalledTimes(1);
+    // Nothing is answered from the card: the words that go back to the agent are
+    // what answer it, and the page puts them in the composer.
+    expect(answerQuestion).not.toHaveBeenCalled();
+  });
+
+  it("asks for the words while the refusal is under way, and keeps the way back", () => {
+    const onCancelReject = vi.fn();
+    const onAcceptPlan = vi.fn();
+    renderPrompt({ onAcceptPlan, onRejectPlan: vi.fn(), rejectingPlan: true, onCancelReject });
+
+    // The refusal is the card's state now: no «Reject» to press again, and the
+    // field the words go into is the composer right under it.
+    expect(screen.getByText("Plan not approved")).toBeTruthy();
+    expect(screen.queryByText("Reject")).toBeNull();
+    fireEvent.click(screen.getByText("Cancel"));
+    expect(onCancelReject).toHaveBeenCalledTimes(1);
+    // A change of mind is one press away: the plan is still approvable.
+    fireEvent.click(screen.getByText("Approve"));
+    expect(onAcceptPlan).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses on its own when the page offers no field for the words", () => {
     const answerQuestion = vi.fn(async () => {});
     useAppStore.setState({ answerQuestion });
     renderPrompt({ onAcceptPlan: vi.fn() });
 
     fireEvent.click(screen.getByText("Reject"));
-    expect(answerQuestion).toHaveBeenCalledWith({
-      outcome: { outcome: "rejected", reason: "rejected by user" },
-    });
+    expect(answerQuestion).toHaveBeenCalledWith({ outcome: { outcome: "rejected" } });
   });
 
   it("closes the card without answering it — the harness ends the turn", () => {

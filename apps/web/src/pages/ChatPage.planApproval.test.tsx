@@ -229,10 +229,15 @@ describe("the plan's approval", () => {
     });
 
     renderChat();
-    fireEvent.click((await planCard()).getByText("Отклонить"));
+    const card = await planCard();
+    // Refusing hands the words to the chat's composer, and Enter sends them back.
+    fireEvent.click(card.getByText("Отклонить"));
+    const composer = await screen.findByPlaceholderText("Что поправить в плане?");
+    fireEvent.change(composer, { target: { value: "Добавь шаг с тестами" } });
+    fireEvent.keyDown(composer, { key: "Enter" });
     await waitFor(() =>
       expect(api.answerQuestion).toHaveBeenCalledWith("s1", "s1:237", {
-        outcome: { outcome: "rejected", reason: "rejected by user" },
+        outcome: { outcome: "rejected", reason: "Добавь шаг с тестами" },
       }),
     );
   });
@@ -505,28 +510,66 @@ describe("the plan's approval", () => {
 
     fireEvent.click(await screen.findByLabelText("Закрыть карточку и написать новый запрос"));
 
-    // A parked turn only ends by being answered — silence is not consent.
+    // A parked turn only ends by being answered — silence is not consent. The X
+    // carries no words of the reader's: the turn just ends.
     await waitFor(() =>
       expect(api.answerQuestion).toHaveBeenCalledWith("s1", "r1", {
-        outcome: { outcome: "rejected", reason: "rejected by user" },
+        outcome: { outcome: "rejected" },
       }),
     );
     expect(api.setSessionPlan).not.toHaveBeenCalled();
     expect(api.prompt).not.toHaveBeenCalled();
   });
 
-  it("answers a rejection and sends nothing else: the plan stays a draft", async () => {
+  it("answers a rejection with the reader's words: the same turn reworks the plan", async () => {
     park(session(), true);
     renderChat();
 
-    fireEvent.click((await planCard()).getByText("Отклонить"));
+    const card = await planCard();
+    fireEvent.click(card.getByText("Отклонить"));
+    // The field for those words is the composer the reader already types in —
+    // not a second input on the card, and not one in the panel's footer.
+    const composer = await screen.findByPlaceholderText("Что поправить в плане?");
+    expect(card.queryByPlaceholderText("Что поправить в плане?")).toBeNull();
+    // The card asks for those words instead of offering its two answers again,
+    // and the panel's footer stays out of the way while they are typed.
+    expect(screen.queryByText("План готов к подтверждению")).toBeNull();
+    expect(screen.getByText("План не одобрен")).toBeTruthy();
+    expect(screen.queryByText("Утвердить")).toBeNull();
+    fireEvent.change(composer, { target: { value: "  Добавь шаг с тестами  " } });
+    fireEvent.keyDown(composer, { key: "Enter" });
 
+    // What the reader typed is the answer the agent gets, not a prompt of its
+    // own: nothing is sent besides it, and the plan stays a draft.
     await waitFor(() =>
       expect(api.answerQuestion).toHaveBeenCalledWith("s1", "r1", {
-        outcome: { outcome: "rejected", reason: "rejected by user" },
+        outcome: { outcome: "rejected", reason: "Добавь шаг с тестами" },
       }),
     );
     expect(api.setSessionPlan).not.toHaveBeenCalled();
+    expect(api.prompt).not.toHaveBeenCalled();
+  });
+
+  it("takes a refusal back: the same card approves the plan after all", async () => {
+    park(session(), true);
+    renderChat();
+
+    const card = await planCard();
+    fireEvent.click(card.getByText("Отклонить"));
+    // While the words are being written the card offers the way back, and a
+    // change of mind is still an approval of the very same plan.
+    fireEvent.click((await planCard()).getByText("Одобрить"));
+    fireEvent.click(
+      within(await screen.findByRole("dialog", { name: "Как выполнять шаги?" })).getByText(
+        "Всё сразу",
+      ),
+    );
+
+    await waitFor(() =>
+      expect(api.answerQuestion).toHaveBeenCalledWith("s1", "r1", {
+        outcome: { outcome: "accepted" },
+      }),
+    );
     expect(api.prompt).not.toHaveBeenCalled();
   });
 

@@ -36,6 +36,16 @@ export type PlanUpdate = {
   path: string;
 } & PlanDocument;
 
+/** The reader's answer to the plan card: a yes, or the words they sent back. */
+export interface PlanApproval {
+  accepted: boolean;
+  /**
+   * What the reader asked to change. Only their own words: a card closed with
+   * the X, or a turn stopped with Stop, carries none — silence is not feedback.
+   */
+  feedback?: string;
+}
+
 /**
  * The plan file as a tool sees it: read what is on disk, write it back (file
  * and panel in one step), and — for `apply_plan` — ask the reader to approve.
@@ -47,7 +57,7 @@ export interface PlanBridge {
   path: string;
   read: () => PlanState | undefined;
   write: (state: PlanState) => void;
-  approve: (state: PlanState) => Promise<boolean>;
+  approve: (state: PlanState) => Promise<PlanApproval>;
 }
 
 export interface BuiltinToolOptions {
@@ -875,9 +885,10 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
             "once the plan is written, in the same turn. The card itself says the plan is ready and " +
             "carries the answers, so the answer adds nothing about it — no «план готов», no «карточка " +
             "его одобряет». Approved, the stage turns `applying` and " +
-            "the work begins; rejected, nothing is implemented and the turn ends there — the reader " +
-            "will say what to change. Never call it before the reader has seen the plan, and never " +
-            "again once the stage is `applying`.",
+            "the work begins. Rejected with the reader's own words, they come back as this tool's " +
+            "answer: rework the plan with `plan` and call this again in the same turn. Rejected in " +
+            "silence, nothing is implemented and the turn ends there. Never call it before the " +
+            "reader has seen the plan, and never again once the stage is `applying`.",
           inputSchema: z.object({
             pacing: z
               .enum(["whole", "step"])
@@ -912,9 +923,21 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
               );
             }
             const asked: PlanState = { ...prev, pacing: pace, stage: "draft" };
-            const accepted = await planBridge.approve(asked);
-            if (!accepted) {
+            const answer = await planBridge.approve(asked);
+            if (!answer.accepted) {
               planBridge.write({ ...asked, stage: "draft" });
+              // The reader's words are what the plan owes an answer to: the same
+              // turn reworks it and asks again, as many times as they want to
+              // change something. A refusal with nothing typed ends the turn.
+              if (answer.feedback) {
+                return (
+                  `The reader did not approve the plan and said what to change:\n\n` +
+                  `"${answer.feedback}"\n\n` +
+                  "Rework the plan with `plan` along those words — change what they asked for " +
+                  "and keep what they did not — then call `apply_plan` again in this turn and " +
+                  "wait for the answer. Implement nothing until the stage is `applying`."
+                );
+              }
               return (
                 "The reader did not approve the plan. Implement nothing and end the turn: they " +
                 "will say what to change. Do not rework the plan on your own and do not call " +

@@ -1443,6 +1443,11 @@
     "planApprove": "Approve",
     "planPace": "How should the steps be done?",
     "planDismiss": "Close the card and write a new prompt",
+    "planRejectHint": "What should change in the plan?",
+    "planRejected": "Plan not approved",
+    "planRejectedHint": "Say what should change in the field below and send it — the agent reworks the plan in this same turn. Or approve it as it is.",
+
+
     "modeSwitch": "Mode switch suggested",
     "modeSwitchTitle": "Switch to {{mode}}?",
     "modeSwitchHint": "The agent wants to change the session mode. Approve to switch, or reject to stay in the current mode.",

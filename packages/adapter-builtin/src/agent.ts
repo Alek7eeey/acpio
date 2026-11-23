@@ -96,6 +96,7 @@ import {
 } from "./planFile.js";
 import {
   createBuiltinTools,
+  type PlanApproval,
   type PlanEntry,
   type PlanBridge,
 } from "./tools.js";
@@ -1640,18 +1641,24 @@ export class BuiltinAgent implements InProcessAgentTransport {
    * approves the very document the panel shows. A turn cut short while it waits
    * reads as a no — silence is not consent.
    */
-  private async approvePlan(state: PlanState): Promise<boolean> {
+  private async approvePlan(state: PlanState): Promise<PlanApproval> {
     const plan = this.planFrame(state);
     delete plan.sessionUpdate;
     this.planApprovals += 1;
     try {
-      const res = await this.rpc.request<{ outcome?: { outcome?: string } }>(
+      const res = await this.rpc.request<{ outcome?: { outcome?: string; reason?: string } }>(
         "builtin/plan_approval",
         plan,
       );
-      return res?.outcome?.outcome === "accepted";
+      if (res?.outcome?.outcome === "accepted") return { accepted: true };
+      // The card puts the reader's own words into `reason` when they type them:
+      // that is the answer `apply_plan` hands back so the same turn can rework
+      // the plan. Stop (`cancelled`) and the X carry none — silence is not a yes
+      // and not a wish either.
+      const feedback = typeof res?.outcome?.reason === "string" ? res.outcome.reason.trim() : "";
+      return { accepted: false, ...(feedback ? { feedback } : {}) };
     } catch {
-      return false;
+      return { accepted: false };
     }
   }
 

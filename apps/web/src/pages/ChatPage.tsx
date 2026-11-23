@@ -4992,6 +4992,10 @@ function ChatThread() {
   /** The composer holds a rewrite — of a sent message or of a queued request —
    *  so it stages no files and recalls no history: an edit rewrites text only. */
   const rewriting = editingMessageId !== null || editingQueueId !== null;
+  /** The plan card was refused and the reader is answering it with words: the
+   *  composer is that answer's field, and what it sends goes back to the turn
+   *  that asked — not out as a prompt of its own. */
+  const [planRejecting, setPlanRejecting] = useState(false);
   const [composerMultiline, setComposerMultiline] = useState(false);
   const composerMultilineRef = useRef(false);
   const [cursorPos, setCursorPos] = useState(0);
@@ -5269,6 +5273,11 @@ function ChatThread() {
    *  as finished instead of pulsing "Работаю…" over a plan that is already
    *  written. The card itself is what is waiting. */
   const planPending = pendingQuestion?.kind === "create_plan";
+  // A card answered any other way (approved, closed with the X, or gone with the
+  // turn) ends the refusal: the composer goes back to sending prompts.
+  useEffect(() => {
+    if (!planPending) setPlanRejecting(false);
+  }, [planPending]);
   const stepsStreaming = turnBusy && !answerVisible && !planPending;
 
   // MCP servers this chat's agent session runs with: the folder's list
@@ -5456,13 +5465,23 @@ function ChatThread() {
     void sendPrompt(t("planPanel.approvePrompt"), { internal: true });
   };
 
+  /** «Отклонить», from the card or from the panel: the words go into the
+   *  composer the reader already types in, and Enter sends them back as the
+   *  answer. Nothing is answered yet — the refusal waits for those words. */
+  const startPlanReject = () => {
+    setPlanRejecting(true);
+    requestAnimationFrame(() => focusComposer());
+  };
+
   /** Closing the card is not one of its answers, but it has to be one for the
    *  agent: a parked turn only ends by being answered, and until it does the
    *  reader's next prompt would sit in the queue. Rejected keeps the plan a
    *  draft — it is still in the panel, and saying what to change is the point. */
   const dismissPlanCard = () => {
     if (!planPending) return;
-    void answerQuestion({ outcome: { outcome: "rejected", reason: "rejected by user" } });
+    // No words: closing the card ends the turn. The reader's own words are the
+    // card's «Отклонить», which hands them back to the agent as the answer.
+    void answerQuestion({ outcome: { outcome: "rejected" } });
   };
 
   /** The plan file itself, verbatim — what the panel's editor opens and saves. */
@@ -6465,6 +6484,17 @@ function ChatThread() {
       const queued = promptQueueAll.find((q) => q.id === editingQueueId);
       if (queued && value && value !== queued.text) updateQueuedPrompt(queued.id, value);
       cancelQueueEdit();
+      return;
+    }
+    // The plan card was refused: this is not a prompt for the queue but the
+    // answer the parked turn waits for, and the agent reworks the plan from it.
+    if (planRejecting) {
+      if (!value) return;
+      setText("");
+      setPlanRejecting(false);
+      setComposerMultilineIfNeeded(false);
+      setCursorPos(0);
+      void answerQuestion({ outcome: { outcome: "rejected", reason: value } });
       return;
     }
     if ((!value && !hasSendableAttachments) || composerLocked || attachmentsUploading) return;
@@ -8286,6 +8316,9 @@ function ChatThread() {
               planPending ? (pacing) => void approvePlan("pending", pacing) : undefined
             }
             onDismissPlan={planPending ? dismissPlanCard : undefined}
+            onRejectPlan={planPending ? startPlanReject : undefined}
+            rejectingPlan={planPending && planRejecting}
+            onCancelReject={() => setPlanRejecting(false)}
             askPace={planHasFile}
             busy={planApproving}
           />
@@ -8731,12 +8764,14 @@ function ChatThread() {
                 offerPasteAsFile(pasted, { start, end });
               }}
               placeholder={
-                slashInputHint ??
-                (chatInitializing
-                  ? ""
-                  : composerLocked && !agentMissing && !agentUnavailable
-                    ? t("common.loadingModels")
-                    : t("common.messageOrCommand"))
+                planRejecting
+                  ? t("question.planRejectHint")
+                  : (slashInputHint ??
+                    (chatInitializing
+                      ? ""
+                      : composerLocked && !agentMissing && !agentUnavailable
+                        ? t("common.loadingModels")
+                        : t("common.messageOrCommand")))
               }
               rows={1}
               disabled={composerLocked}
@@ -9204,9 +9239,9 @@ function ChatThread() {
           /* One approval, two places it can come from: the card's own question
              while a turn is parked on it, the footer's button for a draft nobody
              waits on. Both write the stage into `.acpio/plan.md`. */
-          onAccept={planPending ? () => void approvePlan("pending") : undefined}
+          onAccept={planPending && !planRejecting ? () => void approvePlan("pending") : undefined}
           onApprove={
-            activePlan?.stage === "draft" && activeSession
+            activePlan?.stage === "draft" && activeSession && !planRejecting
               ? () => void approvePlan("draft")
               : undefined
           }
@@ -9221,14 +9256,13 @@ function ChatThread() {
           onReadText={activeSession ? readPlanText : undefined}
           onWriteText={activeSession ? writePlanText : undefined}
           approving={planApproving}
-          onReject={
-            planPending
-              ? () =>
-                  void answerQuestion({
-                    outcome: { outcome: "rejected", reason: "rejected by user" },
-                  })
-              : undefined
-          }
+          /* Refusing asks what to change, and the composer is where the reader
+             types it: those words go back to the agent as the answer to its own
+             question, and it reworks the plan in the same turn. While they are
+             being typed the footer's own answers step aside — the composer's
+             bar carries the refusal, and two places asking at once is one too
+             many. */
+          onReject={planPending && !planRejecting ? startPlanReject : undefined}
         />
       </div>
 

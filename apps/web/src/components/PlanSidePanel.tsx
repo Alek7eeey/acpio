@@ -54,6 +54,8 @@ export function PlanSidePanel({
   onRemove?: () => void;
   /** Answer the waiting card's own question: the plan starts implementing. */
   onAccept?: () => void;
+  /** Refuse the plan: the composer takes the words that go back to the agent as
+   *  the answer, and it reworks the plan in the same turn. */
   onReject?: () => void;
   /** Draft stage: approve the plan and start implementing. */
   onApprove?: () => void;

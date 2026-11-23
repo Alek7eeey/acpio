@@ -71,6 +71,9 @@ function permissionCopy(payload: Record<string, unknown>, toolCall: ToolCallPerm
 export function ChatInlinePrompt({
   onAcceptPlan,
   onDismissPlan,
+  onRejectPlan,
+  rejectingPlan = false,
+  onCancelReject,
   askPace = false,
   busy = false,
 }: {
@@ -81,6 +84,13 @@ export function ChatInlinePrompt({
   /** Close the card without answering it: the parked turn ends, the plan stays a
    *  draft, and the reader is free to write what to change. */
   onDismissPlan?: () => void;
+  /** Refuse the plan where the reader already types: the chat's own composer
+   *  takes the words that go back to the agent as the answer. */
+  onRejectPlan?: () => void;
+  /** That refusal is under way: the card asks for the words instead of offering
+   *  its two answers, and keeps the way back — cancel, or approve after all. */
+  rejectingPlan?: boolean;
+  onCancelReject?: () => void;
   /** The plan lives in a file: the pace is a choice, not a default. */
   askPace?: boolean;
   /** An answer is already on its way — the buttons must not ask twice. */
@@ -160,6 +170,65 @@ export function ChatInlinePrompt({
   if (pendingQuestion?.kind === "create_plan") {
     const name = String(pendingQuestion.payload.name ?? "").trim() || t("question.plan");
     const overview = String(pendingQuestion.payload.overview ?? "").trim();
+    // Refusing asks what to change — in the composer, where the reader is
+    // already typing; the page hands that answer to the agent as its own words.
+    const rejectPlan = () => {
+      if (onRejectPlan) {
+        onRejectPlan();
+        return;
+      }
+      void answerQuestion({ outcome: { outcome: "rejected" } });
+    };
+    // A change of mind is one press away in every state: approving the plan the
+    // refusal was about is still approving it. The refusal is dropped first —
+    // the pace popup belongs to the card's two answers, not to this state.
+    const approvePlanNow = () => {
+      if (rejectingPlan) onCancelReject?.();
+      if (!onAcceptPlan) {
+        void answerQuestion({ outcome: { outcome: "accepted" } });
+        return;
+      }
+      if (askPace) {
+        setPaceOpen(true);
+        return;
+      }
+      onAcceptPlan();
+    };
+    // The refusal asks for words, so the card asks for them too — a thin line
+    // over the field was too quiet to tell the reader what the composer now does.
+    if (rejectingPlan) {
+      return (
+        <div
+          className={`${styles.card} ${styles.cardRejecting}`}
+          role="group"
+          aria-label={t("question.plan")}
+        >
+          <div className={styles.eyebrow}>{t("question.planRejected")}</div>
+          <div className={styles.title}>{name}</div>
+          <p className={styles.overview}>{t("question.planRejectedHint")}</p>
+          <div className={styles.actions}>
+            {onCancelReject ? (
+              <button
+                type="button"
+                className={styles.ghost}
+                disabled={busy}
+                onClick={onCancelReject}
+              >
+                {t("common.cancel")}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className={styles.primary}
+              disabled={busy}
+              onClick={approvePlanNow}
+            >
+              {t("question.planApprove")}
+            </button>
+          </div>
+        </div>
+      );
+    }
     return (
       <div
         className={`${styles.card}${onDismissPlan ? ` ${styles.withClose}` : ""}`}
@@ -200,9 +269,7 @@ export function ChatInlinePrompt({
             type="button"
             className={styles.danger}
             disabled={busy}
-            onClick={() =>
-              void answerQuestion({ outcome: { outcome: "rejected", reason: "rejected by user" } })
-            }
+            onClick={rejectPlan}
           >
             {t("common.reject")}
           </button>
@@ -210,17 +277,7 @@ export function ChatInlinePrompt({
             type="button"
             className={styles.primary}
             disabled={busy}
-            onClick={() => {
-              if (!onAcceptPlan) {
-                void answerQuestion({ outcome: { outcome: "accepted" } });
-                return;
-              }
-              if (askPace) {
-                setPaceOpen(true);
-                return;
-              }
-              onAcceptPlan();
-            }}
+            onClick={approvePlanNow}
           >
             {t("question.planApprove")}
           </button>

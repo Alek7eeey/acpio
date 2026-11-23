@@ -9,6 +9,9 @@ import { createBuiltinTransport } from "./agent.js";
 /** What the stub model answers one request with: a tool call or plain text. */
 type Reply = { tool?: { name: string; args: unknown }; text?: string };
 
+/** What the reader answers one plan card with: a yes, or a no and their words. */
+type ApprovalAnswer = { outcome: "accepted" | "rejected"; reason?: string };
+
 type Chunk = (payload: unknown) => string;
 
 /** One streamed answer on the wire the built-in agent reads. */
@@ -54,8 +57,9 @@ function answer(reply: Reply, index: number, chunk: Chunk): string {
 async function boot(
   replies: Reply[],
   settings: Partial<AppSettings> = {},
-  /** What the reader answers the plan approval card with. */
-  approval: "accepted" | "rejected" = "accepted",
+  /** What the reader answers the plan approval card with — one answer, or one
+   *  per card the turn raises (the last one repeats). */
+  approval: "accepted" | "rejected" | ApprovalAnswer[] = "accepted",
   /** Working folder to share with another chat — its own when omitted. */
   sharedDir?: string,
 ): Promise<{
@@ -111,17 +115,29 @@ async function boot(
   });
   const frames: Array<Record<string, unknown>> = [];
   const pending = new Map<number, (f: Record<string, unknown>) => void>();
+  /** Cards answered so far — `approval` may hold one answer per card. */
+  let approvals = 0;
   let nextId = 1;
   agent.onLine((line) => {
     const frame = JSON.parse(line) as Record<string, unknown>;
     frames.push(frame);
     // The approval card is the harness's: answer it like the panel would.
     if (frame.method === "builtin/plan_approval") {
+      const answers: ApprovalAnswer[] = Array.isArray(approval)
+        ? approval
+        : [{ outcome: approval }];
+      const answer = answers[Math.min(approvals, answers.length - 1)] ?? { outcome: "rejected" };
+      approvals += 1;
       agent.write(
         JSON.stringify({
           jsonrpc: "2.0",
           id: frame.id,
-          result: { outcome: { outcome: approval } },
+          result: {
+            outcome: {
+              outcome: answer.outcome,
+              ...(answer.reason ? { reason: answer.reason } : {}),
+            },
+          },
         }),
       );
       return;
@@ -274,6 +290,60 @@ it("sends the model back to finish a plan the reader approved", async () => {
       .filter((u) => u?.update?.sessionUpdate === "agent_thought_chunk")
       .map((u) => String(u?.update?.content?.text ?? ""));
     expect(notes.join("\n")).toContain("План не закрыт");
+  } finally {
+    await close();
+  }
+});
+
+it("hands a refusal's own words to the model and asks again in the same turn", async () => {
+  const { frames, bodies, prompt, close } = await boot(
+    [
+      { tool: { name: "plan", args: { ...DOCUMENT, entries: STEPS } } },
+      { tool: { name: "apply_plan", args: {} } },
+      // The reader asked for a step that was missing: the plan answers it and the
+      // card comes back — same turn, no new prompt.
+      {
+        tool: {
+          name: "plan",
+          args: { entries: [...STEPS, { content: "Cover the branch with a test" }] },
+        },
+      },
+      { tool: { name: "apply_plan", args: {} } },
+      // The approved plan's steps land, so no finish nudge is in play here.
+      {
+        tool: {
+          name: "plan",
+          args: {
+            entries: [
+              { content: "Read the code", status: "completed" },
+              { content: "Fix it", status: "completed" },
+              { content: "Cover the branch with a test", status: "completed" },
+            ],
+          },
+        },
+      },
+      { text: "Готово." },
+    ],
+    {},
+    [{ outcome: "rejected", reason: "Добавь шаг с тестом" }, { outcome: "accepted" }],
+  );
+  try {
+    await prompt("сделай");
+    // plan, apply, the words from the refusal, the reworked plan, apply, done.
+    expect(bodies).toHaveLength(6);
+    const words = lastMessageText(bodies[2] ?? {});
+    expect(words).toContain("Добавь шаг с тестом");
+    expect(words).toContain("`apply_plan`");
+    // The reworked plan reached the panel before the second card did, and it is
+    // still a draft: the refusal cost nothing but the words.
+    expect(planUpdates(frames)[2]).toMatchObject({
+      stage: "draft",
+      entries: [
+        { content: "Read the code", status: "in_progress" },
+        { content: "Fix it", status: "pending" },
+        { content: "Cover the branch with a test", status: "pending" },
+      ],
+    });
   } finally {
     await close();
   }

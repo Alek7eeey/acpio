@@ -80,6 +80,8 @@ describe("PlanSidePanel", () => {
     expect(screen.getByText("Awaiting")).toBeTruthy();
     // The card's own accept is the approval: one approve button, not two.
     expect(screen.getAllByText("Approve")).toHaveLength(1);
+    // Refusing keeps its one job — the words go into the chat's composer, and
+    // the page hands them back to the agent as the answer to its own question.
     fireEvent.click(screen.getByText("Reject"));
     expect(onReject).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByText("Approve"));

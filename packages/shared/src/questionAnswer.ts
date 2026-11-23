@@ -19,7 +19,12 @@ export function summarizeQuestionAnswer(payload: QuestionAnswerPayload): string 
   if (!outcome) return String(payload.title ?? "").trim();
   const kind = String(outcome.outcome ?? "");
   if (kind === "skipped" || kind === "cancelled") return "—";
-  if (kind === "rejected") return "✗";
+  // The reader's own words are the answer whenever they typed them — the plan
+  // card's «Отклонить» sends them as the rejection's reason.
+  if (kind === "rejected") {
+    const reason = typeof outcome.reason === "string" ? outcome.reason.trim() : "";
+    return reason || "✗";
+  }
   const answers = Array.isArray(outcome.answers)
     ? (outcome.answers as Array<Record<string, unknown>>)
     : [];

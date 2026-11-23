@@ -16,6 +16,17 @@
   isolation: isolate;
 }
 
+/* The card asking for the words that would change the plan: a refusal the reader
+   is answering, not the ready-to-approve card it was a press ago. */
+.cardRejecting {
+  background: color-mix(in srgb, var(--accent, #0866ff) 8%, var(--surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent, #0866ff) 32%, transparent);
+}
+
+.cardRejecting .eyebrow {
+  color: color-mix(in srgb, var(--accent, #0866ff) 65%, var(--text-secondary));
+}
+
 .eyebrow {
   margin: 0;
   font-size: 0.68rem;

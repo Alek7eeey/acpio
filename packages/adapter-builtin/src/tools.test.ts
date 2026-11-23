@@ -702,12 +702,12 @@ describe("the plan tools", () => {
   });
 
   /** A tool set over a real plan file in a temp folder, with the panel's side stubbed. */
-  const setupPlan = (accepted = true) => {
+  const setupPlan = (accepted = true, feedback?: string) => {
     const dir = mkdtempSync(join(tmpdir(), "acpio-plan-tools-"));
     dirs.push(dir);
     const file = join(dir, "plan.md");
     const published: PlanState[] = [];
-    const approve = vi.fn(async () => accepted);
+    const approve = vi.fn(async () => ({ accepted, ...(feedback ? { feedback } : {}) }));
     const bridge: PlanBridge = {
       file,
       path: ".acpio/plan.md",
@@ -817,6 +817,27 @@ describe("the plan tools", () => {
     // their own words come next. The plan stays a draft until then.
     expect(answer).toContain("end the turn");
     expect(readPlan(file)?.stage).toBe("draft");
+  });
+
+  it("hands the reader's own words back so the same turn reworks the plan", async () => {
+    const { tools, file, approve } = setupPlan(false, "Добавь шаг с тестами");
+    await exec(tools, "plan", {
+      problem: "The export drops the plan.",
+      entries: [{ content: "Read the code" }],
+    });
+    const answer = await exec(tools, "apply_plan", {});
+    // What the reader typed is the answer the model has to act on — not a
+    // refusal to swallow and end the turn over.
+    expect(answer).toContain("Добавь шаг с тестами");
+    expect(answer).toContain("apply_plan");
+    expect(answer).not.toContain("end the turn");
+    expect(readPlan(file)?.stage).toBe("draft");
+
+    // The same turn asks again, and this time the reader agrees.
+    approve.mockResolvedValueOnce({ accepted: true });
+    await exec(tools, "plan", { entries: [{ content: "Read the code" }, { content: "Tests" }] });
+    await expect(exec(tools, "apply_plan", {})).resolves.toContain("Plan approved");
+    expect(readPlan(file)?.stage).toBe("applying");
   });
 
   it("takes the pace from the call and keeps it", async () => {
