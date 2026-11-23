@@ -3455,6 +3455,182 @@ describe("compaction reporting", () => {
     }
   });
 
+  /**
+   * The digest boundary has to land on a stored message the next turn agrees
+   * with. A picture note inside the folded prefix is the one thing that used to
+   * move it: the note is a view message *and* a stored one (`storeStep` writes
+   * it), so counting it out of the cut made `covered` name a message the pass
+   * never folded. Nothing showed in that turn — the pass hands the loop its own
+   * cut view — and the next turn, rebuilt from the stored index, re-sent the
+   * digested messages and lost the prefix (chat e460dc05: "совпало 2 из 314",
+   * 148 893 tokens with `cached` 0).
+   */
+  it("keeps the digest boundary when the folded prefix carries a picture note", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    /** The provider's own count, which is what the mid-turn trigger is judged by. */
+    const priced = (messages: unknown) => Math.ceil(JSON.stringify(messages).length / 4);
+    const server = createServer((req, res) => {
+      let body = "";
+      req.on("data", (chunk) => {
+        body += chunk;
+      });
+      req.on("end", () => {
+        const parsed = JSON.parse(body) as Record<string, unknown>;
+        bodies.push(parsed);
+        const messages = (parsed.messages ?? []) as Array<Record<string, unknown>>;
+        const usage = {
+          prompt_tokens: priced(messages),
+          completion_tokens: 1,
+          total_tokens: priced(messages) + 1,
+        };
+        if (!parsed.stream) {
+          res.setHeader("content-type", "application/json");
+          res.end(
+            JSON.stringify({
+              id: "c1",
+              object: "chat.completion",
+              created: 0,
+              model: "stub",
+              choices: [
+                { index: 0, message: { role: "assistant", content: "конспект" }, finish_reason: "stop" },
+              ],
+              usage,
+            }),
+          );
+          return;
+        }
+        res.setHeader("content-type", "text/event-stream");
+        const chunk = (payload: Record<string, unknown>) => `data: ${JSON.stringify(payload)}\n\n`;
+        // One tool call per turn, then an answer: the bash result is big enough
+        // to push this turn's own view over the line, which is the only path a
+        // pass takes mid-turn.
+        const toolsSeen = messages.filter((message) => message.role === "tool").length;
+        if (toolsSeen < 2) {
+          res.write(
+            chunk({
+              id: "c1",
+              object: "chat.completion.chunk",
+              created: 0,
+              model: "stub",
+              choices: [
+                {
+                  index: 0,
+                  delta: {
+                    tool_calls: [
+                      {
+                        index: 0,
+                        id: "call-1",
+                        type: "function",
+                        function: { name: "bash", arguments: '{"command":"echo big"}' },
+                      },
+                    ],
+                  },
+                  finish_reason: null,
+                },
+              ],
+            }),
+          );
+          res.write(
+            chunk({
+              id: "c1",
+              object: "chat.completion.chunk",
+              created: 0,
+              model: "stub",
+              choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
+              usage,
+            }),
+          );
+        } else {
+          res.write(
+            chunk({
+              id: "c1",
+              object: "chat.completion.chunk",
+              created: 0,
+              model: "stub",
+              choices: [
+                { index: 0, delta: { role: "assistant", content: "готово" }, finish_reason: null },
+              ],
+            }),
+          );
+          res.write(
+            chunk({
+              id: "c1",
+              object: "chat.completion.chunk",
+              created: 0,
+              model: "stub",
+              choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+              usage,
+            }),
+          );
+        }
+        res.write("data: [DONE]\n\n");
+        res.end();
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("stub did not bind a port");
+    const dir = tempDir();
+    // ~20k chars of turns plus one picture note: the view starts under the
+    // line, and the note sits well inside the prefix the pass will fold.
+    const history = Array.from({ length: 8 }, (_, i) => [
+      { role: "user" as const, content: `ход ${i}: ${"д".repeat(2_500)}` },
+      { role: "assistant" as const, content: "принято" },
+    ]).flat();
+    const note = {
+      role: "user" as const,
+      content: [
+        { type: "text" as const, text: TOOL_IMAGES_NOTE },
+        { type: "file" as const, mediaType: "image/png", data: "", path: "session-images/1.png" },
+      ],
+    };
+    const messages = [history[0], note, ...history.slice(1)];
+    saveBuiltinSession(dir, "note-1", { version: 1, cwd: dir, modelId: "p1::m1", messages });
+    try {
+      const { call, frames } = boot(
+        {
+          builtinProviders: [
+            {
+              id: "p1",
+              name: "Test",
+              url: `http://127.0.0.1:${address.port}/v1`,
+              apiKey: "",
+              models: [{ id: "m1", label: "M1", contextWindow: 20_000 }],
+            },
+          ],
+          builtinCompactionThresholdPercent: 40,
+          builtinKeepRecentPercent: 30,
+          locale: "ru",
+        },
+        dir,
+        (method) => {
+          if (method === "session/request_permission") {
+            return { outcome: { outcome: "selected", optionId: "allow_once" } };
+          }
+          if (method === "terminal/create") return { terminalId: "t1" };
+          if (method === "terminal/wait_for_exit") return { exitCode: 0 };
+          if (method === "terminal/output") return { output: "о".repeat(8_000) };
+          return {};
+        },
+      );
+      await call("session/load", { sessionId: "note-1", cwd: dir });
+      await call("session/prompt", { prompt: [{ type: "text", text: "продолжай" }] });
+      const firstTurn = bodies.at(-1)?.messages as Array<Record<string, unknown>>;
+      // The pass folded a prefix that carried the note: the digest leads, the
+      // note is gone from the view.
+      expect(String((firstTurn[1]?.content as string) ?? "")).toContain("конспект");
+      expect(JSON.stringify(firstTurn)).not.toContain(TOOL_IMAGES_NOTE);
+
+      await call("session/prompt", { prompt: [{ type: "text", text: "ещё" }] });
+      const secondTurn = bodies.at(-1)?.messages as Array<Record<string, unknown>>;
+      // The provider reads a cached prompt from its first message: the next
+      // turn's request has to start with the bytes the last one ended on.
+      expect(secondTurn.slice(0, firstTurn.length)).toEqual(firstTurn);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it("keeps a picture note with its tool result when the next turn's pass folds the prefix", async () => {
     const dir = tempDir();
     const shot = join(dir, "shot.png");

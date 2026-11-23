@@ -2594,14 +2594,22 @@ export class BuiltinAgent implements InProcessAgentTransport {
       // folded turn look unfolded to the turn-boundary pass, which then folded
       // the same bytes again and rewrote the digest — one full-price prefix per
       // turn (chat 9590a5eb: 10 passes, 7 of them from a `covered` of 0).
-      // The turn's own pictures ride in the view as their own messages (see
-      // `attachToolImages`): the cut counts them, the transcript does not. Left
-      // uncorrected, a note standing in front of the cut would name a stored
-      // message the pass never covered.
-      const notesBefore =
-        opts.foldedBase !== undefined
-          ? 0
-          : view.slice(0, result.state.covered).filter(isToolImagesNote).length;
+      // A view that is not one entry per stored message — the pruned fallback —
+      // can carry picture notes the transcript never saw (see
+      // `attachToolImages`): the cut counts them, the transcript does not, and a
+      // note standing in front of the cut would name a stored message the pass
+      // never covered. An aligned view carries no such note: `storeStep` writes
+      // every picture note into the transcript as it lands, so subtracting it
+      // there moved the digest's boundary a note early (chat e460dc05: three
+      // notes inside the folded prefix, `covered` 136 instead of 139). Nothing
+      // showed in that turn — the pass hands the loop its own cut view — and the
+      // next turn rebuilt from the stored index, re-sent three digested messages
+      // under the digest and lost the whole prefix: prefixSame 2 of 314, 148 893
+      // tokens with `cached` 0.
+      const aligned = opts.foldedBase !== undefined || this.viewIndexed;
+      const notesBefore = aligned
+        ? 0
+        : view.slice(0, result.state.covered).filter(isToolImagesNote).length;
       const stored =
         opts.foldedBase !== undefined
           ? opts.foldedBase + result.state.covered - 1
