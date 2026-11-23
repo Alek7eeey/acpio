@@ -142,7 +142,7 @@ export function keepNewestWithin(messages: ModelMessage[], budget: number): Mode
 
   const cuts: number[] = [];
   for (let i = 1; i < messages.length; i++) {
-    if (messages[i].role === "user") cuts.push(i);
+    if (isCutBoundary(messages[i])) cuts.push(i);
   }
   // Newest-first would always land on the smallest slice; walk oldest cut
   // first so the largest window that still fits is the one kept.
@@ -249,6 +249,20 @@ export function isToolImagesNote(message: ModelMessage | undefined): boolean {
   if (!message || message.role !== "user" || !Array.isArray(message.content)) return false;
   const [note] = message.content as unknown as Array<Record<string, unknown>>;
   return note?.type === "text" && note.text === TOOL_IMAGES_NOTE;
+}
+
+/**
+ * True for a message the history may be cut in front of.
+ *
+ * A picture note is a `user` message that belongs to the tool result before it,
+ * not to a turn: cutting there puts the result under the digest and leaves the
+ * picture standing at the head of the tail. The next pass then sees a cut point
+ * one message further on, folds the note too, and the boundary moves — chat
+ * 30a885f3 sent 329 messages and then 337 with `cached` 120 576 → 11 904, all
+ * within one turn (prefixSame 2 of 329).
+ */
+function isCutBoundary(message: ModelMessage | undefined): boolean {
+  return message?.role === "user" && !isToolImagesNote(message);
 }
 
 /**
@@ -564,7 +578,7 @@ export async function compactHistory(
   // Never cut inside the already-covered prefix: its messages are spoken for.
   let cut = 0;
   for (let i = Math.max(1, covered); i < messages.length; i++) {
-    if (messages[i].role !== "user") continue;
+    if (!isCutBoundary(messages[i])) continue;
     if (estimateTokens(messages.slice(i)) <= tailBudget) {
       cut = i;
       break;

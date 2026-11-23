@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { DEFAULT_SETTINGS, type AppSettings } from "@acpio/shared";
 import { createBuiltinTransport, fillReasoningEcho, RULE_IDS, systemPrompt } from "./agent.js";
-import { estimateTokens, promptView, TOOL_IMAGES_NOTE } from "./loop.js";
+import { estimateTokens, isToolImagesNote, promptView, TOOL_IMAGES_NOTE } from "./loop.js";
 import { isValidSessionId, loadBuiltinSession, saveBuiltinSession } from "./store.js";
 
 const created: string[] = [];
@@ -3452,6 +3452,152 @@ describe("compaction reporting", () => {
       expect(Number(fill?.tokensAfter)).toBeGreaterThan(0);
     } finally {
       await stub.close();
+    }
+  });
+
+  it("keeps a picture note with its tool result when the next turn's pass folds the prefix", async () => {
+    const dir = tempDir();
+    const shot = join(dir, "shot.png");
+    writeFileSync(shot, Buffer.from("iVBORw0KGgo=", "base64"));
+    const bodies: Array<Record<string, unknown>> = [];
+    /** One picture per chat: the second ask is already the answer. */
+    let pictured = false;
+    const server = createServer((req, res) => {
+      let raw = "";
+      req.on("data", (chunk) => {
+        raw += chunk;
+      });
+      req.on("end", () => {
+        const parsed = JSON.parse(raw) as Record<string, unknown>;
+        bodies.push(parsed);
+        const sent = JSON.stringify(parsed.messages ?? []);
+        res.setHeader("content-type", "text/event-stream");
+        const chunk = (payload: Record<string, unknown>) => `data: ${JSON.stringify(payload)}\n\n`;
+        const delta = (message: Record<string, unknown>, finish: string | null) =>
+          chunk({
+            id: "c1",
+            object: "chat.completion.chunk",
+            created: 0,
+            model: "stub",
+            choices: [{ index: 0, delta: message, finish_reason: finish }],
+          });
+        if (sent.includes("Не отвечай на переписку")) {
+          // The summariser's own ask: a digest is text, never a tool call.
+          res.write(delta({ role: "assistant", content: "конспект" }, null));
+          res.write(delta({}, "stop"));
+        } else if (!pictured) {
+          pictured = true;
+          // The tool returns a picture: its bytes ride beside the result as a
+          // note message, and the note is what the pass must not cut away.
+          res.write(
+            delta(
+              {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: "call-shot",
+                    type: "function",
+                    function: { name: "read", arguments: JSON.stringify({ path: shot }) },
+                  },
+                ],
+              },
+              null,
+            ),
+          );
+          res.write(delta({}, "tool_calls"));
+          res.write(
+            chunk({
+              id: "c1",
+              object: "chat.completion.chunk",
+              created: 0,
+              model: "stub",
+              choices: [],
+              usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+            }),
+          );
+        } else {
+          res.write(delta({ role: "assistant", content: "готово" }, null));
+          res.write(delta({}, "stop"));
+          // The provider's count of this view is what the next turn's pass is
+          // judged by: 9k of an 8k window is a pass whatever the estimate says.
+          res.write(
+            chunk({
+              id: "c1",
+              object: "chat.completion.chunk",
+              created: 0,
+              model: "stub",
+              choices: [],
+              usage: { prompt_tokens: 9_000, completion_tokens: 5, total_tokens: 9_005 },
+            }),
+          );
+        }
+        res.write("data: [DONE]\n\n");
+        res.end();
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("stub did not bind a port");
+    saveBuiltinSession(dir, "pictured-1", {
+      version: 1,
+      cwd: dir,
+      modelId: "p1::m1",
+      // Under the line on its own: the turn that puts the picture in must not
+      // pass before the picture exists, and the next turn's pass has to be the
+      // one that meets it.
+      messages: bulky(2, 200),
+    });
+    try {
+      const { call } = boot(
+        {
+          builtinProviders: [provider(`http://127.0.0.1:${address.port}/v1`, 8_000)],
+          builtinCompactionThresholdPercent: 30,
+          builtinKeepRecentPercent: 25,
+          locale: "ru",
+        },
+        dir,
+        (method) => {
+          if (method === "session/request_permission") {
+            return { outcome: { outcome: "selected", optionId: "allow_once" } };
+          }
+          if (method === "fs/read_binary_file") return { data: "iVBORw0KGgo=" };
+          return {};
+        },
+      );
+      await call("session/load", { sessionId: "pictured-1", cwd: dir });
+      // Long enough to outweigh the picture's ~1 500 tokens: without that, the
+      // note never is the cut that fits and the fixture proves nothing.
+      await call("session/prompt", {
+        prompt: [{ type: "text", text: `посмотри скриншот: ${"д".repeat(3_000)}` }],
+      });
+      const pictured = bodies.at(-1)?.messages as Array<Record<string, unknown>>;
+      const noteAt = pictured.findIndex((m) => isToolImagesNote(m as never));
+      expect(noteAt).toBeGreaterThan(0);
+      expect(pictured[noteAt - 1]?.role).toBe("tool");
+
+      // The next turn's pass fires on the provider's count and folds the prefix
+      // the note lives in. The note and its result go in together or not at all:
+      // cutting in front of the note is what moved the tail by one message and
+      // cost chat 30a885f3 120 576 cached tokens.
+      await call("session/prompt", { prompt: [{ type: "text", text: "ещё" }] });
+      // Every request the two turns put on the wire, the pass's own included: a
+      // note never stands away from the result it belongs to. A view that starts
+      // the tail in front of a note puts the picture first and the result under
+      // the digest, and every message after it moves.
+      for (const body of bodies) {
+        const list = (body.messages ?? []) as Array<Record<string, unknown>>;
+        list.forEach((message, i) => {
+          if (!isToolImagesNote(message as never)) return;
+          expect(list[i - 1]?.role, `note at ${i} of ${list.length}`).toBe("tool");
+        });
+      }
+      // The turn after it continues on the bytes the last request ended with.
+      const last = bodies.at(-1)?.messages as Array<Record<string, unknown>>;
+      await call("session/prompt", { prompt: [{ type: "text", text: "и ещё" }] });
+      const next = bodies.at(-1)?.messages as Array<Record<string, unknown>>;
+      expect(next.slice(0, last.length)).toEqual(last);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
 

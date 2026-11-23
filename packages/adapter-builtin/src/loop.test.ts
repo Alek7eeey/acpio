@@ -7,6 +7,7 @@ import {
   compactMessages,
   estimateTokens,
   foldInjected,
+  isToolImagesNote,
   pruneMessages,
   renderTranscript,
   repairToolPairs,
@@ -217,6 +218,70 @@ describe("compactMessages", () => {
     expect(transcript).toContain("fix the test");
     expect(transcript).toContain("npm test");
     expect(transcript).toContain("1 failed");
+  });
+});
+
+describe("a picture note is never a cut point", () => {
+  const note: ModelMessage = {
+    role: "user",
+    content: [
+      { type: "text", text: TOOL_IMAGES_NOTE },
+      { type: "file", mediaType: "image/png", data: "" },
+    ],
+  };
+  const call: ModelMessage = {
+    role: "assistant",
+    content: [{ type: "tool-call", toolCallId: "c1", toolName: "mcp__cad_shot", input: {} }],
+  };
+  const result: ModelMessage = {
+    role: "tool",
+    content: [
+      {
+        type: "tool-result",
+        toolCallId: "c1",
+        toolName: "mcp__cad_shot",
+        output: { type: "text", value: "rendered" },
+      },
+    ],
+  };
+
+  it("folds the note together with the result it belongs to", async () => {
+    const messages = [
+      ...turn("t0", 9_000),
+      ...turn("t1", 9_000),
+      ...turn("t2", 9_000),
+      call,
+      result,
+      note,
+      ...turn("t3", 40),
+    ];
+    const folded = await compactHistory({
+      messages,
+      contextWindow: 10_000,
+      thresholdPercent: 80,
+      // The picture costs ~1 500 tokens and the turn before it costs more: the
+      // only cut that fits the tail budget is the note itself, which is exactly
+      // the one place a history may not be cut.
+      keepRecentPercent: 20,
+      summarize: async () => "конспект",
+    });
+    const covered = folded.state?.covered ?? 0;
+    expect(folded.state).toBeDefined();
+    const toolAt = messages.findIndex((m) => m.role === "tool");
+    const noteAt = messages.findIndex((m) => isToolImagesNote(m));
+    expect(noteAt).toBeGreaterThan(0);
+    // Both sides of the boundary, or neither: a note left behind in the tail
+    // while its result sits under the digest moves every message after it.
+    expect(toolAt < covered).toBe(noteAt < covered);
+  });
+
+  it("prunes to a real turn start rather than to the note", () => {
+    const messages = [...turn("t0", 20_000), call, result, note, ...turn("t1", 40)];
+    const pruned = pruneMessages(messages, 10_000);
+    // The note's own tail fits the budget and the turn before it does not, so
+    // the note is the cut the old selector took — and the wrong one.
+    expect(isToolImagesNote(pruned[0])).toBe(false);
+    expect(text(pruned[0]!)).toMatch(/^t1-u/);
   });
 });
 
