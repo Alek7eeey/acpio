@@ -1394,6 +1394,19 @@ export const en = {
     counter: "{{current}} of {{total}}",
     hint: "Wheel — scale · click — magnify · drag — move · ←/→ — another picture · Esc — close",
   },
+  crash: {
+    title: "The interface broke",
+    hint: "The screen stopped updating. The report below carries what broke and what the app was reading at that moment — copy it, save it, or keep the dump and reload.",
+    report: "Report",
+    copy: "Copy report",
+    copied: "Report copied",
+    copyFailed:
+      "The clipboard refused the report — open the report and select it by hand",
+    download: "Save as file",
+    savedFile: "Saved as {{name}}",
+    saveDump: "Save to diagnostics",
+    reload: "Reload",
+  },
   update: {
     trigger: "Version {{version}} is available",
     title: "A new version is available",

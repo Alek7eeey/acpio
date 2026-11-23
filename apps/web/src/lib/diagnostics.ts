@@ -114,6 +114,9 @@ export function buildClientDiagnosticsPayload(opts?: {
   session?: SessionDetailDto | null;
   /** Dislike feedback: the rated message + the user's comment. */
   dislike?: { messageId: string; role: string; text: string; comment: string } | null;
+  /** A render crash: the boundary caught it and the reader is looking at the
+   *  card, so the stack travels with the dump instead of only in their memory. */
+  crash?: { message: string; stack: string; componentStack: string } | null;
 }) {
   const state = useAppStore.getState();
   const catalog = state.modelsCatalog;
@@ -162,6 +165,7 @@ export function buildClientDiagnosticsPayload(opts?: {
     recentErrors: readRecentErrors(),
     note: opts?.note,
     dislike: opts?.dislike ?? undefined,
+    crash: opts?.crash ?? undefined,
   };
 }
 
@@ -173,6 +177,8 @@ export async function submitDiagnosticsDump(opts?: {
   sessionId?: string | null;
   /** Dislike feedback: the rated message + the user's comment. */
   dislike?: { messageId: string; role: string; text: string; comment: string } | null;
+  /** A render crash and its stacks (see `buildClientDiagnosticsPayload`). */
+  crash?: { message: string; stack: string; componentStack: string } | null;
 }): Promise<DiagnosticsDumpMeta> {
   const includeSession = opts?.includeSession !== false && opts?.sessionId !== "";
   const session =
@@ -186,6 +192,7 @@ export async function submitDiagnosticsDump(opts?: {
     includeSession,
     session,
     dislike: opts?.dislike,
+    crash: opts?.crash,
   });
   const res = await api.createDiagnosticsDump({
     reason: opts?.reason ?? "manual",

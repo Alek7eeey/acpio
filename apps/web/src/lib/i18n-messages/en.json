@@ -986,7 +986,7 @@
     "chatMetaChipBgJobs": "Background tasks",
     "chatEnterToSend": "Enter sends the message",
     "chatEnterToSendHint": "Off: Enter inserts a newline, Ctrl+Enter sends.",
-    "chatArrowHistory": "\u2191 recalls sent messages",
+    "chatArrowHistory": "↑ recalls sent messages",
     "chatArrowHistoryHint": "↑ on the first line is pressed twice: the first press only arms it, the second puts the previous prompt in the field, and ↓ walks back. Off: the arrows only move the caret.",
     "chatShowMessageTime": "Message timestamps",
     "chatShowMessageTimeHint": "Show the send time next to each message.",
@@ -1649,5 +1649,17 @@
     "restartTimeout": "Acpio did not come back after the restart. Start it by hand and reload this page.",
     "manual": "This Acpio build did not come from npm, so it cannot update itself from here. Update the copy where it came from: the npm package installs and updates on its own.",
     "staleRestart": "Acpio answered, but the version is still {{version}} — a different copy is running. Start the updated build by hand."
+  },
+  "crash": {
+    "title": "The interface broke",
+    "hint": "The screen stopped updating. The report below carries what broke and what the app was reading at that moment — copy it, save it, or keep the dump and reload.",
+    "report": "Report",
+    "copy": "Copy report",
+    "copied": "Report copied",
+    "copyFailed": "The clipboard refused the report — open the report and select it by hand",
+    "download": "Save as file",
+    "savedFile": "Saved as {{name}}",
+    "saveDump": "Save to diagnostics",
+    "reload": "Reload"
   }
 }

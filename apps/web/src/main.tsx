@@ -3,11 +3,31 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { registerSW } from "virtual:pwa-register";
 import { App } from "./App";
+import { AppErrorBoundary } from "./components/AppErrorBoundary";
 import { initPwaInstallCapture } from "./lib/pwaInstall";
+import { rememberDiagnosticsError, submitAutoErrorDump } from "./lib/diagnostics";
 import "./styles/global.css";
 import "./styles/settingsUi.css";
 
 initPwaInstallCapture();
+
+// Crashes outside a render — an event handler, an unawaited promise — do not
+// reach the boundary, and on a phone their console is not open. They still
+// leave a line in the report a later dump carries.
+function noteUncaught(message: string, source: string) {
+  rememberDiagnosticsError(message, source);
+  void submitAutoErrorDump(message);
+}
+
+window.addEventListener("error", (event) => {
+  const err = event.error instanceof Error ? event.error : null;
+  noteUncaught(err?.message ?? event.message ?? "unknown error", "window");
+});
+
+window.addEventListener("unhandledrejection", (event) => {
+  const reason = event.reason;
+  noteUncaught(reason instanceof Error ? reason.message : String(reason), "promise");
+});
 
 if (!import.meta.env.DEV && "caches" in window) {
   // Drop legacy Workbox precache entries from older builds.
@@ -38,8 +58,10 @@ if ("serviceWorker" in navigator) {
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
+    <AppErrorBoundary>
+      <BrowserRouter>
+        <App />
+      </BrowserRouter>
+    </AppErrorBoundary>
   </StrictMode>,
 );
