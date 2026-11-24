@@ -6,6 +6,19 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, viewport-fit=cover"
     />
+    <script>
+      // The palette lives in CSS under [data-theme="dark"], and the app's own
+      // applyTheme runs only once the bundle does — until then the document
+      // paints the light :root values, so a dark-theme reader is left on a blank
+      // #f7f8fa page whenever the bundle is slow or a service-worker reload
+      // catches the server restarting. Same rule as lib/store.ts, one paint earlier.
+      try {
+        document.documentElement.setAttribute(
+          "data-theme",
+          localStorage.getItem("acpio.theme") === "dark" ? "dark" : "light",
+        );
+      } catch {}
+    </script>
     <meta name="theme-color" content="#0866ff" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#0f1115" media="(prefers-color-scheme: dark)" />
     <meta name="mobile-web-app-capable" content="yes" />
