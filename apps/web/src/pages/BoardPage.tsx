@@ -723,15 +723,22 @@ const NewTaskComposer = memo(function NewTaskComposer({
   );
 
   /** Clipboard text, put in at the caret: the field's own paste is the
-   *  browser's, which the menu that replaced it has to do itself. */
+   *  browser's, which the menu that replaced it has to do itself. A clipboard
+   *  holding no text but a file copied in the file manager is the case the
+   *  browser keeps to itself — see the chat's `pasteIntoComposer` — so the
+   *  server, on this machine, names the file and it is attached by its path. */
   const pasteFromClipboard = async () => {
     let text = "";
     try {
       text = await navigator.clipboard.readText();
     } catch {
-      return; // no clipboard permission: there is nothing to paste
+      text = ""; // no clipboard permission, or no such API: ask for files
     }
-    if (!text) return;
+    if (!text) {
+      const copied = await api.clipboardFiles().catch(() => ({ files: [] }));
+      if (copied.files?.length) addServerFiles(copied.files);
+      return;
+    }
     const el = inputRef.current;
     const start = Math.min(el?.selectionStart ?? caret, draft.length);
     const end = Math.max(start, Math.min(el?.selectionEnd ?? start, draft.length));

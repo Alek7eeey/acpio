@@ -75,6 +75,9 @@ const apiMock = vi.hoisted(() => {
     browseDirectory: vi.fn(async () => ({ path: "C:/", parent: null, entries: [] })),
     // Starting a card from the board sends its description as the first turn.
     prompt: vi.fn(async () => undefined),
+    // The files a reader copied in the file manager, named by the server: the
+    // browser hides a copied file list from every script.
+    clipboardFiles: vi.fn(async () => ({ files: [] as Array<{ name: string; path: string }> })),
   };
 });
 vi.mock("../lib/api", () => ({ api: apiMock }));
@@ -1633,6 +1636,30 @@ describe("BoardPage new task form", () => {
     box.setSelectionRange(0, 3);
     fireEvent.contextMenu(box);
     expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  // The report: right-click → «Вставить» pasted text but never a file copied in
+  // Explorer. The browser keeps a copied file list to itself, so the server on
+  // this machine names the paths and the form takes the file as it is — no
+  // upload, and the name goes into the description like any other attachment.
+  it("attaches a file copied in the file manager from the field's menu", async () => {
+    apiMock.clipboardFiles.mockResolvedValueOnce({
+      files: [{ name: "largeWindows1251_3.txt", path: "E:/logs/largeWindows1251_3.txt" }],
+    });
+    renderBoard();
+    await screen.findByText("Fix the login bug");
+    const group = document.querySelector("[data-group]") as HTMLElement;
+    await userEvent.click(within(group).getByLabelText("New task"));
+    const box = within(group).getByPlaceholderText("Describe the task…");
+
+    fireEvent.contextMenu(box);
+    const menu = await screen.findByRole("menu");
+    await userEvent.click(within(menu).getByRole("menuitem", { name: /^Paste/ }));
+
+    await waitFor(() => expect((box as HTMLTextAreaElement).value).toBe("largeWindows1251_3.txt"));
+    expect(group.querySelector(`.${styles.fileChip}`)?.textContent).toContain(
+      "largeWindows1251_3.txt",
+    );
   });
 
   // The report: the field's menu outlived the first keystroke and covered the

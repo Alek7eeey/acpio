@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { DEFAULT_SETTINGS, type MessagePartDto, type SessionDetailDto } from "@acpio/shared";
 import { useAppStore } from "../lib/store";
@@ -23,6 +24,11 @@ const apiMock = vi.hoisted(() => ({
     ...useAppStore.getState().settings,
     ...patch,
   })),
+  // The files a reader copied in the file manager: the browser hides a copied
+  // file list, so the server names them (see the paste tests below).
+  clipboardFiles: vi.fn(async () => ({
+    files: [] as Array<{ name: string; path: string }>,
+  })),
 }));
 
 vi.mock("../lib/api", () => {
@@ -30,6 +36,7 @@ vi.mock("../lib/api", () => {
     uploadAttachment: apiMock.uploadAttachment,
     prompt: apiMock.prompt,
     updateSettings: apiMock.updateSettings,
+    clipboardFiles: apiMock.clipboardFiles,
     // A running turn pulls the git chip in; an empty `{}` from the generic
     // proxy would leave `status.files` undefined and crash the chip row.
     gitStatus: vi.fn(async () => ({
@@ -524,5 +531,88 @@ describe("attached image in a landed user message", () => {
     expect(container.querySelector(`.${styles.userFilePreviewWrap}`)).toBeNull();
     expect(container.querySelector(`a.${styles.userFileChip}`)).toBeNull();
     expect(container.querySelector(`span.${styles.userFileChip}`)?.textContent).toContain("shot.png");
+  });
+});
+
+// The report: a 16 MB log («largeWindows1251_3.txt») was refused in the chat
+// with «больше 15 МБ — он пропущен», and the notice then followed the reader
+// into every other chat. An attachment rides to the agent as a path, so its
+// size is the disk's business; the notice belongs to the chat it was made in.
+describe("a file bigger than the old 15 MB cap", () => {
+  /** A File whose size is what the test says it is: a real one would have to
+   *  sit in memory byte for byte, and the size is the only thing consulted. */
+  function sized(name: string, size: number): File {
+    const file = new File([new Uint8Array([1, 2, 3])], name, { type: "text/plain" });
+    Object.defineProperty(file, "size", { value: size });
+    return file;
+  }
+
+  it("stages it instead of skipping it", async () => {
+    apiMock.uploadAttachment.mockResolvedValueOnce({
+      name: "largeWindows1251_3.txt",
+      path: "E:/proj/.acpio-attachments/s1/largeWindows1251_3.txt",
+      size: 16 * 1024 * 1024,
+    });
+    const { container } = renderComposer();
+    const textarea = container.querySelector("textarea")!;
+    await screen.findByLabelText("Остановить");
+    fireEvent.change(textarea, { target: { value: "" } });
+
+    const big = sized("largeWindows1251_3.txt", 16 * 1024 * 1024);
+    fireEvent.paste(textarea, { clipboardData: { files: [big], items: [] } });
+
+    expect((await stagedChip(container)).textContent).toContain("largeWindows1251_3.txt");
+    expect(apiMock.uploadAttachment).toHaveBeenCalledWith("s1", big, "largeWindows1251_3.txt");
+    expect(screen.queryByText(/пропущен/)).toBeNull();
+  });
+
+  it("keeps the notice in the chat that made it", async () => {
+    const detail = runningSession();
+    const other = { ...runningSession(), id: "s2", title: "Other" };
+    useAppStore.setState({
+      sessions: [detail, other],
+      sessionDetails: { s1: detail, s2: other },
+      chatPaneIds: ["s1"],
+    } as never);
+
+    const { container } = renderComposer();
+    const textarea = container.querySelector("textarea")!;
+    await screen.findByLabelText("Остановить");
+
+    fireEvent.paste(textarea, {
+      clipboardData: { files: [sized("huge.log", 2 * 1024 * 1024 * 1024)], items: [] },
+    });
+    expect(await screen.findByText(/больше 1 ГБ/)).toBeTruthy();
+
+    act(() => {
+      useAppStore.setState({ activeSessionId: "s2", activeSession: other } as never);
+    });
+
+    await waitFor(() => expect(screen.queryByText(/больше 1 ГБ/)).toBeNull());
+  });
+});
+
+// The report: right-click → «Вставить» pasted text but never a file copied in
+// Explorer. The browser hands a copied file list to no script at all (it reads
+// back as one clipboard item with no types), so the server — on the same
+// machine — names the paths, and the file rides in as an attachment.
+describe("paste from the field's menu", () => {
+  it("attaches a file copied in the file manager", async () => {
+    apiMock.clipboardFiles.mockResolvedValueOnce({
+      files: [{ name: "largeWindows1251_3.txt", path: "E:/logs/largeWindows1251_3.txt" }],
+    });
+    const { container } = renderComposer();
+    const textarea = container.querySelector("textarea")!;
+    await screen.findByLabelText("Остановить");
+    fireEvent.change(textarea, { target: { value: "" } });
+
+    fireEvent.contextMenu(textarea);
+    await userEvent.click(screen.getByRole("menuitem", { name: /^Вставить/ }));
+
+    // Nothing is uploaded: the file is already on this machine, and the agent
+    // reads it where it lies.
+    expect((await stagedChip(container)).textContent).toContain("largeWindows1251_3.txt");
+    await waitFor(() => expect(textarea.value).toBe("largeWindows1251_3.txt"));
+    expect(apiMock.uploadAttachment).not.toHaveBeenCalled();
   });
 });

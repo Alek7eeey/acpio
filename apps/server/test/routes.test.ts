@@ -21,6 +21,13 @@ vi.mock("node:child_process", async (importOriginal) => {
     }),
   };
 });
+// The clipboard bridge shells out to PowerShell: a route test must not read
+// the machine's clipboard, nor depend on what is on it.
+const clipboardAttachmentsMock = vi.hoisted(() => vi.fn(async () => [] as Array<{ name: string; path: string }>));
+vi.mock("../src/services/clipboardFiles.js", () => ({
+  clipboardAttachments: clipboardAttachmentsMock,
+  clipboardFilePaths: vi.fn(async () => []),
+}));
 import http from "node:http";
 import path from "node:path";
 import os from "node:os";
@@ -1659,10 +1666,23 @@ describe("attachment upload", () => {
     expect(res.json().size).toBe(big.length);
   });
 
-  it("rejects a payload above 15 MB with 413", async () => {
+  it("rejects a body that declares more than the ceiling with 413", async () => {
+    // The declared length is the cheap door: a 2 GB body is refused before a
+    // byte of it is written. One that hides its size is caught while streaming
+    // (see the service's own ceiling case) — a test cannot push 1 GB through
+    // `inject` to see that.
     const session = await seedUploadSession();
-    const huge = Buffer.alloc(15 * 1024 * 1024 + 1, 7);
-    const res = await postUpload(session.id, huge, "huge.png");
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${session.id}/attachments/upload`,
+      headers: {
+        "content-type": "application/octet-stream",
+        "x-file-name": encodeURIComponent("huge.png"),
+        "x-file-mime": "image/png",
+        "content-length": String(2 * 1024 * 1024 * 1024),
+      },
+      payload: ONE_PIXEL_PNG,
+    });
     expect(res.statusCode).toBe(413);
   });
 
@@ -1675,6 +1695,42 @@ describe("attachment upload", () => {
       payload: ONE_PIXEL_PNG,
     });
     expect(res.statusCode).toBe(400);
+  });
+});
+
+// The report: a right-click paste of a file copied in Explorer did nothing —
+// the browser hides a file list from `navigator.clipboard.read()`, so the menu
+// row had nothing to paste. The server is on the same machine and answers with
+// the paths instead; the OS call itself is stubbed, the route is not.
+describe("clipboard files", () => {
+  it("answers the files copied on this machine", async () => {
+    clipboardAttachmentsMock.mockResolvedValue([
+      { name: "Снимок экрана.txt", path: "E:/proj/Снимок экрана.txt" },
+    ]);
+    const res = await app.inject({ method: "GET", url: "/api/clipboard/files" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({
+      files: [{ name: "Снимок экрана.txt", path: "E:/proj/Снимок экрана.txt" }],
+    });
+  });
+
+  it("answers nothing to a reader on another machine, key or no key", async () => {
+    // That clipboard belongs to this machine, not to the phone that asked — so
+    // the route is local even for a client the remote access key let in.
+    const key = (await app.inject({ method: "GET", url: "/api/settings" })).json()
+      .remoteAccessKey as string;
+    const lan = { host: "192.168.1.9:18751", "x-forwarded-for": "192.168.1.50" };
+    clipboardAttachmentsMock.mockResolvedValue([{ name: "secret.txt", path: "C:/secret.txt" }]);
+    expect(
+      (await app.inject({ method: "GET", url: "/api/settings", headers: lan })).statusCode,
+    ).toBe(401);
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/clipboard/files",
+      headers: lan,
+      cookies: { acp_remote: key },
+    });
+    expect(res.statusCode).toBe(403);
   });
 });
 

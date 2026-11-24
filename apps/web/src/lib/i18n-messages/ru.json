@@ -313,7 +313,7 @@
     "selectAll": "Выделить всё",
     "undo": "Отменить",
     "redo": "Повторить",
-    "fileTooLarge": "Файл «{{name}}» больше 15 МБ — он пропущен",
+    "fileTooLarge": "Файл «{{name}}» больше 1 ГБ — он пропущен",
     "tooManyFiles": "Можно прикрепить не больше 8 файлов",
     "attachmentUploading": "Загрузка…",
     "attachmentUploadFailed": "Не удалось загрузить",

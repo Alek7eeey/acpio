@@ -277,7 +277,7 @@ export const ru = {
     searchOpen: "открыть",
     pendingFiles: "Прикреплённые файлы",
     removeFile: "Убрать файл",
-    fileTooLarge: "Файл «{{name}}» больше 15 МБ — он пропущен",
+    fileTooLarge: "Файл «{{name}}» больше 1 ГБ — он пропущен",
     tooManyFiles: "Можно прикрепить не больше 8 файлов",
     attachmentUploading: "Загрузка…",
     attachmentUploadFailed: "Не удалось загрузить",

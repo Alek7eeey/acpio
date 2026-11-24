@@ -256,7 +256,7 @@ export const en = {
     searchOpen: "open",
     pendingFiles: "Attached files",
     removeFile: "Remove file",
-    fileTooLarge: "File «{{name}}» exceeds 15 MB — skipped",
+    fileTooLarge: "File «{{name}}» exceeds 1 GB — skipped",
     tooManyFiles: "Up to 8 files can be attached",
     attachmentUploading: "Uploading…",
     attachmentUploadFailed: "Upload failed",

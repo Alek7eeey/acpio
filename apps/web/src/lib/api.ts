@@ -767,6 +767,11 @@ export const api = {
         body: file,
       },
     ),
+  /** Files the reader copied in the file manager. The browser cannot read a
+   *  copied file list (only a `paste` event carries it), so the server — on the
+   *  same machine — asks the OS and answers their paths. */
+  clipboardFiles: () =>
+    request<{ files: Array<{ name: string; path: string }> }>("/api/clipboard/files"),
   /** The chip is gone before the prompt went out: delete the staged bytes too. */
   deleteAttachment: (id: string, stagedPath: string) =>
     request<{ ok: boolean }>(

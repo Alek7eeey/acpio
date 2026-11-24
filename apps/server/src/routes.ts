@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import fsp from "node:fs/promises";
 import path from "node:path";
+import type { Readable } from "node:stream";
 import { z, ZodError } from "zod";
 import { and, eq } from "drizzle-orm";
 import { db } from "./db/client.js";
@@ -92,6 +93,7 @@ import {
   stageAcpioUpload,
   stageSessionUpload,
 } from "./services/attachmentUpload.js";
+import { clipboardAttachments } from "./services/clipboardFiles.js";
 import {
   listFolders,
   listFolderTags,
@@ -611,12 +613,12 @@ async function wireLogChatId(sessionId: string): Promise<string | null> {
 }
 
 export async function registerRoutes(app: FastifyInstance) {
-  // Attachment uploads post raw bytes (see /attachments/upload), so the body
-  // arrives as a Buffer rather than JSON; the limit matches the service's cap.
-  app.addContentTypeParser(
-    "application/octet-stream",
-    { parseAs: "buffer", bodyLimit: MAX_ATTACH_UPLOAD_BYTES },
-    (_req, body, done) => done(null, body),
+  // Attachment uploads post raw bytes (see /attachments/upload). The body goes
+  // to the route as the request stream it is: the route pipes it to disk, so a
+  // big attachment costs a chunk of memory instead of its whole size (a
+  // buffered parser with a 15 MB body limit is what refused bigger files).
+  app.addContentTypeParser("application/octet-stream", (_req, body, done) =>
+    done(null, body),
   );
 
   // Validation failures are client errors, not server faults: turn zod
@@ -2206,24 +2208,40 @@ export async function registerRoutes(app: FastifyInstance) {
    *  project, and their repository must not collect the task's attachments. */
   app.post("/api/sessions/:id/attachments/upload", async (req, reply) => {
     const { id } = req.params as { id: string };
+    // The client posts the blob itself; name/mime ride in headers so no base64
+    // (and no giant JSON body) is involved. The body arrives as the request
+    // stream and is piped to disk by the service — so an answer sent before a
+    // byte of it is read still reaches the client (an unread body would keep
+    // the socket busy and turn the refusal into a network error).
+    const stream = req.body as Readable | undefined;
+    const drain = () => {
+      if (stream && typeof stream.resume === "function") stream.resume();
+    };
     const detail = await getSessionDetail(id);
-    if (!detail) return reply.code(404).send({ error: "Not found" });
-    // The client posts the clipboard blob itself; name/mime ride in headers so
-    // no base64 (and no giant JSON body) is involved.
-    const bytes = req.body;
-    if (!Buffer.isBuffer(bytes) || bytes.length === 0) {
+    if (!detail) {
+      drain();
+      return reply.code(404).send({ error: "Not found" });
+    }
+    if (!stream || typeof stream.pipe !== "function") {
       return reply.code(400).send({ error: "Empty upload" });
     }
-    if (bytes.length > MAX_ATTACH_UPLOAD_BYTES) {
+    // A body that announces more than the ceiling is refused before a byte of
+    // it is written; one that does not is caught while it streams.
+    const declared = Number(headerValue(req.headers["content-length"]));
+    if (Number.isFinite(declared) && declared > MAX_ATTACH_UPLOAD_BYTES) {
+      drain();
       return reply.code(413).send({ error: "File too large" });
     }
     const name = decodeHeaderFileName(req.headers["x-file-name"]).trim();
-    if (!name) return reply.code(400).send({ error: "Missing file name" });
+    if (!name) {
+      drain();
+      return reply.code(400).send({ error: "Missing file name" });
+    }
     const mime = headerValue(req.headers["x-file-mime"]).trim();
     try {
       const saved = detail.boardId
-        ? await stageAcpioUpload(id, { name, mime, bytes })
-        : await stageSessionUpload(id, detail.cwd, { name, mime, bytes });
+        ? await stageAcpioUpload(id, { name, mime, stream })
+        : await stageSessionUpload(id, detail.cwd, { name, mime, stream });
       // A board task keeps the file on itself: its first turn carries what
       // the task was created with, however long the card waits in Todo.
       if (detail.boardId && !detail.startedAt) {
@@ -2237,6 +2255,20 @@ export async function registerRoutes(app: FastifyInstance) {
       }
       return reply.code(400).send({ error: message || "Upload failed" });
     }
+  });
+
+  /** Files a reader copied in the file manager, by their real paths.
+   *
+   * A right-click paste row cannot get them out of the browser: Chromium hands
+   * `navigator.clipboard.read()` an item with no types at all for a copied file
+   * list, and the files only ever arrive in a `paste` event — which a click
+   * cannot raise. The server runs on the same machine, so it asks the OS, and
+   * the file rides into the prompt as a path: no upload, no size limit. Answers
+   * an empty list when the client is on another machine (its clipboard is not
+   * this one's) and wherever the clipboard cannot be read at all. */
+  app.get("/api/clipboard/files", async (req, reply) => {
+    if (!isLoopbackClient(req)) return reply.code(403).send({ error: "Local only" });
+    return { files: await clipboardAttachments() };
   });
 
   /** Drop a file the composer staged and the reader then removed before

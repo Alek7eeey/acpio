@@ -21,7 +21,7 @@ Chat with streamed reasoning, tool calls and subagents, settings, META-style lig
 [![stars](https://img.shields.io/github/stars/Alek7eeey/acpio?logo=github&label=stars&labelColor=555&color=blue)](https://github.com/Alek7eeey/acpio/stargazers)
 [![node](https://img.shields.io/badge/node-%E2%89%A520-blue?labelColor=555)](package.json)
 
-**Current version:** 0.1.49
+**Current version:** 0.1.48
 
 </div>
 

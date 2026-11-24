@@ -359,7 +359,10 @@ function formatBytes(bytes: number): string {
 }
 
 const MAX_ATTACH_COUNT = 8;
-const MAX_ATTACH_SIZE = 15 * 1024 * 1024;
+/** Ceiling on one attachment, the server's own (it pipes the body to disk, so
+ *  this is a backstop against a runaway, not a judgement about the file). The
+ *  old 15 MB refused a 16 MB log while the board pretended to take it. */
+const MAX_ATTACH_SIZE = 1024 * 1024 * 1024;
 
 /**
  * Attachment sitting in the composer. A pasted image gets its chip (and a
@@ -5758,6 +5761,10 @@ function ChatThread() {
     resetComposerHistory();
     // Another chat's steps are not this composer's to undo.
     clearComposerUndo();
+    // Nor is its verdict on a file: a chip's complaint outlived the chat it was
+    // made in and followed the reader into every other one (reported: «Файл
+    // «largeWindows1251_3.txt» больше 15 МБ» above every chat in the app).
+    setAttachError(null);
     setText(next);
     setCursorPos(next.length);
     setSlashMenuDismissed(false);
@@ -6231,6 +6238,39 @@ function ChatThread() {
     [stageDeviceFiles],
   );
 
+  /**
+   * Files that already live on the server — picked from its disk, or copied in
+   * the file manager (see `pasteIntoComposer`) — become chips as they are:
+   * there is nothing to upload, and the link to each one goes into the field
+   * where the pick would have put it.
+   */
+  const stageServerFiles = useCallback(
+    (
+      files: Array<{ name: string; path: string }>,
+      at: { start: number; end: number } | "end" = "end",
+    ): void => {
+      if (files.length === 0) return;
+      if (pendingFiles.length + files.length > MAX_ATTACH_COUNT) {
+        setAttachError(t("chat.tooManyFiles"));
+        return;
+      }
+      setAttachError(null);
+      setPendingFiles((prev) => [
+        ...prev,
+        ...files.map((f) => ({
+          id: nextComposerAttachmentId(),
+          name: f.name,
+          path: f.path,
+          link: composerAttachmentText(f.name),
+          size: 0,
+          status: "ready" as const,
+        })),
+      ]);
+      insertComposerText(files.map((f) => composerAttachmentText(f.name)).join(" "), at);
+    },
+    [insertComposerText, pendingFiles.length, t],
+  );
+
   const pasteOfferAsText = useCallback(() => {
     if (pasteOffer === null) return;
     setPasteOffer(null);
@@ -6596,7 +6636,15 @@ function ChatThread() {
   /**
    * Paste from the menu as Ctrl+V would: text lands over the selection, and a
    * wall of it is offered as a file first. A clipboard with no text on it is
-   * asked for files — a screenshot is the other half of a paste.
+   * asked for a picture — a screenshot is the other half of a paste.
+   *
+   * A file copied in the file manager is the third half, and the browser hides
+   * it: `clipboard.read()` answers one item with no readable types at all, and
+   * the files exist only inside a `paste` event, which a click cannot raise
+   * (measured on Chromium 141: Ctrl+V delivers `largeWindows1251_3.txt` as a
+   * 16 MB `text/plain` File, the very same clipboard reads back as nothing).
+   * The server runs on this machine, so it names them instead — the file rides
+   * in as a path, with nothing to upload.
    */
   const pasteIntoComposer = async () => {
     setComposerMenu(null);
@@ -6624,10 +6672,15 @@ function ChatThread() {
           files.push(new File([blob], "", { type: blob.type || type }));
         }
       }
-      if (files.length > 0) attachPastedFiles(files, { start, end });
+      if (files.length > 0) {
+        attachPastedFiles(files, { start, end });
+        return;
+      }
     } catch {
-      /* No clipboard permission, or no such API: there is nothing to paste. */
+      /* No clipboard permission, or no such API: nothing readable there. */
     }
+    const copied = await api.clipboardFiles().catch(() => ({ files: [] }));
+    if (copied.files?.length) stageServerFiles(copied.files, { start, end });
   };
 
   /** Highlight the whole draft, so the next key replaces it. */
@@ -9173,28 +9226,8 @@ function ChatThread() {
         initialDir={activeSession?.cwd}
         onClose={() => setAttachDialogOpen(false)}
         onAttach={(files) => {
-          if (pendingFiles.length + files.length > MAX_ATTACH_COUNT) {
-            setAttachError(t("chat.tooManyFiles"));
-            return;
-          }
-          setAttachError(null);
           // Files picked from the server are already staged — nothing to upload.
-          setPendingFiles((prev) => [
-            ...prev,
-            ...files.map((f) => ({
-              id: nextComposerAttachmentId(),
-              name: f.name,
-              path: f.path,
-              link: composerAttachmentText(f.name),
-              size: 0,
-              status: "ready" as const,
-            })),
-          ]);
-          // The link to every file goes in at the end, where the paperclip's
-          // own picks land — the text names what the chips carry.
-          if (files.length > 0) {
-            insertComposerText(files.map((f) => composerAttachmentText(f.name)).join(" "), "end");
-          }
+          stageServerFiles(files);
         }}
       />
       <McpChatDialog

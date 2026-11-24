@@ -148,10 +148,10 @@ describe("interpolation", () => {
 
   it("interpolates a single var into chat.fileTooLarge", () => {
     expect(t("en", "chat.fileTooLarge", { name: "big.bin" })).toBe(
-      "File «big.bin» exceeds 15 MB — skipped",
+      "File «big.bin» exceeds 1 GB — skipped",
     );
     expect(t("ru", "chat.fileTooLarge", { name: "big.bin" })).toBe(
-      "Файл «big.bin» больше 15 МБ — он пропущен",
+      "Файл «big.bin» больше 1 ГБ — он пропущен",
     );
   });
 });

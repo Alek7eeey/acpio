@@ -293,7 +293,7 @@
     "selectAll": "Select all",
     "undo": "Undo",
     "redo": "Redo",
-    "fileTooLarge": "File «{{name}}» exceeds 15 MB — skipped",
+    "fileTooLarge": "File «{{name}}» exceeds 1 GB — skipped",
     "tooManyFiles": "Up to 8 files can be attached",
     "attachmentUploading": "Uploading…",
     "attachmentUploadFailed": "Upload failed",
