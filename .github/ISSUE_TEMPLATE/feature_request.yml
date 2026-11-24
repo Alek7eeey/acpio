@@ -1,0 +1,41 @@
+name: Feature request
+description: Something the app does not do, or does in a way that hurts
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is missing or awkward today
+      description: The concrete case that hurts, not a general wish. What do you do instead, and what does it cost you?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What it should do
+      description: Where it belongs on screen or in the API, and what the reader would see.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you tried instead
+      description: An existing setting, another harness, a workaround — and why it is not enough.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where it lives
+      options:
+        - Chat and composer
+        - Board
+        - Settings
+        - Harnesses and adapters
+        - Server and API
+        - Docs and installer
+    validations:
+      required: true

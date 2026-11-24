@@ -1,0 +1,84 @@
+name: Bug report
+description: Something behaves differently from what it should
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you saw. A console line, a stack trace or a screenshot beats a summary.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. open …
+        2. send …
+        3. the panel shows …
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Acpio version
+      description: The number `acpio --version` prints.
+      placeholder: 0.1.48
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How it is installed
+      options:
+        - npx acpio
+        - npm i -g acpio
+        - From source (git clone, npm run dev)
+        - PowerShell setup (setup.ps1)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: agent
+    attributes:
+      label: Which agent was driving the chat
+      description: Leave it on "Not about an agent" for the shell, the board, settings or the installer.
+      options:
+        - Built-in agent
+        - Cursor CLI
+        - OMP
+        - OpenCode
+        - Not about an agent
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: OS, Node version, browser
+      placeholder: Windows 11, Node 24.1, Firefox 143
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: |
+        A crash or a broken chat screen leaves an `acpio-dump-*.json`, and Settings → Diagnostics
+        browses the saved ones. The server's console output helps too. Attach the files or paste
+        the text — remove API keys and tokens first.
+      render: text
+    validations:
+      required: false
