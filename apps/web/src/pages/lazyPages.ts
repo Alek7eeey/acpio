@@ -1,4 +1,4 @@
-import { lazy } from "react";
+import { lazyPage } from "../lib/lazyPage";
 
 /**
  * The pages that are not the chat, loaded on arrival.
@@ -11,17 +11,18 @@ import { lazy } from "react";
  *
  * The route table in `App.tsx` and the shell that actually renders the pages
  * (`AppShell`, which has no `<Outlet/>`) both point here, so a navigation
- * fetches each chunk once.
+ * fetches each chunk once. `lazyPage` is `lazy` plus the reload that a chunk
+ * deleted by a rebuild needs — see `lib/lazyPage.ts`.
  */
-export const LazyEditorPage = lazy(() =>
+export const LazyEditorPage = lazyPage(() =>
   import("./EditorPage").then((m) => ({ default: m.EditorPage })),
 );
-export const LazySettingsPage = lazy(() =>
+export const LazySettingsPage = lazyPage(() =>
   import("./SettingsPage").then((m) => ({ default: m.SettingsPage })),
 );
-export const LazyTasksPage = lazy(() =>
+export const LazyTasksPage = lazyPage(() =>
   import("./TasksPage").then((m) => ({ default: m.TasksPage })),
 );
-export const LazyBoardPage = lazy(() =>
+export const LazyBoardPage = lazyPage(() =>
   import("./BoardPage").then((m) => ({ default: m.BoardPage })),
 );
