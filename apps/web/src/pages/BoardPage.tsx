@@ -54,6 +54,7 @@ import { isTypingKey } from "../lib/menuPosition";
 import "../lib/modeColors.css";
 import { readComposerDraft, setComposerDraft } from "../lib/composerDrafts";
 import { splitLinkNames } from "../lib/linkNames";
+import { isLargePastedText, pastedTextFileName, spliceComposerText } from "../lib/pasteAsFile";
 import { showToast } from "../lib/toast";
 import { stageComposerAttachments } from "../lib/pendingComposerAttachments";
 import {
@@ -448,6 +449,10 @@ const NewTaskComposer = memo(function NewTaskComposer({
   const [attachDialogOpen, setAttachDialogOpen] = useState(false);
   /** Caret in the description — where a skill picked from the menu lands. */
   const [caret, setCaret] = useState(() => seed?.text.length ?? 0);
+  /** The block a big paste left waiting for an answer, and the range it
+   *  replaced — the offer the chat composer makes, kept for this field too. */
+  const [pasteOffer, setPasteOffer] = useState<string | null>(null);
+  const pasteAtRef = useRef<{ start: number; end: number } | null>(null);
   /** The painted copy of the description (see `splitLinkNames`). */
   const mirrorRef = useRef<HTMLDivElement>(null);
   /** The chip whose link is being offered, and where the menu stands. */
@@ -703,11 +708,12 @@ const NewTaskComposer = memo(function NewTaskComposer({
   useEffect(() => {
     dirtyRef.current =
       draft.trim().length > 0 ||
+      pasteOffer !== null ||
       files.length > 0 ||
       draftProvider !== "" ||
       draftModel !== "" ||
       Object.keys(draftParams).length > 0;
-  }, [dirtyRef, draft, files, draftProvider, draftModel, draftParams]);
+  }, [dirtyRef, draft, pasteOffer, files, draftProvider, draftModel, draftParams]);
 
   // The previews are object URLs of files the user picked: nothing else
   // releases them, so a dismissed form (or a board left behind) must.
@@ -721,6 +727,90 @@ const NewTaskComposer = memo(function NewTaskComposer({
     },
     [],
   );
+
+  /** Put text into the description over a range, the caret left after it —
+   *  where the paste that text came from would have landed. */
+  const insertDraftText = (insertion: string, at: { start: number; end: number } | null) => {
+    const range = at ?? { start: draft.length, end: draft.length };
+    const start = Math.min(Math.max(range.start, 0), draft.length);
+    const end = Math.min(Math.max(range.end, start), draft.length);
+    setDraft(`${draft.slice(0, start)}${insertion}${draft.slice(end)}`);
+    const after = start + insertion.length;
+    // An offer still waiting for its answer holds a range in this text: what is
+    // written before it moves it along, so the block still lands where it was
+    // pasted.
+    const offered = pasteAtRef.current;
+    if (offered) {
+      const delta = insertion.length - (end - start);
+      const move = (pos: number) => (pos >= end ? pos + delta : pos >= start ? after : pos);
+      pasteAtRef.current = { start: move(offered.start), end: move(offered.end) };
+    }
+    setCaret(after);
+    requestAnimationFrame(() => {
+      const input = inputRef.current;
+      if (!input) return;
+      input.focus();
+      input.setSelectionRange(after, after);
+    });
+  };
+
+  /** A big paste waits for the answer; a second one does not replace (and so
+   *  lose) the first — that one goes in where it was pasted, and the new block
+   *  is offered for the range this paste replaced. */
+  const offerPasteAsFile = (pasted: string, at: { start: number; end: number }) => {
+    let next = at;
+    if (pasteOffer !== null) {
+      const prev = pasteOffer;
+      const prevAt = pasteAtRef.current ?? { start: next.start, end: next.start };
+      insertDraftText(prev, prevAt);
+      const shift = prev.length;
+      const prevStart = Math.min(prevAt.start, prevAt.end);
+      const prevEnd = Math.max(prevAt.start, prevAt.end);
+      const move = (pos: number) =>
+        pos >= prevEnd ? pos + shift : pos >= prevStart ? prevStart + shift : pos;
+      next = { start: move(at.start), end: move(at.end) };
+    }
+    pasteAtRef.current = next;
+    setPasteOffer(pasted);
+  };
+
+  /** The offer taken as text: the block goes back in where the paste replaced. */
+  const pasteOfferAsText = () => {
+    if (pasteOffer === null) return;
+    const block = pasteOffer;
+    const at = pasteAtRef.current;
+    setPasteOffer(null);
+    pasteAtRef.current = null;
+    insertDraftText(block, at);
+  };
+
+  /** The offer taken as a file: the block becomes a chip of the task — uploaded
+   *  with it — and the description keeps its name. No room for another file
+   *  means the block goes in as text: the paste itself is never dropped. */
+  const pasteOfferAsFile = () => {
+    if (pasteOffer === null) return;
+    const block = pasteOffer;
+    const at = pasteAtRef.current;
+    setPasteOffer(null);
+    pasteAtRef.current = null;
+    if (files.length >= MAX_TASK_FILES) {
+      insertDraftText(block, at);
+      return;
+    }
+    fileSeq.current += 1;
+    const name = pastedTextFileName();
+    setFiles((prev) =>
+      [
+        ...prev,
+        {
+          id: `task-file-${fileSeq.current}`,
+          name,
+          file: new File([block], name, { type: "text/plain" }),
+        },
+      ].slice(0, MAX_TASK_FILES),
+    );
+    insertDraftText(name, at);
+  };
 
   /** Clipboard text, put in at the caret: the field's own paste is the
    *  browser's, which the menu that replaced it has to do itself. A clipboard
@@ -742,16 +832,9 @@ const NewTaskComposer = memo(function NewTaskComposer({
     const el = inputRef.current;
     const start = Math.min(el?.selectionStart ?? caret, draft.length);
     const end = Math.max(start, Math.min(el?.selectionEnd ?? start, draft.length));
-    const next = `${draft.slice(0, start)}${text}${draft.slice(end)}`;
-    const after = start + text.length;
-    setDraft(next);
-    setCaret(after);
-    requestAnimationFrame(() => {
-      const input = inputRef.current;
-      if (!input) return;
-      input.focus();
-      input.setSelectionRange(after, after);
-    });
+    // A wall of text is offered as a file first, exactly as Ctrl+V offers it.
+    if (isLargePastedText(text)) offerPasteAsFile(text, { start, end });
+    else insertDraftText(text, { start, end });
   };
 
   /** Put the names of the files just attached into the description, at the
@@ -761,16 +844,7 @@ const NewTaskComposer = memo(function NewTaskComposer({
     const at = Math.min(Math.max(caret, 0), draft.length);
     const before = draft.slice(0, at);
     const pad = before && !/\s$/.test(before) ? " " : "";
-    const insertion = `${pad}${names.join(" ")}`;
-    const caretAfter = before.length + insertion.length;
-    setDraft(before + insertion + draft.slice(at));
-    setCaret(caretAfter);
-    requestAnimationFrame(() => {
-      const input = inputRef.current;
-      if (!input) return;
-      input.focus();
-      input.setSelectionRange(caretAfter, caretAfter);
-    });
+    insertDraftText(`${pad}${names.join(" ")}`, { start: at, end: at });
   };
 
   /** Add drafts to the row, dropping whatever goes past the ceiling — and the
@@ -855,9 +929,16 @@ const NewTaskComposer = memo(function NewTaskComposer({
   };
 
   const submit = () => {
+    // An offer still waiting for its answer is not lost by pressing Create: no
+    // choice means «paste as text», and the block goes back into the very range
+    // the paste replaced — the chat composer's rule.
+    const description =
+      pasteOffer === null
+        ? draft
+        : spliceComposerText(draft, pasteOffer, pasteAtRef.current);
     void onSubmit(
       cwd,
-      draft,
+      description,
       files.flatMap((entry) => (entry.file ? [entry.file] : [])),
       files.flatMap((entry) => (entry.path ? [{ name: entry.name, path: entry.path }] : [])),
       draftProvider || defaultProvider,
@@ -1049,9 +1130,20 @@ const NewTaskComposer = memo(function NewTaskComposer({
         }}
         onPaste={(e) => {
           const pasted = clipboardFiles(e.clipboardData);
-          if (!pasted.length) return;
+          if (pasted.length) {
+            e.preventDefault();
+            addFiles(pasted);
+            return;
+          }
+          // A wall of pasted text would swamp the description (and the task),
+          // so it is offered as a file first — the chat composer's own rule;
+          // anything shorter is left to the browser.
+          const text = e.clipboardData?.getData("text/plain") ?? "";
+          if (!isLargePastedText(text)) return;
           e.preventDefault();
-          addFiles(pasted);
+          const start = e.currentTarget.selectionStart ?? draft.length;
+          const end = e.currentTarget.selectionEnd ?? start;
+          offerPasteAsFile(text, { start, end });
         }}
         onKeyDown={(e) => {
           // The menu holds the arrows, Enter and Escape while it is open, the
@@ -1087,6 +1179,36 @@ const NewTaskComposer = memo(function NewTaskComposer({
         }}
       />
       </div>
+      {/* The chat composer's offer, over the field it was pasted into: the
+          block becomes a file of the task, or the text itself. */}
+      {pasteOffer !== null && (
+        <div
+          className={styles.pasteOffer}
+          role="group"
+          aria-label={t("chat.pasteAsFileTitle")}
+        >
+          <span className={styles.pasteOfferCopy}>
+            <span className={styles.pasteOfferTitle}>{t("chat.pasteAsFileTitle")}</span>
+            <span className={styles.pasteOfferHint}>{t("chat.pasteAsFileHint")}</span>
+          </span>
+          <span className={styles.pasteOfferActions}>
+            <button
+              type="button"
+              className={styles.pasteOfferPrimary}
+              onClick={pasteOfferAsFile}
+            >
+              {t("chat.pasteAsFile")}
+            </button>
+            <button
+              type="button"
+              className={styles.pasteOfferGhost}
+              onClick={pasteOfferAsText}
+            >
+              {t("chat.pasteAsText")}
+            </button>
+          </span>
+        </div>
+      )}
       {fileMenu
         ? createPortal(
             <div
@@ -1282,7 +1404,7 @@ const NewTaskComposer = memo(function NewTaskComposer({
           <button
             type="button"
             className={styles.primaryBtn}
-            disabled={!draft.trim() || busy}
+            disabled={(!draft.trim() && pasteOffer === null) || busy}
             onClick={submit}
           >
             {submitLabel}

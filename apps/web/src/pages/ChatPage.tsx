@@ -70,6 +70,7 @@ import {
   setComposerDraftFiles,
 } from "../lib/composerDrafts";
 import { splitLinkNames } from "../lib/linkNames";
+import { isLargePastedText, pastedTextFileName, spliceComposerText } from "../lib/pasteAsFile";
 import { useChatSplitAllowed } from "../lib/panelLayout";
 import { isTypingKey, useFixedMenuPlacement } from "../lib/menuPosition";
 import { sanitizeCatalogModes, selectLiveSessionDetail, useAppStore, type PendingAttachment } from "../lib/store";
@@ -501,40 +502,6 @@ function deviceFileName(file: File, index: number): string {
   if (raw) return raw;
   const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
   return `file-${stamp}${index > 0 ? `-${index + 1}` : ""}`;
-}
-
-/** A pasted block this long — or this many lines — is a wall of text in the
- *  composer, so the reader is offered to keep it as a file instead. Anything
- *  shorter is pasted by the browser itself, as it always was. */
-const PASTE_AS_FILE_MIN_CHARS = 1500;
-const PASTE_AS_FILE_MIN_LINES = 20;
-
-function isLargePastedText(text: string): boolean {
-  return text.length >= PASTE_AS_FILE_MIN_CHARS || text.split("\n").length >= PASTE_AS_FILE_MIN_LINES;
-}
-
-/** Put a block back into the composer text over the caret range the paste
- *  replaced. A range known to be gone (no offer recorded) appends instead. */
-function spliceComposerText(
-  base: string,
-  insertion: string,
-  at: { start: number; end: number } | null,
-): string {
-  if (!at) return base + insertion;
-  const start = Math.min(Math.max(at.start, 0), base.length);
-  const end = Math.min(Math.max(at.end, start), base.length);
-  return base.slice(0, start) + insertion + base.slice(end);
-}
-
-/**
- * Name of the file a pasted block becomes. Millisecond precision on purpose:
- * the link written into the composer carries this name, so a second paste in
- * the same second must not land on the name an earlier one already took (the
- * server would then rename the file and the link would point at nothing).
- */
-function pastedTextFileName(): string {
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 23);
-  return `pasted-text-${stamp}.txt`;
 }
 
 /**

@@ -660,6 +660,76 @@
   gap: 6px;
 }
 
+/* Offer shown for a pasted wall of text, as in the chat composer: the block
+   becomes a file of the task (a chip, its name in the description) or the text
+   itself. Sized to the form's own rows — a 264px lane has no room for the
+   chat's padding. */
+.pasteOffer {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  min-width: 0;
+}
+
+.pasteOfferCopy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pasteOfferTitle {
+  color: var(--text);
+  font-size: 0.74rem;
+  font-weight: 650;
+}
+
+.pasteOfferHint {
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+}
+
+.pasteOfferActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.pasteOfferPrimary,
+.pasteOfferGhost {
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  padding: 3px 8px;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.pasteOfferPrimary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.pasteOfferPrimary:hover {
+  background: color-mix(in srgb, var(--accent) 85%, #000);
+}
+
+.pasteOfferGhost {
+  background: transparent;
+  color: var(--text);
+}
+
+.pasteOfferGhost:hover {
+  background: var(--bg-tertiary);
+}
+
 .attachFile {
   display: grid;
   place-items: center;

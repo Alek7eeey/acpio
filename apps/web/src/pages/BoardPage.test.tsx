@@ -1662,6 +1662,42 @@ describe("BoardPage new task form", () => {
     );
   });
 
+  // The chat composer offers a wall of pasted text as a file; the board's field
+  // is the same field, so it makes the same offer — the block becomes a chip of
+  // the task, uploaded with it, and the description keeps its name.
+  it("offers a big paste as a file and names the file in the description", async () => {
+    renderBoard();
+    await screen.findByText("Fix the login bug");
+    const group = document.querySelector("[data-group]") as HTMLElement;
+    await userEvent.click(within(group).getByLabelText("New task"));
+    const box = within(group).getByPlaceholderText("Describe the task…") as HTMLTextAreaElement;
+
+    const block = Array.from({ length: 40 }, (_, i) => `лог строка ${i}`).join("\n");
+    fireEvent.paste(box, { clipboardData: { getData: () => block, files: [], items: [] } });
+
+    // Nothing lands in the field until the reader answers the offer.
+    expect(box.value).toBe("");
+    await userEvent.click(within(group).getByRole("button", { name: "Paste as file" }));
+
+    await waitFor(() => expect(box.value).toMatch(/^pasted-text-.+\.txt$/));
+    expect(group.querySelector(`.${styles.fileChip}`)?.textContent).toContain(box.value);
+  });
+
+  it("puts a big paste in as text when that is the answer", async () => {
+    renderBoard();
+    await screen.findByText("Fix the login bug");
+    const group = document.querySelector("[data-group]") as HTMLElement;
+    await userEvent.click(within(group).getByLabelText("New task"));
+    const box = within(group).getByPlaceholderText("Describe the task…") as HTMLTextAreaElement;
+
+    const block = Array.from({ length: 40 }, (_, i) => `лог строка ${i}`).join("\n");
+    fireEvent.paste(box, { clipboardData: { getData: () => block, files: [], items: [] } });
+    await userEvent.click(within(group).getByRole("button", { name: "Paste as text" }));
+
+    await waitFor(() => expect(box.value).toBe(block));
+    expect(group.querySelector(`.${styles.fileChip}`)).toBeNull();
+  });
+
   // The report: the field's menu outlived the first keystroke and covered the
   // task being written under it.
   it("steps the form's menu aside as soon as the reader types", async () => {
