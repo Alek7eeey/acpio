@@ -821,7 +821,7 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
     | { kind: "folder-fewer"; key: string; fkey: string }
     | { kind: "folder-confirm"; key: string; cwd: string }
     | { kind: "board"; key: string; board: BoardDto }
-    | { kind: "session"; key: string; session: SessionDto; showActivity: boolean; inArchive: boolean; indent: boolean }
+    | { kind: "session"; key: string; session: SessionDto; showActivity: boolean; indent: boolean }
     | { kind: "archive-head"; key: string; count: number }
     | { kind: "liked-head"; key: string; count: number }
     | { kind: "liked"; key: string; item: LikedMessage };
@@ -899,7 +899,6 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
               key: `s:${s.id}`,
               session: s,
               showActivity: true,
-              inArchive: false,
               indent: showFolderHeaders,
             });
           }
@@ -911,7 +910,6 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
             key: `s:${s.id}`,
             session: s,
             showActivity: true,
-            inArchive: false,
             indent: showFolderHeaders,
           });
         }
@@ -977,7 +975,7 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
     overscan: 8,
   });
 
-  const renderSessionRow = (s: SessionDto, showActivity: boolean, inArchive = false) => {
+  const renderSessionRow = (s: SessionDto, showActivity: boolean) => {
     // On a board page the board row is the selection; the chat the reader came
     // from must not stay lit up.
     const isActive = !boardRouteOpen && s.id === activeSessionId;
@@ -1158,56 +1156,6 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
                 />
                 <path d="M12 13.6V20" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
               </svg>
-            </button>
-            <button
-              type="button"
-              className={`${styles.sessionRowAction} ${styles.sessionArchive}`}
-              title={inArchive ? t("chat.unarchive") : t("chat.archive")}
-              aria-label={inArchive ? t("chat.unarchive") : t("chat.archive")}
-              onPointerDown={(e) => e.stopPropagation()}
-              onDoubleClick={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                const next = !s.archived;
-                void setSessionFlags(s.id, { archived: next });
-                showToast(next ? t("common.toastArchived") : t("common.toastUnarchived"), {
-                  tone: "info",
-                  id: `archive-${s.id}`,
-                });
-              }}
-            >
-              {inArchive ? (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-                  <path
-                    d="M4.5 7.5h15V18a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 18V7.5Z"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinejoin="round"
-                  />
-                  <path
-                    d="M4.5 7.5V5.5A1.5 1.5 0 0 1 6 4h12a1.5 1.5 0 0 1 1.5 1.5v2M12 12v4.5m0 0-1.8-1.8m1.8 1.8 1.8-1.8"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              ) : (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-                  <path
-                    d="M4.5 7.5h15V18a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 18V7.5Z"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinejoin="round"
-                  />
-                  <path
-                    d="M4.5 7.5V5.5A1.5 1.5 0 0 1 6 4h12a1.5 1.5 0 0 1 1.5 1.5v2M12 12v3.5"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              )}
             </button>
             </div>
             {activity ? (
@@ -2053,7 +2001,7 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
       case "board":
         return renderBoardRow(row.board);
       case "session":
-        return renderSessionRow(row.session, row.showActivity, row.inArchive);
+        return renderSessionRow(row.session, row.showActivity);
       case "archive-head":
         return renderSectionHead("__archive__", row.count, t("chat.archiveSection"));
       case "liked-head":
@@ -2068,7 +2016,7 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
       <div
         className={`${styles.chatPanel}${
           (settings.chatTreeElements ?? []).includes("pin") ? "" : ` ${styles.treeNoPin}`
-        }${(settings.chatTreeElements ?? []).includes("archive") ? "" : ` ${styles.treeNoArchive}`}${
+        }${
           (settings.chatTreeElements ?? []).includes("more") &&
           (settings.chatTreeMenu ?? []).length > 0
             ? ""
@@ -2251,7 +2199,7 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
               </div>
               {!collapsedFolders.has("__archive__") && (
                 <div className={styles.ungroupedSessions}>
-                  {archivedSessions.map((s) => renderSessionRow(s, true, true))}
+                  {archivedSessions.map((s) => renderSessionRow(s, true))}
                 </div>
               )}
             </div>
@@ -2388,39 +2336,37 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
                 </button>
               </>
             )}
-            {isTouch && (
-              <>
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    const next = !menuSession.archived;
-                    void setSessionFlags(menuSession.id, { archived: next });
-                    showToast(next ? t("common.toastArchived") : t("common.toastUnarchived"), {
-                      tone: "info",
-                      id: `archive-${menuSession.id}`,
-                    });
-                    setMenu(null);
-                  }}
-                >
-                  <MenuIcon>
-                    <path
-                      d="M4.5 7.5h15V18a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 18V7.5Z"
-                      stroke="currentColor"
-                      strokeWidth="1.5"
-                      strokeLinejoin="round"
-                    />
-                    <path
-                      d="M4.5 7.5V5.5A1.5 1.5 0 0 1 6 4h12a1.5 1.5 0 0 1 1.5 1.5v2M12 12v4.5m0 0-1.8-1.8m1.8 1.8 1.8-1.8"
-                      stroke="currentColor"
-                      strokeWidth="1.5"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </MenuIcon>
-                  {menuSession.archived ? t("chat.unarchive") : t("chat.archive")}
-                </button>
-              </>
+            {(settings.chatTreeElements ?? []).includes("archive") && (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  const next = !menuSession.archived;
+                  void setSessionFlags(menuSession.id, { archived: next });
+                  showToast(next ? t("common.toastArchived") : t("common.toastUnarchived"), {
+                    tone: "info",
+                    id: `archive-${menuSession.id}`,
+                  });
+                  setMenu(null);
+                }}
+              >
+                <MenuIcon>
+                  <path
+                    d="M4.5 7.5h15V18a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 18V7.5Z"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="M4.5 7.5V5.5A1.5 1.5 0 0 1 6 4h12a1.5 1.5 0 0 1 1.5 1.5v2M12 12v4.5m0 0-1.8-1.8m1.8 1.8 1.8-1.8"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </MenuIcon>
+                {menuSession.archived ? t("chat.unarchive") : t("chat.archive")}
+              </button>
             )}
             {(settings.chatTreeMenu ?? []).includes("export") && (
             <button

@@ -1766,7 +1766,7 @@
   color: var(--accent);
 }
 
-/* Pin / archive sit with the time on the right; ⋯ appears after the time. */
+/* Pin sits with the time on the right; ⋯ appears after the time. */
 .sessionRowActions {
   display: flex;
   align-items: center;
@@ -1777,7 +1777,7 @@
   margin-top: 0;
 }
 
-/* Pin / archive actions — revealed only on row hover. */
+/* The pin action — revealed only on row hover. */
 .sessionRowAction {
   flex: 0 0 auto;
   width: var(--session-row-h);
@@ -1834,9 +1834,9 @@
   }
 }
 
-/* Touch devices have no hover to reveal the inline pin/archive actions, so
-   every row would permanently show both icons. Hide them entirely there —
-   everything lives in the ⋮ menu, which stays always visible. */
+/* Touch devices have no hover to reveal the inline pin action, so every row
+   would permanently show the icon. Hide it entirely there — everything lives
+   in the ⋮ menu, which stays always visible. */
 @media (hover: none), (pointer: coarse) {
   .sessionRowAction {
     display: none;
@@ -5213,10 +5213,6 @@
 
 /* Hidden tree controls (settings → Chat → Tree buttons). */
 .treeNoPin .sessionPin {
-  display: none;
-}
-
-.treeNoArchive .sessionArchive {
   display: none;
 }
 

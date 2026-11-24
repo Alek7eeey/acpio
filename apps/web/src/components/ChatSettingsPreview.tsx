@@ -1242,23 +1242,6 @@ export function ChatSettingsPreview({
                     </svg>
                   </span>
                 </El>
-                <El
-                  on={treeOn("archive")} variant="dim"
-                  onToggle={() => onToggleTreeElement("archive")}
-                  label={t("settings.chatTreeElArchive")}
-                >
-                  <span className={styles.treeAct} aria-hidden>
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
-                      <path
-                        d="M4.5 7.5h15V18a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 18V7.5Z"
-                        stroke="currentColor"
-                        strokeWidth="1.5"
-                        strokeLinejoin="round"
-                      />
-                      <path d="M4.5 7.5V5.5A1.5 1.5 0 0 1 6 4h12a1.5 1.5 0 0 1 1.5 1.5v2" stroke="currentColor" strokeWidth="1.5" />
-                    </svg>
-                  </span>
-                </El>
                 {treeMenu.length > 0 ? (
                   <span
                     className={styles.treeAct}
@@ -1308,6 +1291,15 @@ export function ChatSettingsPreview({
             role="menu"
             style={{ top: treeMenuPos.top, left: treeMenuPos.left }}
           >
+            {/* The archive command lives in the ⋯ menu, not on the row. */}
+            <El
+              variant="dim"
+              on={treeOn("archive")}
+              onToggle={() => onToggleTreeElement("archive")}
+              label={t("settings.chatTreeElArchive")}
+            >
+              <span className={styles.treeMenuItem}>{t("chat.archive")}</span>
+            </El>
             {TREE_MENU_ORDER.map((id) => (
               <El
                 key={id}
