@@ -281,6 +281,11 @@ export function settingsSearchIndex(
       t("settings.agentAdvancedDesc"),
       t("settings.defaultFolder"),
       t("settings.exportDir"),
+      t("settings.attachmentsDir"),
+      // How the reader says it: "куда падают вложения", "attachments folder".
+      "вложения",
+      "attachments",
+      ".acpio-attachments",
       t("settings.permissionPolicy"),
       t("settings.permissionAlways"),
       t("settings.permissionPrompt"),
@@ -491,6 +496,7 @@ function settingsRowHints(t: TranslateFn): Record<SettingsLeaf, string[]> {
     ],
     advanced: [
       t("settings.exportDirHint", { path: "…" }),
+      t("settings.attachmentsDirHint"),
       t("settings.resumeAgentContextHint"),
       t("settings.resumeInterruptedTurnsHint"),
       t("settings.multitaskHint"),

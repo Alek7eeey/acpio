@@ -1,3 +1,5 @@
+import { readFile, stat } from "node:fs/promises";
+import path from "node:path";
 import { eq } from "drizzle-orm";
 import {
   AppSettings,
@@ -219,6 +221,9 @@ function mergeSettings(raw: unknown): AppSettings {
   }
   if (typeof merged.exportDir !== "string") {
     merged.exportDir = DEFAULT_SETTINGS.exportDir;
+  }
+  if (typeof merged.attachmentsDir !== "string") {
+    merged.attachmentsDir = DEFAULT_SETTINGS.attachmentsDir;
   }
   if (typeof merged.resumeAgentContext !== "boolean") {
     merged.resumeAgentContext = DEFAULT_SETTINGS.resumeAgentContext;
@@ -825,6 +830,23 @@ function withLocalSecrets(
     );
   }
   return out;
+}
+
+/** Ceiling on a settings file read off the disk: a real one is a few KB. */
+const MAX_SETTINGS_FILE_BYTES = 8 * 1024 * 1024;
+
+/**
+ * The settings file at a path the reader picked in the app's own browser (the
+ * second variant of the import dialog), parsed as the export wrote it. Reading
+ * it here rather than in the page is the point: the file is on the server's
+ * disk, where a phone's file dialog cannot go.
+ */
+export async function readSettingsFileAt(filePath: string): Promise<unknown> {
+  const abs = path.resolve(filePath);
+  const info = await stat(abs);
+  if (!info.isFile()) throw new Error("settings file: not a file");
+  if (info.size > MAX_SETTINGS_FILE_BYTES) throw new Error("settings file: too large");
+  return JSON.parse(await readFile(abs, "utf8"));
 }
 
 /**

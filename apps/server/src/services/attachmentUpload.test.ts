@@ -3,7 +3,7 @@ import { Readable } from "node:stream";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { ATTACH_DIR, stageSessionUpload } from "./attachmentUpload.js";
+import { ATTACH_DIR, discardStagedUpload, stageSessionUpload } from "./attachmentUpload.js";
 
 /** The body the route hands over: the request stream, byte for byte. */
 function body(bytes: Buffer | string): Readable {
@@ -81,6 +81,40 @@ describe("stageSessionUpload", () => {
     ).rejects.toThrow("File too large");
     // A half-written blob is a file the reader never asked for.
     expect(await readdir(path.join(cwd, ATTACH_DIR, "sess-1"))).toEqual([]);
+  });
+
+  // The reader's own folder: a value relative to the chat's folder keeps the
+  // project tidy (`docs/attachments`), and it is theirs to name.
+  it("stages into the folder settings.attachmentsDir points at", async () => {
+    const cwd = await mkdtemp(path.join(os.tmpdir(), "acpio-attach-"));
+    dirs.push(cwd);
+    const saved = await stageSessionUpload(
+      "sess-1",
+      cwd,
+      { name: "shot.png", mime: "image/png", stream: body("png") },
+      "docs/attachments",
+    );
+    expect(saved.path).toBe(path.join(cwd, "docs", "attachments", "sess-1", "shot.png"));
+    // The chip's removal still finds it: a staged file nobody points at is
+    // exactly what the discard is for.
+    expect(await discardStagedUpload("sess-1", cwd, saved.path, "docs/attachments")).toBe(true);
+    expect(await readdir(path.dirname(saved.path))).toEqual([]);
+  });
+
+  it("takes an absolute attachmentsDir and nothing outside it", async () => {
+    const cwd = await mkdtemp(path.join(os.tmpdir(), "acpio-attach-"));
+    const elsewhere = await mkdtemp(path.join(os.tmpdir(), "acpio-attach-out-"));
+    dirs.push(cwd, elsewhere);
+    const saved = await stageSessionUpload(
+      "sess-1",
+      cwd,
+      { name: "log.txt", mime: "text/plain", stream: body("hello") },
+      elsewhere,
+    );
+    expect(saved.path).toBe(path.join(elsewhere, "sess-1", "log.txt"));
+    // A path this chat never staged into is not ours to delete.
+    const project = path.join(cwd, ATTACH_DIR, "sess-1", "keep.txt");
+    expect(await discardStagedUpload("sess-1", cwd, project, elsewhere)).toBe(false);
   });
 
   it("calls an empty body an empty upload", async () => {

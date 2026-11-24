@@ -510,6 +510,7 @@ describe("DEFAULT_SETTINGS", () => {
     editorToolOxlint: "auto",
     editorToolOxfmt: "auto",
     exportDir: "",
+    attachmentsDir: "",
     resumeAgentContext: true,
     resumeInterruptedTurns: true,
     multitask: false,

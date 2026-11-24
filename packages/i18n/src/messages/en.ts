@@ -968,6 +968,11 @@ export const en = {
     changePassword: "Change password",
     removeKey: "Remove key from settings",
     defaultFolder: "Default folder",
+    attachmentsDir: "Attachments folder",
+    attachmentsDirDefault: ".acpio-attachments in the chat's folder",
+    attachmentsDirHint:
+      "Where a chat's uploads are stored. Empty keeps .acpio-attachments in the chat's folder (the project root). A folder inside the project works (docs/attachments), and so does any path on the disk.",
+    folderPickSwapHint: "Right-click: pick inside the app",
     cliAndPermissions: "CLI & permissions",
     permissionPolicy: "Permission policy",
     permissionPrompt: "Ask",

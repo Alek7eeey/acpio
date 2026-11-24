@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { DEFAULT_SETTINGS, type AppSettings } from "@acpio/shared";
@@ -36,11 +36,31 @@ const apiMock = vi.hoisted(() => ({
   listSkills: vi.fn(async () => [] as Array<{ name: string; description: string; mode: string }>),
   // The About leaf asks whether npm has a newer Acpio than the running build.
   appUpdate: vi.fn(),
+  // The Advanced leaf shows where exports land by default, and its rows pick a
+  // folder with the OS dialog or the app's browser.
+  getExportDefaultDir: vi.fn(async () => ({ path: "E:/exports" })),
+  pickDirectory: vi.fn(async () => ({ path: null })),
+  browseDirectory: vi.fn(async () => ({ path: "E:/", parent: null, entries: [] })),
 }));
 vi.mock("../lib/api", () => ({ api: apiMock }));
 
 /** The chat leaf renders the row twice (mobile block + "Advanced" details). */
 const limitField = () => screen.getAllByLabelText("Chats per folder")[0] as HTMLInputElement;
+
+// jsdom ships no matchMedia, and the folder pickers read the touch query to
+// decide which dialog a click opens.
+if (!window.matchMedia) {
+  window.matchMedia = ((query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+  })) as never;
+}
 
 const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
 
@@ -84,6 +104,57 @@ const scrolledTo = () => {
   const spy = HTMLElement.prototype.scrollIntoView as unknown as { mock: { contexts: unknown[] } };
   return spy.mock.contexts[0] as HTMLElement | undefined;
 };
+
+describe("Agent → Advanced", () => {
+  const renderAdvanced = () => {
+    useAppStore.setState({ settings: DEFAULT_SETTINGS, bootstrapped: true });
+    return render(
+      <MemoryRouter initialEntries={["/settings?section=agent&leaf=advanced"]}>
+        <I18nProvider>
+          <SettingsPage />
+        </I18nProvider>
+      </MemoryRouter>,
+    );
+  };
+
+  // The attachments folder is a setting like the export folder beside it: the
+  // OS dialog answers, the field paints the path, and the leaf's Save carries
+  // it. Empty — the row's own caption says so — is the project's own
+  // `.acpio-attachments`.
+  it("picks the attachments folder with the OS dialog and saves it", async () => {
+    apiMock.pickDirectory.mockResolvedValue({ path: "E:/shots" });
+    renderAdvanced();
+    const field = screen.getByLabelText("Attachments folder") as HTMLInputElement;
+    // Empty is the folder every chat had, and the placeholder says which one.
+    expect(field.value).toBe("");
+    expect(field.placeholder).toBe(".acpio-attachments in the chat's folder");
+
+    // Default folder, export folder, attachments folder — in that order.
+    const pickers = screen.getAllByRole("button", { name: "Select folder…" });
+    fireEvent.click(pickers[2]!);
+    await waitFor(() => expect(field.value).toBe("E:/shots"));
+
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(apiMock.updateSettings).toHaveBeenCalled());
+    expect(apiMock.updateSettings.mock.calls.at(-1)?.[0]).toMatchObject({
+      attachmentsDir: "E:/shots",
+    });
+  });
+
+  // A folder inside the project, typed rather than picked: the reader wants
+  // the uploads among the project's own folders, not beside them.
+  it("takes a folder relative to the chat and saves it", async () => {
+    renderAdvanced();
+    const field = screen.getByLabelText("Attachments folder");
+    await userEvent.type(field, "docs/attachments");
+
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(apiMock.updateSettings).toHaveBeenCalled());
+    expect(apiMock.updateSettings.mock.calls.at(-1)?.[0]).toMatchObject({
+      attachmentsDir: "docs/attachments",
+    });
+  });
+});
 
 describe("Built-in agent section", () => {
   const renderBuiltin = (search: string) => {

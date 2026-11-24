@@ -987,6 +987,11 @@ export const ru = {
     changePassword: "Сменить пароль",
     removeKey: "Удалить ключ из настроек",
     defaultFolder: "Папка по умолчанию",
+    attachmentsDir: "Папка вложений",
+    attachmentsDirDefault: ".acpio-attachments в папке чата",
+    attachmentsDirHint:
+      "Куда складывать вложения из чата. Пусто — .acpio-attachments в папке чата (корень проекта). Можно назвать папку внутри проекта (docs/attachments) или любой путь на диске.",
+    folderPickSwapHint: "ПКМ: выбор в приложении",
     cliAndPermissions: "CLI и права",
     permissionPolicy: "Политика разрешений",
     permissionPrompt: "Спрашивать",

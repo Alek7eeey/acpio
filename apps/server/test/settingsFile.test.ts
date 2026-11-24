@@ -2,6 +2,9 @@
 // stored object, Import keeps what `SETTING_KEYS` recognises, and both are
 // silent about a key that is missing from either side. This walks the file the
 // way a user does — set the value, export, import it elsewhere.
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { buildApp, useResetDb } from "./test-utils.js";
@@ -33,6 +36,50 @@ describe("settings file: the context drift warning", () => {
     expect(imported.statusCode).toBe(200);
     expect(imported.json().applied).toContain("diagnosticsContextDrift");
     expect(imported.json().settings.diagnosticsContextDrift).toBe(false);
+  });
+});
+
+describe("settings file: the attachments folder", () => {
+  it("travels with the file and leaves the project folder as the default", async () => {
+    const fresh = await app.inject({ method: "GET", url: "/api/settings" });
+    expect(fresh.json().attachmentsDir).toBe("");
+
+    expect((await put({ attachmentsDir: "docs/attachments" })).statusCode).toBe(200);
+    const exported = await app.inject({ method: "GET", url: "/api/settings/export" });
+    expect(exported.json().settings.attachmentsDir).toBe("docs/attachments");
+
+    const imported = await app.inject({
+      method: "POST",
+      url: "/api/settings/import",
+      payload: { settings: { attachmentsDir: "E:/shots" } },
+    });
+    expect(imported.json().applied).toContain("attachmentsDir");
+    expect(imported.json().settings.attachmentsDir).toBe("E:/shots");
+  });
+
+  // The second variant of the import dialog: a file on the server's disk, which
+  // a phone's own file picker cannot reach.
+  it("imports the file at a path the app's browser picked", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "acpio-settings-"));
+    try {
+      const file = path.join(dir, "acpio-settings.json");
+      await writeFile(
+        file,
+        JSON.stringify({ settings: { attachmentsDir: "E:/from-disk", cursorApiKey: "sk-x" } }),
+      );
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/settings/import",
+        payload: { path: file },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().applied).toContain("attachmentsDir");
+      expect(res.json().settings.attachmentsDir).toBe("E:/from-disk");
+      // The file's credential is still not a setting.
+      expect(res.json().settings.cursorApiKey).not.toBe("sk-x");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
 

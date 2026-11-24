@@ -10,6 +10,8 @@ type AttachDialogProps = {
   open: boolean;
   /** Session cwd — the browser starts here (files there are agent-readable). */
   initialDir?: string;
+  /** Title; the chat's own caption by default (Settings → Import reuses it). */
+  title?: string;
   onClose: () => void;
   onAttach: (files: PendingAttachment[]) => void;
 };
@@ -141,7 +143,7 @@ function fileIconFor(name: string) {
   }
 }
 
-export function AttachDialog({ open, initialDir, onClose, onAttach }: AttachDialogProps) {
+export function AttachDialog({ open, initialDir, title, onClose, onAttach }: AttachDialogProps) {
   const t = useT();
   const [browse, setBrowse] = useState<BrowseState | null>(null);
   const [loading, setLoading] = useState(false);
@@ -261,11 +263,11 @@ export function AttachDialog({ open, initialDir, onClose, onAttach }: AttachDial
         className={styles.dialog}
         role="dialog"
         aria-modal="true"
-        aria-label={t("chat.attachFiles")}
+        aria-label={title ?? t("chat.attachFiles")}
         style={size ? { width: size.w, height: size.h, maxHeight: size.h } : undefined}
       >
         <div className={styles.titleBar}>
-          <h2 className={styles.title}>{t("chat.attachFiles")}</h2>
+          <h2 className={styles.title}>{title ?? t("chat.attachFiles")}</h2>
           <button
             type="button"
             className={styles.closeBtn}

@@ -2416,6 +2416,14 @@ export interface AppSettings {
   /** Folder on the server where chat exports are written. Empty → default under repo. */
   exportDir: string;
   /**
+   * Where a chat's own uploads (pasted pictures, attached logs) are staged, on
+   * top of the session folder inside it. Empty → `.acpio-attachments` in the
+   * chat's working folder, which is what every chat had before the knob; a
+   * relative value is read from that folder too (`docs/attachments`), an
+   * absolute one is used as it is. See `attachmentsRoot` in the server.
+   */
+  attachmentsDir: string;
+  /**
    * Reuse the agent's ACP session on restarts (model/MCP change, server
    * restart): OMP via session/resume, Cursor via session/load. Keeps the
    * agent's context instead of starting each spawn with a blank slate.
@@ -2765,6 +2773,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   diagnosticsDeepLogging: false,
   diagnosticsContextDrift: false,
   exportDir: "",
+  attachmentsDir: "",
   resumeAgentContext: true,
   resumeInterruptedTurns: true,
   multitask: false,

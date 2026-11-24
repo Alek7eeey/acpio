@@ -1656,6 +1656,25 @@ describe("attachment upload", () => {
     expect(await fsp.readFile(body.path)).toEqual(ONE_PIXEL_PNG);
   });
 
+  // The reader's own folder (Settings → Attachments folder): the route reads
+  // the setting, not a constant, so a project can keep its uploads in
+  // `docs/attachments` instead of a dot-folder at its root.
+  it("stages uploads in the folder the settings name", async () => {
+    await app.inject({
+      method: "PUT",
+      url: "/api/settings",
+      payload: { attachmentsDir: "docs/attachments" },
+    });
+    const session = await seedUploadSession();
+    const res = await postUpload(session.id, ONE_PIXEL_PNG, "shot.png");
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { path: string };
+    expect(body.path).toBe(
+      path.join(session.cwd, "docs", "attachments", session.id, "shot.png"),
+    );
+    expect(await fsp.readFile(body.path)).toEqual(ONE_PIXEL_PNG);
+  });
+
   it("accepts a payload far above the instance-wide default body limit", async () => {
     // The parser raises the limit to MAX_ATTACH_UPLOAD_BYTES for this content
     // type; a multi-MB screenshot must not hit Fastify's 1 MB default.

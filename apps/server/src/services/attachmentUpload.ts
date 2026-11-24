@@ -8,6 +8,19 @@ import { DATA_DIR } from "../db/client.js";
 export const ATTACH_DIR = ".acpio-attachments";
 
 /**
+ * Where this chat's uploads go: `settings.attachmentsDir` when the reader set
+ * one, else the folder every chat has always used. A relative value is read
+ * from the chat's own folder (a `docs/attachments` in the project), an absolute
+ * one stands on its own — a reader who wants the pictures out of the project
+ * names any folder they can write to.
+ */
+export function attachmentsRoot(cwd: string, configured: string): string {
+  const raw = (configured ?? "").trim();
+  if (!raw) return path.join(path.resolve(cwd), ATTACH_DIR);
+  return path.isAbsolute(raw) ? path.resolve(raw) : path.resolve(cwd, raw);
+}
+
+/**
  * Acpio's own attachment root, beside the DB. Files attached to a board task
  * live here: the task is worked in the user's project folder, and an
  * attachment that belongs to the card must not appear in their repository.
@@ -128,8 +141,10 @@ export async function stageSessionUpload(
   sessionId: string,
   cwd: string,
   input: { name: string; mime?: string; stream: Readable; limit?: number },
+  /** `settings.attachmentsDir` — empty keeps the project folder. */
+  configuredDir = "",
 ): Promise<{ name: string; path: string; size: number }> {
-  return stageUpload(path.join(path.resolve(cwd), ATTACH_DIR), sessionId, input);
+  return stageUpload(attachmentsRoot(cwd, configuredDir), sessionId, input);
 }
 
 /**
@@ -152,8 +167,8 @@ export async function stageAcpioUpload(
  * comes from the client, and a project source file the reader attached from
  * the server must survive its chip going away.
  */
-function stagingDirs(sessionId: string, cwd: string): string[] {
-  const roots = [path.join(path.resolve(cwd), ATTACH_DIR), ACPIO_ATTACHMENTS_DIR];
+function stagingDirs(sessionId: string, cwd: string, configuredDir = ""): string[] {
+  const roots = [attachmentsRoot(cwd, configuredDir), ACPIO_ATTACHMENTS_DIR];
   return roots.map((root) => path.resolve(root, sessionId) + path.sep);
 }
 
@@ -169,11 +184,15 @@ export async function discardStagedUpload(
   sessionId: string,
   cwd: string,
   filePath: string,
+  /** `settings.attachmentsDir` — the root this chat's uploads were staged into. */
+  configuredDir = "",
 ): Promise<boolean> {
   if (!sessionId || !filePath || !path.isAbsolute(filePath)) return false;
   const target = path.resolve(filePath);
   const key = target.toLowerCase();
-  const inside = stagingDirs(sessionId, cwd).some((dir) => key.startsWith(dir.toLowerCase()));
+  const inside = stagingDirs(sessionId, cwd, configuredDir).some((dir) =>
+    key.startsWith(dir.toLowerCase()),
+  );
   if (!inside) return false;
   try {
     await unlink(target);

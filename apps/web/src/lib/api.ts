@@ -195,6 +195,15 @@ export const api = {
     anchor.remove();
     URL.revokeObjectURL(url);
   },
+  /**
+   * Apply the settings file at a path on the server's disk — the variant a
+   * phone's file dialog cannot reach. Same answer as the upload above.
+   */
+  importSettingsPath: (path: string) =>
+    request<{ settings: AppSettings; applied: string[] }>("/api/settings/import", {
+      method: "POST",
+      body: JSON.stringify({ path }),
+    }),
   /** Apply a settings file: local credentials stay, everything else lands. */
   importSettingsFile: (file: unknown) =>
     request<{ settings: AppSettings; applied: string[] }>("/api/settings/import", {

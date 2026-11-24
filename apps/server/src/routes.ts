@@ -15,6 +15,7 @@ import {
   forgetMcpFolderConfig,
   getSettings,
   importSettingsFile,
+  readSettingsFileAt,
   updateSettings,
 } from "./services/settings.js";
 import {
@@ -373,7 +374,14 @@ const settingsSchema = z.object({
   diagnosticsDir: z.string().optional(),
   diagnosticsDeepLogging: z.boolean().optional(),
   diagnosticsContextDrift: z.boolean().optional(),
-  exportDir: z.string().optional(),
+  /** Folder on the server where chat exports are written. Empty → default under repo. */
+  exportDir: z.string().max(4096).optional(),
+  /**
+   * Where a chat's uploads are staged: empty keeps `.acpio-attachments` in the
+   * chat's folder, a relative value is read from it, an absolute one stands on
+   * its own.
+   */
+  attachmentsDir: z.string().max(4096).optional(),
   resumeAgentContext: z.boolean().optional(),
   resumeInterruptedTurns: z.boolean().optional(),
   multitask: z.boolean().optional(),
@@ -1254,11 +1262,18 @@ export async function registerRoutes(app: FastifyInstance) {
    */
   app.post("/api/settings/import", async (req) => {
     const body = z
-      .object({ settings: z.record(z.unknown()) })
+      .object({
+        settings: z.record(z.unknown()).optional(),
+        // A file picked in the app's own browser instead of the page's file
+        // dialog: the reader named a path on the server's disk (a phone cannot
+        // reach it), so the server reads the same JSON the export writes.
+        path: z.string().min(1).max(4096).optional(),
+      })
       .passthrough()
       .parse(req.body);
+    const doc = body.path ? await readSettingsFileAt(body.path) : body;
     const current = await getSettings();
-    const { settings: next, applied } = await importSettingsFile(body);
+    const { settings: next, applied } = await importSettingsFile(doc);
     // Only what the file carried is compared, so an unchanged section (the MCP
     // list, an endpoint) does not restart live chats for nothing.
     const patch = Object.fromEntries(
@@ -2241,7 +2256,12 @@ export async function registerRoutes(app: FastifyInstance) {
     try {
       const saved = detail.boardId
         ? await stageAcpioUpload(id, { name, mime, stream })
-        : await stageSessionUpload(id, detail.cwd, { name, mime, stream });
+        : await stageSessionUpload(
+            id,
+            detail.cwd,
+            { name, mime, stream },
+            (await getSettings()).attachmentsDir,
+          );
       // A board task keeps the file on itself: its first turn carries what
       // the task was created with, however long the card waits in Todo.
       if (detail.boardId && !detail.startedAt) {
@@ -2285,7 +2305,12 @@ export async function registerRoutes(app: FastifyInstance) {
     }
     const detail = await getSessionDetail(id);
     if (!detail) return reply.code(404).send({ error: "Not found" });
-    const removed = await discardStagedUpload(id, detail.cwd, stagedPath);
+    const removed = await discardStagedUpload(
+      id,
+      detail.cwd,
+      stagedPath,
+      (await getSettings()).attachmentsDir,
+    );
     if (!removed) return reply.code(404).send({ error: "Not found" });
     return { ok: true };
   });

@@ -104,11 +104,13 @@ import { BuiltinHeadersEditor } from "../components/BuiltinHeadersEditor";
 import { BuiltinModelsEditor } from "../components/BuiltinModelsEditor";
 import { BuiltinProviderLimits } from "../components/BuiltinProviderLimits";
 import { OptionPicker } from "../components/OptionPicker";
-import { ServerFolderBrowseDialog } from "../components/ServerFolderBrowseDialog";
+import { FolderPickButton } from "../components/FolderPickButton";
+import { AttachDialog } from "../components/AttachDialog";
 import { SettingRow, SettingTable, Toggle } from "../components/SettingRow";
 import { ChatSettingsPreview } from "../components/ChatSettingsPreview";
 import { MiddleTruncate } from "../components/MiddleTruncate";
 import { getDiagnosticsDump, submitDiagnosticsDump } from "../lib/diagnostics";
+import { isTouchUi } from "../lib/pointerUi";
 import { startReadAloud, stopReadAloud } from "../lib/tts";
 import { applyAppearance } from "../lib/appearance";
 import { DARK_SCHEMES, LIGHT_SCHEMES, SYSTEM_SWATCH } from "../lib/themeSchemes";
@@ -1781,10 +1783,6 @@ export function SettingsPage() {
   /** The add-provider chooser is open: the kind decides the name and endpoint. */
   const [addProviderOpen, setAddProviderOpen] = useState(false);
   const providerSearchActive = settingsQuery.trim().length > 0;
-  const [folderBrowseOpen, setFolderBrowseOpen] = useState(false);
-  const [folderBrowseTarget, setFolderBrowseTarget] = useState<
-    "defaultCwd" | "diagnosticsDir" | "exportDir"
-  >("defaultCwd");
   const [copied, setCopied] = useState(false);
 
   // Live-preview the appearance (font + palettes) while editing; the store
@@ -2510,6 +2508,8 @@ export function SettingsPage() {
   };
 
   const [settingsFileBusy, setSettingsFileBusy] = useState(false);
+  /** The app's own file browser, the import's second variant. */
+  const [settingsPickOpen, setSettingsPickOpen] = useState(false);
   const settingsFileInputRef = useRef<HTMLInputElement | null>(null);
 
   /** Download these settings as a file another install applies by import. */
@@ -2534,11 +2534,13 @@ export function SettingsPage() {
    * and the shell reloads the payload it holds: a theme, a palette or an agent
    * the file brought only reaches the rest of the app through the store.
    */
-  const importSettingsFile = async (file: File) => {
+  const runSettingsImport = async (load: () => Promise<{
+    settings: AppSettings;
+    applied: string[];
+  }>) => {
     setSettingsFileBusy(true);
     try {
-      const doc: unknown = JSON.parse(await file.text());
-      const result = await api.importSettingsFile(doc);
+      const result = await load();
       await useAppStore.getState().loadBootstrap();
       const applied = useAppStore.getState().settings ?? result.settings;
       setForm(applied);
@@ -2558,6 +2560,14 @@ export function SettingsPage() {
       setSettingsFileBusy(false);
     }
   };
+
+  /** The page's own file dialog: the file's bytes never leave the browser. */
+  const importSettingsFile = (file: File) =>
+    runSettingsImport(async () => api.importSettingsFile(JSON.parse(await file.text())));
+
+  /** A file on the server's disk, picked in the app's browser — the phone's way in. */
+  const importSettingsFromServer = (pathOnServer: string) =>
+    runSettingsImport(() => api.importSettingsPath(pathOnServer));
 
   const title =
     section === "about"
@@ -3152,14 +3162,37 @@ export function SettingsPage() {
                   if (file) void importSettingsFile(file);
                 }}
               />
+              {/* Two dialogs, as everywhere a file is chosen: the page's own on
+                  a click, and the app's browser on a right click or on a
+                  phone, whose file dialog cannot reach the server's disk. */}
               <button
                 type="button"
                 className={styles.secondaryBtn}
                 disabled={settingsFileBusy}
-                onClick={() => settingsFileInputRef.current?.click()}
+                title={`${t("settings.importSettingsFile")} · ${t("settings.folderPickSwapHint")}`}
+                onClick={() =>
+                  // A phone's file dialog reaches its own storage, never the
+                  // server's disk where the settings files are exported to.
+                  isTouchUi()
+                    ? setSettingsPickOpen(true)
+                    : settingsFileInputRef.current?.click()
+                }
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setSettingsPickOpen(true);
+                }}
               >
                 {t("settings.importSettingsFile")}
               </button>
+              <AttachDialog
+                open={settingsPickOpen}
+                title={t("settings.importSettingsFile")}
+                onClose={() => setSettingsPickOpen(false)}
+                onAttach={(files) => {
+                  const picked = files[0];
+                  if (picked) void importSettingsFromServer(picked.path);
+                }}
+              />
             </SettingRow>
           </SettingTable>
           </>
@@ -4583,16 +4616,11 @@ export function SettingsPage() {
                     className={styles.cwdPath}
                     text={form.defaultCwd || t("common.notSet")}
                   />
-                  <button
-                    type="button"
+                  <FolderPickButton
                     className={styles.secondaryBtn}
-                    onClick={() => {
-                      setFolderBrowseTarget("defaultCwd");
-                      setFolderBrowseOpen(true);
-                    }}
-                  >
-                    {t("common.selectFolder")}
-                  </button>
+                    value={form.defaultCwd}
+                    onPick={(path) => patch("defaultCwd", path)}
+                  />
                   {form.defaultCwd ? (
                     <button
                       type="button"
@@ -4617,21 +4645,57 @@ export function SettingsPage() {
                     className={styles.cwdPath}
                     text={form.exportDir || exportDirDefault || t("common.notSet")}
                   />
-                  <button
-                    type="button"
+                  <FolderPickButton
                     className={styles.secondaryBtn}
-                    onClick={() => {
-                      setFolderBrowseTarget("exportDir");
-                      setFolderBrowseOpen(true);
-                    }}
-                  >
-                    {t("common.selectFolder")}
-                  </button>
+                    value={form.exportDir}
+                    fallback={exportDirDefault}
+                    onPick={(path) => patch("exportDir", path)}
+                  />
                   {form.exportDir ? (
                     <button
                       type="button"
                       className={styles.secondaryBtn}
                       onClick={() => patch("exportDir", "")}
+                    >
+                      {t("common.cancel")}
+                    </button>
+                  ) : null}
+                </div>
+              </SettingRow>
+
+              {/* Where a chat's uploads land. Empty is the folder every chat
+                  had before the knob; a relative value (docs/attachments) is
+                  read from the chat's own folder, an absolute one stands on
+                  its own. */}
+              <SettingRow
+                label={t("settings.attachmentsDir")}
+                controlClassName={styles.folderControl}
+                hint={t("settings.attachmentsDirHint")}
+              >
+                <div className={styles.cwdPickRow}>
+                  {/* The one path field that is typed as well as picked: a
+                      value relative to the chat's folder is how a project
+                      keeps its uploads in `docs/attachments` without naming a
+                      machine (see `attachmentsRoot` on the server). */}
+                  <input
+                    className={styles.cwdPath}
+                    type="text"
+                    aria-label={t("settings.attachmentsDir")}
+                    value={form.attachmentsDir}
+                    placeholder={t("settings.attachmentsDirDefault")}
+                    onChange={(e) => patch("attachmentsDir", e.target.value)}
+                  />
+                  <FolderPickButton
+                    className={styles.secondaryBtn}
+                    value={form.attachmentsDir}
+                    fallback={form.defaultCwd}
+                    onPick={(path) => patch("attachmentsDir", path)}
+                  />
+                  {form.attachmentsDir ? (
+                    <button
+                      type="button"
+                      className={styles.secondaryBtn}
+                      onClick={() => patch("attachmentsDir", "")}
                     >
                       {t("common.cancel")}
                     </button>
@@ -5336,16 +5400,12 @@ export function SettingsPage() {
                       t("common.notSet")
                     }
                   />
-                  <button
-                    type="button"
+                  <FolderPickButton
                     className={styles.secondaryBtn}
-                    onClick={() => {
-                      setFolderBrowseTarget("diagnosticsDir");
-                      setFolderBrowseOpen(true);
-                    }}
-                  >
-                    {t("common.selectFolder")}
-                  </button>
+                    value={form.diagnosticsDir}
+                    fallback={diagDirDefault}
+                    onPick={(path) => patch("diagnosticsDir", path)}
+                  />
                   {form.diagnosticsDir ? (
                     <button
                       type="button"
@@ -5803,18 +5863,6 @@ export function SettingsPage() {
         </div>)}
         </SettingsSearchProvider>
       </form>
-      <ServerFolderBrowseDialog
-        open={folderBrowseOpen}
-        initialPath={
-          folderBrowseTarget === "diagnosticsDir"
-            ? form.diagnosticsDir || diagDirDefault || undefined
-            : folderBrowseTarget === "exportDir"
-              ? form.exportDir || exportDirDefault || undefined
-              : form.defaultCwd || undefined
-        }
-        onClose={() => setFolderBrowseOpen(false)}
-        onSelect={(path) => patch(folderBrowseTarget, path)}
-      />
     </div>
   );
 }
