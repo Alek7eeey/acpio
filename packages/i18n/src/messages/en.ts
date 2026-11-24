@@ -122,6 +122,9 @@ export const en = {
     model: "Model",
     workingDir: "Working directory",
     selectFolder: "Select folder…",
+    folderPickTitle: "Select a folder",
+    selectFile: "Choose file…",
+    reset: "Reset",
     installApp: "Install app",
     installAppHint: "Add Acpio to your home screen to use it like a native app.",
     installAppWaiting:
@@ -971,7 +974,7 @@ export const en = {
     attachmentsDir: "Attachments folder",
     attachmentsDirDefault: ".acpio-attachments in the chat's folder",
     attachmentsDirHint:
-      "Where a chat's uploads are stored. Empty keeps .acpio-attachments in the chat's folder (the project root). A folder inside the project works (docs/attachments), and so does any path on the disk.",
+      "Where a chat's uploads are stored. Empty keeps .acpio-attachments in the chat's folder (the project root). The button picks any folder, including one inside the project.",
     folderPickSwapHint: "Right-click: pick inside the app",
     cliAndPermissions: "CLI & permissions",
     permissionPolicy: "Permission policy",

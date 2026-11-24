@@ -1,0 +1,51 @@
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+}
+
+/**
+ * The value: a read-only box, not a text field. A path is chosen, never typed —
+ * and an input inside the settings form is what the browser's autofill treated
+ * as "some text field" and filled with a provider's endpoint, and what Enter
+ * submitted the form from. MiddleTruncate shortens it in the middle, so both
+ * the start of the path and its deepest folder stay visible.
+ */
+.field {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: var(--settings-control-radius);
+  padding: var(--settings-control-pad-y) var(--settings-control-pad-x);
+  font-family: inherit;
+  font-size: var(--settings-control-size);
+  font-weight: var(--settings-control-weight);
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/** Nothing chosen yet: the box says what the empty value means, in a muted tone. */
+.fieldEmpty {
+  color: var(--text-secondary);
+}
+
+/** A caption is never broken across lines: the field gives up the room first. */
+.button {
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+@media (max-width: 700px) {
+  .row {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+}

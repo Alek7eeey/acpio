@@ -140,6 +140,9 @@ export const ru = {
     model: "Модель",
     workingDir: "Рабочая папка",
     selectFolder: "Выбрать папку…",
+    folderPickTitle: "Выбор папки",
+    selectFile: "Выбрать файл…",
+    reset: "Сбросить",
     installApp: "Установить приложение",
     installAppHint: "Добавьте Acpio на домашний экран — будет открываться как обычное приложение.",
     installAppWaiting:
@@ -990,7 +993,7 @@ export const ru = {
     attachmentsDir: "Папка вложений",
     attachmentsDirDefault: ".acpio-attachments в папке чата",
     attachmentsDirHint:
-      "Куда складывать вложения из чата. Пусто — .acpio-attachments в папке чата (корень проекта). Можно назвать папку внутри проекта (docs/attachments) или любой путь на диске.",
+      "Куда складывать вложения из чата. Пусто — .acpio-attachments в папке чата (корень проекта). Кнопка выбирает любую папку, в том числе внутри проекта.",
     folderPickSwapHint: "ПКМ: выбор в приложении",
     cliAndPermissions: "CLI и права",
     permissionPolicy: "Политика разрешений",

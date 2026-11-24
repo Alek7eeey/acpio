@@ -167,9 +167,22 @@
   gap: 10px;
 }
 
+/**
+ * A stacked row puts its controls one under another, full width. As a flex ROW
+ * (the inline default) several children landed side by side in one line — a
+ * button pressed against its own note, a list of rows squeezed into a strip.
+ */
 .rowStack .control {
   width: 100%;
-  justify-content: stretch;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 8px;
+}
+
+/* Fields fill the row; an action keeps the width of its own words. */
+.rowStack .control > button {
+  align-self: flex-start;
 }
 
 @media (max-width: 700px) {

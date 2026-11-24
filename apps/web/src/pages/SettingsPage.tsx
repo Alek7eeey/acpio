@@ -104,13 +104,10 @@ import { BuiltinHeadersEditor } from "../components/BuiltinHeadersEditor";
 import { BuiltinModelsEditor } from "../components/BuiltinModelsEditor";
 import { BuiltinProviderLimits } from "../components/BuiltinProviderLimits";
 import { OptionPicker } from "../components/OptionPicker";
-import { FolderPickButton } from "../components/FolderPickButton";
-import { AttachDialog } from "../components/AttachDialog";
+import { PathPickField, PickButton } from "../components/PathPickField";
 import { SettingRow, SettingTable, Toggle } from "../components/SettingRow";
 import { ChatSettingsPreview } from "../components/ChatSettingsPreview";
-import { MiddleTruncate } from "../components/MiddleTruncate";
 import { getDiagnosticsDump, submitDiagnosticsDump } from "../lib/diagnostics";
-import { isTouchUi } from "../lib/pointerUi";
 import { startReadAloud, stopReadAloud } from "../lib/tts";
 import { applyAppearance } from "../lib/appearance";
 import { DARK_SCHEMES, LIGHT_SCHEMES, SYSTEM_SWATCH } from "../lib/themeSchemes";
@@ -2509,8 +2506,6 @@ export function SettingsPage() {
 
   const [settingsFileBusy, setSettingsFileBusy] = useState(false);
   /** The app's own file browser, the import's second variant. */
-  const [settingsPickOpen, setSettingsPickOpen] = useState(false);
-  const settingsFileInputRef = useRef<HTMLInputElement | null>(null);
 
   /** Download these settings as a file another install applies by import. */
   const exportSettingsFile = async () => {
@@ -2683,6 +2678,15 @@ export function SettingsPage() {
       <form
         className={`${styles.panel}${section === "interface" && leaf === "chat" ? ` ${styles.panelChat}` : ""}`}
         onSubmit={(e) => void onSubmit(e)}
+        // Enter in a field is a keystroke, not "Save": the page has one Save
+        // button, and a half-typed command or key must not submit every
+        // setting of the form. A textarea keeps its newline.
+        onKeyDown={(e) => {
+          if (e.key !== "Enter") return;
+          const target = e.target as HTMLElement;
+          if (target.tagName === "TEXTAREA" || target.tagName === "BUTTON") return;
+          e.preventDefault();
+        }}
       >
         <SettingsSearchProvider query={settingsQuery} filtering={viewingResults}>
         {settingsQuery.trim() && !viewingResults && (
@@ -3150,48 +3154,18 @@ export function SettingsPage() {
               label={t("settings.importSettings")}
               hint={t("settings.importSettingsHint")}
             >
-              <input
-                ref={settingsFileInputRef}
-                type="file"
+              {/* The same pick control the folder rows use, in its file kind:
+                  the page's dialog on a click, the app's own browser on a
+                  right click or on a phone, whose file dialog cannot reach
+                  the server's disk. */}
+              <PickButton
+                kind="file"
                 accept="application/json,.json"
-                hidden
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  // Clearing lets the same file be picked again after a fix.
-                  e.target.value = "";
-                  if (file) void importSettingsFile(file);
-                }}
-              />
-              {/* Two dialogs, as everywhere a file is chosen: the page's own on
-                  a click, and the app's browser on a right click or on a
-                  phone, whose file dialog cannot reach the server's disk. */}
-              <button
-                type="button"
                 className={styles.secondaryBtn}
+                caption={t("common.selectFile")}
                 disabled={settingsFileBusy}
-                title={`${t("settings.importSettingsFile")} · ${t("settings.folderPickSwapHint")}`}
-                onClick={() =>
-                  // A phone's file dialog reaches its own storage, never the
-                  // server's disk where the settings files are exported to.
-                  isTouchUi()
-                    ? setSettingsPickOpen(true)
-                    : settingsFileInputRef.current?.click()
-                }
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  setSettingsPickOpen(true);
-                }}
-              >
-                {t("settings.importSettingsFile")}
-              </button>
-              <AttachDialog
-                open={settingsPickOpen}
-                title={t("settings.importSettingsFile")}
-                onClose={() => setSettingsPickOpen(false)}
-                onAttach={(files) => {
-                  const picked = files[0];
-                  if (picked) void importSettingsFromServer(picked.path);
-                }}
+                onPickFile={(file) => void importSettingsFile(file)}
+                onPick={(pathOnServer) => void importSettingsFromServer(pathOnServer)}
               />
             </SettingRow>
           </SettingTable>
@@ -4610,57 +4584,31 @@ export function SettingsPage() {
         {section === "agent" && leaf === "advanced" && (
           <>
             <SettingTable>
-              <SettingRow label={t("settings.defaultFolder")} controlClassName={styles.folderControl}>
-                <div className={styles.cwdPickRow}>
-                  <MiddleTruncate
-                    className={styles.cwdPath}
-                    text={form.defaultCwd || t("common.notSet")}
-                  />
-                  <FolderPickButton
-                    className={styles.secondaryBtn}
-                    value={form.defaultCwd}
-                    onPick={(path) => patch("defaultCwd", path)}
-                  />
-                  {form.defaultCwd ? (
-                    <button
-                      type="button"
-                      className={styles.secondaryBtn}
-                      onClick={() => patch("defaultCwd", "")}
-                    >
-                      {t("common.cancel")}
-                    </button>
-                  ) : null}
-                </div>
+              <SettingRow layout="stack" label={t("settings.defaultFolder")}>
+                <PathPickField
+                  value={form.defaultCwd}
+                  onPick={(path) => patch("defaultCwd", path)}
+                  onReset={() => patch("defaultCwd", "")}
+                  placeholder={t("common.notSet")}
+                  buttonClassName={styles.secondaryBtn}
+                />
               </SettingRow>
 
               <SettingRow
+                layout="stack"
                 label={t("settings.exportDir")}
-                controlClassName={styles.folderControl}
                 hint={t("settings.exportDirHint", {
                   path: form.exportDir || exportDirDefault || "…",
                 })}
               >
-                <div className={styles.cwdPickRow}>
-                  <MiddleTruncate
-                    className={styles.cwdPath}
-                    text={form.exportDir || exportDirDefault || t("common.notSet")}
-                  />
-                  <FolderPickButton
-                    className={styles.secondaryBtn}
-                    value={form.exportDir}
-                    fallback={exportDirDefault}
-                    onPick={(path) => patch("exportDir", path)}
-                  />
-                  {form.exportDir ? (
-                    <button
-                      type="button"
-                      className={styles.secondaryBtn}
-                      onClick={() => patch("exportDir", "")}
-                    >
-                      {t("common.cancel")}
-                    </button>
-                  ) : null}
-                </div>
+                <PathPickField
+                  value={form.exportDir}
+                  onPick={(path) => patch("exportDir", path)}
+                  onReset={() => patch("exportDir", "")}
+                  fallback={exportDirDefault}
+                  placeholder={exportDirDefault || t("common.notSet")}
+                  buttonClassName={styles.secondaryBtn}
+                />
               </SettingRow>
 
               {/* Where a chat's uploads land. Empty is the folder every chat
@@ -4668,39 +4616,18 @@ export function SettingsPage() {
                   read from the chat's own folder, an absolute one stands on
                   its own. */}
               <SettingRow
+                layout="stack"
                 label={t("settings.attachmentsDir")}
-                controlClassName={styles.folderControl}
                 hint={t("settings.attachmentsDirHint")}
               >
-                <div className={styles.cwdPickRow}>
-                  {/* The one path field that is typed as well as picked: a
-                      value relative to the chat's folder is how a project
-                      keeps its uploads in `docs/attachments` without naming a
-                      machine (see `attachmentsRoot` on the server). */}
-                  <input
-                    className={styles.cwdPath}
-                    type="text"
-                    aria-label={t("settings.attachmentsDir")}
-                    value={form.attachmentsDir}
-                    placeholder={t("settings.attachmentsDirDefault")}
-                    onChange={(e) => patch("attachmentsDir", e.target.value)}
-                  />
-                  <FolderPickButton
-                    className={styles.secondaryBtn}
-                    value={form.attachmentsDir}
-                    fallback={form.defaultCwd}
-                    onPick={(path) => patch("attachmentsDir", path)}
-                  />
-                  {form.attachmentsDir ? (
-                    <button
-                      type="button"
-                      className={styles.secondaryBtn}
-                      onClick={() => patch("attachmentsDir", "")}
-                    >
-                      {t("common.cancel")}
-                    </button>
-                  ) : null}
-                </div>
+                <PathPickField
+                  value={form.attachmentsDir}
+                  onPick={(path) => patch("attachmentsDir", path)}
+                  onReset={() => patch("attachmentsDir", "")}
+                  fallback={form.defaultCwd}
+                  placeholder={t("settings.attachmentsDirDefault")}
+                  buttonClassName={styles.secondaryBtn}
+                />
               </SettingRow>
 
               <SettingRow label={t("settings.permissionPolicy")} terms={["разрешения"]}>
@@ -4917,19 +4844,6 @@ export function SettingsPage() {
 
         {section === "agent" && leaf === "plugins" && (
           <>
-            <SearchGate
-              terms={[
-                t("settings.pluginsTitle"),
-                t("settings.pluginsHint"),
-                t("settings.pluginsSourceTitle"),
-                "plugin",
-                "плагин",
-              ]}
-            >
-              <div className={styles.mcpApplyNote} role="note">
-                {t("settings.pluginsHint")}
-              </div>
-            </SearchGate>
             <SettingTable>
               <SettingRow
                 layout="stack"
@@ -4938,7 +4852,7 @@ export function SettingsPage() {
                 terms={[t("settings.pluginsSourceTitle"), t("settings.pluginsSourceHint")]}
               >
                 <input
-                  className={styles.mcpFilesInput}
+                  className={styles.pluginLineInput}
                   value={form.pluginsConfig ?? ""}
                   placeholder={pluginsState?.dir ? `${pluginsState.dir}/config.json` : ""}
                   spellCheck={false}
@@ -4968,21 +4882,23 @@ export function SettingsPage() {
                     configText.trim() && !parseJsonObjectText(configText),
                   );
                   return (
-                    <div key={index} className={styles.mcpRowDetail}>
-                      <div>
-                        <strong>{entry.id || t("settings.pluginsEntryNew")}</strong>{" · "}
-                        {!loaded
-                          ? t("settings.pluginsEntryPending")
-                          : `${t(
-                              loaded.status === "loaded"
-                                ? "settings.pluginsStatusLoaded"
-                                : loaded.status === "skipped"
-                                  ? "settings.pluginsStatusSkipped"
-                                  : "settings.pluginsStatusFailed",
-                            )}${loaded.error ? ` · ${loaded.error}` : ""}`}
+                    <div key={index} className={styles.pluginEntry}>
+                      <div className={styles.pluginEntryHead}>
+                        <strong>{entry.id || t("settings.pluginsEntryNew")}</strong>
+                        <span className={styles.pluginEntryState}>
+                          {!loaded
+                            ? t("settings.pluginsEntryPending")
+                            : `${t(
+                                loaded.status === "loaded"
+                                  ? "settings.pluginsStatusLoaded"
+                                  : loaded.status === "skipped"
+                                    ? "settings.pluginsStatusSkipped"
+                                    : "settings.pluginsStatusFailed",
+                              )}${loaded.error ? ` · ${loaded.error}` : ""}`}
+                        </span>
                       </div>
                       <input
-                        className={styles.mcpFilesInput}
+                        className={styles.pluginLineInput}
                         value={entry.id}
                         placeholder={t("settings.pluginsEntryId")}
                         spellCheck={false}
@@ -4990,15 +4906,15 @@ export function SettingsPage() {
                         onChange={(e) => updatePluginEntry(index, { id: e.target.value })}
                       />
                       <input
-                        className={styles.mcpFilesInput}
+                        className={styles.pluginLineInput}
                         value={entry.server}
                         placeholder={t("settings.pluginsEntryServer")}
                         spellCheck={false}
                         aria-label={t("settings.pluginsEntryServer")}
                         onChange={(e) => updatePluginEntry(index, { server: e.target.value })}
                       />
-                      <input
-                        className={styles.mcpFilesInput}
+                      <textarea
+                        className={styles.pluginConfigInput}
                         value={configText}
                         placeholder={t("settings.pluginsEntryConfig")}
                         spellCheck={false}
@@ -5012,11 +4928,11 @@ export function SettingsPage() {
                         }}
                       />
                       {configBroken ? (
-                        <div className={styles.mcpRowDetail}>
+                        <div className={styles.pluginEntryError}>
                           {t("settings.pluginsEntryConfigInvalid")}
                         </div>
                       ) : null}
-                      <div>
+                      <div className={styles.pluginEntryActions}>
                         <Toggle
                           checked={entry.enabled !== false}
                           onChange={(v) => updatePluginEntry(index, { enabled: v })}
@@ -5389,33 +5305,15 @@ export function SettingsPage() {
                 </div>
               </SettingRow>
 
-              <SettingRow label={t("diagnostics.folder")} controlClassName={styles.folderControl}>
-                <div className={styles.cwdPickRow}>
-                  <MiddleTruncate
-                    className={styles.cwdPath}
-                    text={
-                      form.diagnosticsDir ||
-                      diagDirResolved ||
-                      diagDirDefault ||
-                      t("common.notSet")
-                    }
-                  />
-                  <FolderPickButton
-                    className={styles.secondaryBtn}
-                    value={form.diagnosticsDir}
-                    fallback={diagDirDefault}
-                    onPick={(path) => patch("diagnosticsDir", path)}
-                  />
-                  {form.diagnosticsDir ? (
-                    <button
-                      type="button"
-                      className={styles.secondaryBtn}
-                      onClick={() => patch("diagnosticsDir", "")}
-                    >
-                      {t("diagnostics.useDefault")}
-                    </button>
-                  ) : null}
-                </div>
+              <SettingRow layout="stack" label={t("diagnostics.folder")}>
+                <PathPickField
+                  value={form.diagnosticsDir}
+                  onPick={(path) => patch("diagnosticsDir", path)}
+                  onReset={() => patch("diagnosticsDir", "")}
+                  fallback={diagDirDefault}
+                  placeholder={diagDirResolved || diagDirDefault || t("common.notSet")}
+                  buttonClassName={styles.secondaryBtn}
+                />
               </SettingRow>
 
               <SettingRow

@@ -205,6 +205,10 @@ export function AttachDialog({ open, initialDir, title, onClose, onAttach }: Att
       return res;
     } catch (err) {
       if (seq !== loadSeq.current) return null;
+      // The folder the browser was pointed at is gone (or was never a path):
+      // open where it opens with no starting folder instead of an empty list
+      // under a raw "Path not found".
+      if (path) return loadBrowse();
       setError(err instanceof Error ? err.message : String(err));
       return null;
     } finally {

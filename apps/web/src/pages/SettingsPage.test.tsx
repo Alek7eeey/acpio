@@ -123,16 +123,19 @@ describe("Agent → Advanced", () => {
   // `.acpio-attachments`.
   it("picks the attachments folder with the OS dialog and saves it", async () => {
     apiMock.pickDirectory.mockResolvedValue({ path: "E:/shots" });
-    renderAdvanced();
-    const field = screen.getByLabelText("Attachments folder") as HTMLInputElement;
-    // Empty is the folder every chat had, and the placeholder says which one.
-    expect(field.value).toBe("");
-    expect(field.placeholder).toBe(".acpio-attachments in the chat's folder");
+    const { container } = renderAdvanced();
+    // Empty is the folder every chat had, and the row says which one. The path
+    // itself is read-only: only the dialogs write it.
+    expect(container.textContent).toContain(".acpio-attachments in the chat's folder");
+    // No text input in that row: nothing to autofill, nothing to submit Enter
+    // from.
+    const row = screen.getByText(".acpio-attachments in the chat's folder").closest("div");
+    expect(row?.querySelector("input")).toBeNull();
 
     // Default folder, export folder, attachments folder — in that order.
     const pickers = screen.getAllByRole("button", { name: "Select folder…" });
     fireEvent.click(pickers[2]!);
-    await waitFor(() => expect(field.value).toBe("E:/shots"));
+    await waitFor(() => expect(screen.getByTitle("E:/shots")).toBeTruthy());
 
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(apiMock.updateSettings).toHaveBeenCalled());
@@ -141,18 +144,30 @@ describe("Agent → Advanced", () => {
     });
   });
 
-  // A folder inside the project, typed rather than picked: the reader wants
-  // the uploads among the project's own folders, not beside them.
-  it("takes a folder relative to the chat and saves it", async () => {
-    renderAdvanced();
-    const field = screen.getByLabelText("Attachments folder");
-    await userEvent.type(field, "docs/attachments");
+  // The way back: a value nobody wants is cleared in one click, and only the
+  // Save beside it writes the empty value into the settings.
+  it("resets the attachments folder to the project's own", async () => {
+    useAppStore.setState({
+      settings: { ...DEFAULT_SETTINGS, attachmentsDir: "E:/shots" },
+      bootstrapped: true,
+    });
+    render(
+      <MemoryRouter initialEntries={["/settings?section=agent&leaf=advanced"]}>
+        <I18nProvider>
+          <SettingsPage />
+        </I18nProvider>
+      </MemoryRouter>,
+    );
+    expect(screen.getByTitle("E:/shots")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+    await waitFor(() =>
+      expect(screen.getByText(".acpio-attachments in the chat's folder")).toBeTruthy(),
+    );
 
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(apiMock.updateSettings).toHaveBeenCalled());
-    expect(apiMock.updateSettings.mock.calls.at(-1)?.[0]).toMatchObject({
-      attachmentsDir: "docs/attachments",
-    });
+    expect(apiMock.updateSettings.mock.calls.at(-1)?.[0]).toMatchObject({ attachmentsDir: "" });
   });
 });
 
@@ -930,7 +945,8 @@ describe("Settings file on the About page", () => {
     expect(screen.getByRole("heading", { name: "About" })).toBeTruthy();
     expect(screen.getByText("Import/export settings")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Download file" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Choose file" })).toBeTruthy();
+    // The same pick control every path row uses, captioned like them.
+    expect(screen.getByRole("button", { name: "Choose file…" })).toBeTruthy();
   });
 
   // Links from before the move: the section it had, and the interface leaf it

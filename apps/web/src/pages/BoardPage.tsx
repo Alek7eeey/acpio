@@ -42,7 +42,7 @@ import { McpFolderDialog } from "../components/McpFolderDialog";
 import { OptionPicker } from "../components/OptionPicker";
 import { ShareLinkTip, useShareLinkTip } from "../components/ShareLinkTip";
 import { chatLink } from "../lib/shareLink";
-import { ServerFolderBrowseDialog } from "../components/ServerFolderBrowseDialog";
+import { PickButton } from "../components/PathPickField";
 import { SlashCommandMenu } from "../components/SlashCommandMenu";
 import { ModeHoverMenu } from "../components/ModeMenu";
 import { api } from "../lib/api";
@@ -1753,7 +1753,6 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const [deriveEffortParam, setDeriveEffortParam] = useState<ModelParamDto | null>(null);
   const [deriveBusy, setDeriveBusy] = useState(false);
   const [deriveError, setDeriveError] = useState<string | null>(null);
-  const [deriveBrowse, setDeriveBrowse] = useState(false);
 
   /** The agent the derived chat runs on — the pick the creation below makes. */
   const deriveAgent: AgentProvider | null =
@@ -1801,7 +1800,6 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
     };
   }, [deriveTask, deriveAgent, deriveModel, taskEffortPicker]);
   const [railOpen, setRailOpen] = useState(false);
-  const [browseOpen, setBrowseOpen] = useState(false);
   const [mcpCwd, setMcpCwd] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<SessionDto | null>(null);
   /** The Todo card being rewritten: its edit form is the new-task form. */
@@ -4338,13 +4336,15 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                 <p className={styles.modalText}>{t("chat.boardNoFolders")}</p>
               )}
               <div className={styles.modalActions}>
-                <button
-                  type="button"
+                <PickButton
                   className={styles.ghostBtn}
-                  onClick={() => setBrowseOpen(true)}
-                >
-                  {t("chat.boardAddFolder")}
-                </button>
+                  caption={t("chat.boardAddFolder")}
+                  start={defaultCwd}
+                  onPick={(path) => {
+                    const folders = board?.folders ?? [];
+                    if (!folders.includes(path)) void setBoardFolders(boardId, [...folders, path]);
+                  }}
+                />
                 <button
                   type="button"
                   className={styles.primaryBtn}
@@ -4478,9 +4478,12 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                 </div>
               ) : null}
               <div className={styles.modalActions}>
-                <button type="button" className={styles.ghostBtn} onClick={() => setDeriveBrowse(true)}>
-                  {t("chat.boardDeriveBrowse")}
-                </button>
+                <PickButton
+                  className={styles.ghostBtn}
+                  caption={t("chat.boardDeriveBrowse")}
+                  start={deriveFolder ?? defaultCwd}
+                  onPick={setDeriveFolder}
+                />
                 <span className={styles.folderSpacer} />
                 <button
                   type="button"
@@ -4541,34 +4544,11 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
           document.body,
         )}
 
-      {deriveBrowse && (
-        <ServerFolderBrowseDialog
-          open
-          initialPath={deriveFolder ?? defaultCwd}
-          onClose={() => setDeriveBrowse(false)}
-          onSelect={(path) => {
-            setDeriveBrowse(false);
-            setDeriveFolder(path);
-          }}
-        />
-      )}
-
       {mcpCwd &&
         createPortal(
           <McpFolderDialog open cwd={mcpCwd} onClose={() => setMcpCwd(null)} />,
           document.body,
         )}
-
-      <ServerFolderBrowseDialog
-        open={browseOpen}
-        initialPath={defaultCwd}
-        onClose={() => setBrowseOpen(false)}
-        onSelect={(path) => {
-          const folders = board?.folders ?? [];
-          setBrowseOpen(false);
-          if (!folders.includes(path)) void setBoardFolders(boardId, [...folders, path]);
-        }}
-      />
 
       {newTaskPicker && (
         <CreateSessionFolderPicker

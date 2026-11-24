@@ -119,6 +119,11 @@ export function ServerFolderBrowseDialog({
       return res;
     } catch (err) {
       if (seq !== loadSeq.current) return null;
+      // A folder that is gone — deleted since it was saved, or a value an
+      // older build wrote — must not leave the dialog empty under a raw "Path
+      // not found": it opens where it opens with no starting path at all, and
+      // the reader walks to the folder from there.
+      if (path) return loadBrowse();
       setError(err instanceof Error ? err.message : String(err));
       return null;
     } finally {
@@ -218,13 +223,13 @@ export function ServerFolderBrowseDialog({
         className={styles.dialog}
         role="dialog"
         aria-modal="true"
-        aria-label={mode === "create" ? t("common.newFolder") : t("common.selectFolder")}
+        aria-label={mode === "create" ? t("common.newFolder") : t("common.folderPickTitle")}
       >
         <div className={styles.titleBar}>
           <div className={styles.titleLeft}>
             <span className={styles.titleIcon}>{folderIcon}</span>
             <h2 className={styles.title}>
-              {mode === "create" ? t("common.newFolder") : t("common.selectFolder")}
+              {mode === "create" ? t("common.newFolder") : t("common.folderPickTitle")}
             </h2>
           </div>
           <button type="button" className={styles.closeBtn} aria-label={t("common.cancel")} onClick={onClose}>

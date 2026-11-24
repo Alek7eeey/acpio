@@ -315,33 +315,6 @@
   min-width: 0;
 }
 
-/* Folder rows: let the control grow to the remaining row width so the path
-   field is externally bounded and MiddleTruncate can shorten it. */
-.folderControl {
-  flex: 1 1 60%;
-  min-width: 0;
-}
-
-.cwdPath {
-  display: block;
-  min-width: 0;
-  border: 1px solid var(--border);
-  background: var(--bg);
-  border-radius: var(--settings-control-radius);
-  padding: var(--settings-control-pad-y) var(--settings-control-pad-x);
-  font-family: inherit;
-  font-weight: var(--settings-control-weight);
-  font-size: var(--settings-control-size);
-  color: var(--text);
-  /* Middle truncation is done by MiddleTruncate; never wrap onto lines. */
-  white-space: nowrap;
-  overflow: hidden;
-  line-height: 1.35;
-  text-align: left;
-  cursor: pointer;
-  box-sizing: border-box;
-}
-
 @media (max-width: 700px) {
   .cwdPickRow {
     grid-template-columns: 1fr;
@@ -972,6 +945,65 @@
   width: 100%;
   min-height: 76px;
   resize: vertical;
+}
+
+/* --- plugins (Settings → Plugins) ----------------------------------------
+ * The source is one line (a path or a URL); a plugin of the reader's own is a
+ * card: what it is, the three fields and its own actions underneath. */
+.pluginLineInput {
+  width: 100%;
+}
+
+.pluginConfigInput {
+  width: 100%;
+  min-height: 76px;
+  resize: vertical;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
+  font-size: 0.82em;
+}
+
+.pluginEntry {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-secondary) 50%, transparent);
+}
+
+.pluginEntryHead {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pluginEntryHead strong {
+  font-size: var(--settings-label-size);
+  font-weight: var(--settings-label-weight);
+  color: var(--text);
+}
+
+.pluginEntryState {
+  min-width: 0;
+  font-size: 0.76rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pluginEntryError {
+  font-size: 0.76rem;
+  color: var(--danger);
+}
+
+/* A switch is a label of its own size, a button is text wide: they line up on
+   their middles instead of stretching to the card. */
+.pluginEntryActions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .mcpStatusDotBad {
