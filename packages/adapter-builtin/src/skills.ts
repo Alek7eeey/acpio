@@ -30,9 +30,11 @@ export interface BuiltinSkill {
   disableModelInvocation: boolean;
   /**
    * Frontmatter `read-only: true`: what the skill delivers is an answer, not a
-   * change. A turn that invokes it is given no `write`/`edit` and no plan
-   * tools, and its prompt says the answer is the whole deliverable — so `/ask`
-   * cannot leave a file behind however the skill's own text is read.
+   * change. A turn that invokes it refuses `write`, `edit`, the plan tools and
+   * `task`, and says in its own message that the answer is the whole
+   * deliverable — so `/ask` cannot leave a file behind however the skill's own
+   * text is read. The declarations stay whole: they are the head the provider
+   * caches (see `BuiltinToolOptions.readOnly`).
    */
   readOnly?: boolean;
   /**

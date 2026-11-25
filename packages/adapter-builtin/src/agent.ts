@@ -391,13 +391,6 @@ export function systemPrompt(
   thinkingInstructions: string,
   /** The repository's own rules, already rendered (see `projectRules.ts`). */
   projectRules = "",
-  /**
-   * The turn may only answer: a `read-only` skill was invoked (`/ask`). The
-   * tools are withheld by the caller, and the prompt has to say the same — the
-   * `edit` rule and the plan rule would otherwise send the model after files it
-   * cannot write.
-   */
-  readOnly = false,
 ): string {
   // The prompt speaks the UI language: every fixed line below has its Russian
   // twin, so a reader flipping the language reads rules in their own.
@@ -423,20 +416,6 @@ export function systemPrompt(
             "Пути вне рабочей папки тоже работают: абсолютные пути, например к глобальной папке " +
               "скиллов, читаются, и `grep`/`glob` можно ограничить ею. Новые файлы держи внутри " +
               "рабочей папки, если пользователь не укажет другое.",
-          ),
-        ]
-      : []),
-    ...(readOnly
-      ? [
-          t(
-            "This turn only reads: the reader invoked a skill whose deliverable is an answer, so " +
-              "`write` and `edit` are not offered. The answer in this chat is the whole result — no " +
-              "file is created, no working-tree change is made, and a command is for reading, a " +
-              "test run or the history, not for writing something down.",
-            "Этот ход только читает: читатель вызвал скилл, результат которого — ответ, поэтому " +
-              "`write` и `edit` не предлагаются. Ответ в этом чате — это весь результат: ни один " +
-              "файл не создаётся, рабочее дерево не меняется, а команда — для чтения, теста или " +
-              "истории, а не для того, чтобы что-то записать.",
           ),
         ]
       : []),
@@ -478,12 +457,7 @@ export function systemPrompt(
     // plan rule leaves with the tool it names (Settings → Built-in agent).
     t("Rules:", "Правила:"),
     ...RULES.filter(
-      (rule) =>
-        !supersededRules.has(rule.id) &&
-        (planTool || rule.id !== "plan") &&
-        // The rule that tells the model to change files with `edit`/`write`
-        // has no tool to name on a read-only turn.
-        (!readOnly || rule.id !== "edit"),
+      (rule) => !supersededRules.has(rule.id) && (planTool || rule.id !== "plan"),
     ).map((rule) => `- ${t(rule.text, rule.ru)}`),
     // The repository's rules sit right below: more specific than the laws
     // above, less than a skill the user turned on.
@@ -518,6 +492,22 @@ export function systemPrompt(
     // in front of every message the provider had cached.
     ...(thinkingInstructions.trim() ? ["", thinkingInstructions.trim()] : []),
   ].join("\n");
+}
+
+/**
+ * What a read-only turn says about itself, in the turn's own message — the
+ * tail, where a new line costs only itself. The declarations stay whole and the
+ * writing tools refuse (see `BuiltinToolOptions.readOnly`), so this note is the
+ * only place the model learns the turn's limit.
+ */
+function readOnlyTurnNote(locale: string): string {
+  return locale === "ru"
+    ? "\n\n(Этот ход только читает: `write`, `edit`, `plan`, `apply_plan` и `task` откажут. " +
+        "Ответ в чате — это весь результат: ни один файл не создаётся, рабочее дерево не меняется, " +
+        "а команда — для чтения, теста или истории, не для того, чтобы что-то записать.)"
+    : "\n\n(This turn only reads: `write`, `edit`, `plan`, `apply_plan` and `task` refuse. The " +
+        "answer in the chat is the whole result — no file is created, the working tree is not " +
+        "changed, and a command is for reading, a test run or the history, not for writing down.)";
 }
 
 /**
@@ -2772,18 +2762,22 @@ export class BuiltinAgent implements InProcessAgentTransport {
     /** `bash`'s kill time when a call names none — live, and never in the schema. */
     bashTimeoutMs: number;
     /**
-     * The turn only reads: a `read-only` skill was invoked (`/ask`). Its head
-     * declares no `write`, no `edit`, no plan and no subagent, and the prompt
-     * says the answer is the whole deliverable. The frozen head is untouched —
-     * the next turn sends it exactly as the provider cached it.
+     * The turn only reads: a `read-only` skill was invoked (`/ask`). It does
+     * **not** reach the head — neither the system prompt nor the declarations.
+     * A head that moved for one turn is a head the provider's cache has never
+     * seen, and a chat that alternates `/ask` with work pays for its whole
+     * history on every switch (chat 13923ef4: 891 messages re-billed twice in
+     * one hour). The writing tools refuse instead, and the turn's own message
+     * says so (see `readOnlyTurnNote`).
      */
     readOnly?: boolean;
   }): Promise<{ system: string; tools: ToolSet }> {
     const head = this.frozenHead;
     if (!head) throw new Error("prompt head не заморожен");
-    // A plan is a file, and the ask skill forbids one anyway: the tool leaves
-    // with write and edit, and its rule leaves the prompt with it.
-    const planTool = head.planTool && opts.readOnly !== true;
+    // The plan rides with the head: a plan is a file, so leaving it out of one
+    // turn's declarations would move them, and the ask skill's refusal inside
+    // `plan` is what keeps that turn from writing one.
+    const planTool = head.planTool;
     const ask = (toolCall: { title: string; kind: string; input: Record<string, unknown> }) =>
       this.askPermission(toolCall);
     // The tools follow the head: a server connected mid-chat (or a switch
@@ -2805,8 +2799,6 @@ export class BuiltinAgent implements InProcessAgentTransport {
       head.extraInstructions,
       THINKING_INSTRUCTIONS[head.thinking],
       this.frozenRules ?? "",
-      // The edit rule goes out with the tools it names, and one line says why.
-      opts.readOnly === true,
     );
     const tools = {
       ...createBuiltinTools({
@@ -2815,13 +2807,11 @@ export class BuiltinAgent implements InProcessAgentTransport {
         ask,
         outsideCwd: head.outsideCwd,
         bashTimeoutMs: opts.bashTimeoutMs,
-        // A read-only turn runs no child either: the child toolset writes, and
-        // a question answered by a subagent that left a file behind is the same
-        // hole one level down.
-        subagents:
-          head.subagents.enabled && opts.readOnly !== true
-            ? { settings: head.subagents, bridge: () => this.activeSubagents }
-            : undefined,
+        // Declared on a read-only turn too — the declarations are the head — and
+        // the `task` tool itself refuses the spawn (see `TaskToolHost.readOnly`).
+        subagents: head.subagents.enabled
+          ? { settings: head.subagents, bridge: () => this.activeSubagents }
+          : undefined,
         plan: planTool ? this.planBridge() : undefined,
         readOnly: opts.readOnly === true,
         // Same channel as the MCP tools: `read` on a picture hands the bytes to
@@ -2913,11 +2903,17 @@ export class BuiltinAgent implements InProcessAgentTransport {
       this.opts.settings.builtinSkillModes,
       this.opts.settings.locale,
     );
+    // A read-only turn says so here, in the tail, and nowhere else: the head is
+    // the bytes the provider caches, and a mode that rewrote it billed the whole
+    // history again on every `/ask` and again on the way back (see `renderHead`).
+    const asked = readOnly
+      ? `${expanded}${readOnlyTurnNote(this.frozenHead?.locale ?? this.opts.settings.locale)}`
+      : expanded;
     // Recorded before the push, so the point names this turn's own first
     // message — the index an edit rewinds to (see `openSession`).
     const turnId = turnMessageId(params);
     if (turnId) this.turnIndex[turnId] = this.messages.length;
-    this.messages.push(userContent(expanded ? [{ type: "text", text: expanded }] : promptParts));
+    this.messages.push(userContent(asked ? [{ type: "text", text: asked }] : promptParts));
     this.persist();
     // A steer aimed at an earlier turn must not ride into this one.
     this.settleSteers(false);
@@ -3048,8 +3044,8 @@ export class BuiltinAgent implements InProcessAgentTransport {
         // Read live and kept out of the declarations: a raised limit reaches the
         // very next call without moving the head (see the `bash` schema).
         bashTimeoutMs: normalizeBuiltinBashTimeoutSec(live.builtinBashTimeoutSec) * 1000,
-        // A read-only turn (`/ask`) declares no tool that writes: the head it
-        // sends is this turn's own, and the next turn restores the frozen one.
+        // A read-only turn (`/ask`) refuses the tools that write and says so in
+        // its own message; the head stays the one the cache already has.
         readOnly,
       });
       // A fresh turn: the warning about a moving head is its to earn again.

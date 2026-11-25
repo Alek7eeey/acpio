@@ -102,10 +102,24 @@ export interface BuiltinToolOptions {
   bashTimeoutMs?: number;
   /**
    * A turn that may only answer: a read-only skill was invoked (`/ask`).
-   * `write` and `edit` stay out of the set, so the answer cannot leave a file
-   * behind — the prompt says the same thing, and this is what makes it true.
+   *
+   * The declarations stay whole anyway — the set is the front of every request,
+   * and a set that changed for one turn rewrote the head the provider's cache
+   * answers (chat 13923ef4 paid for 891 messages twice over one `/ask`). The
+   * writing tools refuse instead, and the turn's own message says so.
    */
   readOnly?: boolean;
+}
+
+/**
+ * What a writing tool answers on a read-only turn. It names the turn rather
+ * than the tool: the model that reads it stops calling the others too.
+ */
+function readOnlyRefusal(what: string): Error {
+  return new Error(
+    `Read-only turn: \`${what}\` was not performed. The answer in the chat is the whole result — ` +
+      "no file is created and the working tree is not changed.",
+  );
 }
 
 /** File types `read` hands to the model as pixels instead of text. */
@@ -588,8 +602,11 @@ export function renderAskAnswers(
  */
 export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
   const { host, ask, outsideCwd, sessionId, onImages } = opts;
+  const readOnly = opts.readOnly === true;
   const bashTimeoutMs = opts.bashTimeoutMs ?? DEFAULT_BASH_TIMEOUT_MS;
-  const taskTool: ToolSet = opts.subagents ? { task: makeTaskTool(opts.subagents) } : {};
+  const taskTool: ToolSet = opts.subagents
+    ? { task: makeTaskTool({ ...opts.subagents, readOnly }) }
+    : {};
 
   const read = tool({
     description:
@@ -847,6 +864,7 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
               ),
           }),
           execute: async ({ entries, name, problem, overview, plan: markdown }) => {
+            if (readOnly) throw readOnlyRefusal("plan");
             const list: PlanEntry[] = [];
             for (const entry of entries ?? []) {
               const content = entry.content.trim();
@@ -899,6 +917,7 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
               ),
           }),
           execute: async ({ pacing }) => {
+            if (readOnly) throw readOnlyRefusal("apply_plan");
             const prev = planBridge.read() ?? emptyPlanState();
             if (!prev.entries.length) {
               throw new Error(
@@ -970,6 +989,7 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
         .describe("The `hash` from read — required to overwrite an existing file."),
     }),
     execute: async ({ path, content, expect }) => {
+      if (readOnly) throw readOnlyRefusal("write");
       await ask({ title: `write ${path}`, kind: "edit", input: { path } });
       const res = await host.request<{ hash?: string }>("fs/write_text_file", {
         path,
@@ -997,6 +1017,7 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
         .min(1),
     }),
     execute: async ({ path, edits }) => {
+      if (readOnly) throw readOnlyRefusal("edit");
       const { content, hash } = await host.request<{ content: string; hash?: string }>(
         "fs/read_text_file",
         { path },
@@ -1129,9 +1150,8 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
     read,
     glob,
     grep,
-    // A read-only turn keeps the two tools that change the project out of the
-    // set entirely: a model cannot call what it was never offered.
-    ...(opts.readOnly ? {} : { write, edit }),
+    write,
+    edit,
     bash,
     ask: askUser,
     ...planTool,

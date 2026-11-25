@@ -38,16 +38,50 @@ describe("createBuiltinTools", () => {
     ]);
   });
 
-  // A read-only turn (a `/ask` invocation) must not be able to leave a file
-  // behind: the two tools that write are not in the set at all.
-  it("leaves write and edit out of a read-only turn", () => {
+  // A read-only turn (a `/ask` invocation) still declares every tool — the
+  // declarations are the head the provider caches, and dropping two of them for
+  // one turn billed the whole history twice per question — and refuses the ones
+  // that write instead.
+  it("keeps its declarations on a read-only turn and refuses what writes", async () => {
+    const host = { request: vi.fn(async () => ({ content: "x", hash: "h" })) };
+    const plan: PlanBridge = {
+      file: "/w/.acpio/plan.md",
+      path: ".acpio/plan.md",
+      read: () => undefined,
+      write: () => undefined,
+      approve: async () => ({ accepted: true }),
+    };
     const readOnly = createBuiltinTools({
-      host: { request: vi.fn(async () => ({})) },
+      host,
       ask: vi.fn(async () => undefined),
       sessionId: "S1",
+      plan,
+      subagents: { settings: { enabled: true, agents: [] }, bridge: () => null },
       readOnly: true,
     });
-    expect(Object.keys(readOnly)).toEqual(["read", "glob", "grep", "bash", "ask"]);
+    expect(Object.keys(readOnly)).toEqual([
+      "read",
+      "glob",
+      "grep",
+      "write",
+      "edit",
+      "bash",
+      "ask",
+      "plan",
+      "apply_plan",
+      "task",
+    ]);
+    for (const [name, input] of [
+      ["write", { path: "f.txt", content: "x" }],
+      ["edit", { path: "f.txt", edits: [{ old_string: "a", new_string: "b" }] }],
+      ["plan", { name: "P" }],
+      ["apply_plan", {}],
+      ["task", { prompt: "go" }],
+    ] as const) {
+      await expect(exec(readOnly, name, input)).rejects.toThrow(/Read-only turn/);
+    }
+    // Nothing reached the file system behind the refusal.
+    expect(host.request).not.toHaveBeenCalled();
   });
 
   it("read passes the window through to the host", async () => {

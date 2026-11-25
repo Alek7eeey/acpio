@@ -18,7 +18,7 @@ The question is the user's: the deliverable is the answer to it, not a questionn
 
 ## The turn
 
-Reading, searching and read-only commands are the work. `write`, `edit`, commits, migrations — anything that changes the project — are not, however obvious the fix looks. On `/ask` the harness withholds `write` and `edit` for the turn, so a cheatsheet, a report or a patch has no file to land in: what the answer explains, it explains in the chat.
+Reading, searching and read-only commands are the work. `write`, `edit`, commits, migrations — anything that changes the project — are not, however obvious the fix looks. On `/ask` the harness refuses the tools that write (`write`, `edit`, `plan`, `apply_plan`, `task`) for the turn, so a cheatsheet, a report or a patch has no file to land in: what the answer explains, it explains in the chat.
 
 ## Answering
 

@@ -133,7 +133,6 @@ describe("system prompt rules", () => {
     planTool = true,
     locale = "en",
     replyLanguage: "auto" | "ru" | "en" = "auto",
-    readOnly = false,
   ) =>
     systemPrompt(
       locale,
@@ -148,7 +147,6 @@ describe("system prompt rules", () => {
       "",
       "",
       "",
-      readOnly,
     );
 
   it("carries every rule when no active skill claims one", () => {
@@ -189,21 +187,6 @@ describe("system prompt rules", () => {
 
   it("is untouched by an id no rule carries", () => {
     expect(build(["no-such-rule"])).toBe(build([]));
-  });
-
-  // `/ask` is a question: the turn gets no `write`/`edit`, and the prompt must
-  // not send the model after files with tools it was not given.
-  it("says a read-only turn answers and changes nothing", () => {
-    const prompt = build([], "", true, "en", "auto", true);
-    expect(prompt).toContain("This turn only reads");
-    expect(prompt).toContain("The answer in this chat is the whole result");
-    expect(prompt).not.toContain("Read a file before changing it,");
-    expect(prompt).toContain("Make the smallest change that fully solves the task.");
-    // The Russian twin, for the interface that speaks it.
-    expect(build([], "", true, "ru", "auto", true)).toContain("Этот ход только читает");
-    // An ordinary turn keeps the edit rule and says nothing about a limit.
-    expect(build([])).toContain("Read a file before changing it,");
-    expect(build([])).not.toContain("This turn only reads");
   });
 
   it("keeps the plan rule only while the plan tool is offered", () => {
@@ -542,10 +525,13 @@ describe("builtin provider routing", () => {
   });
 
   // `/ask` is the question skill, and its frontmatter says `read-only: true`:
-  // the turn answers in the chat and is given no tool that could leave a file
-  // behind. The model cannot call what it was never offered — that is the part
-  // a skill's own wording cannot guarantee.
-  it("gives an /ask turn no write or edit tool and says so in the prompt", async () => {
+  // the turn answers in the chat, and the tools that write refuse it. What it
+  // must not do is move the head — the system prompt and the declarations are
+  // the prefix the provider's cache answers, so a mode that rewrote them for
+  // one turn charged the whole history twice per question (chat 13923ef4: 891
+  // messages, `systemChanged` and `toolsChanged` on the way in and on the way
+  // out). The limit rides in the turn's own message instead.
+  it("keeps the head across a read-only turn and states the limit in its message", async () => {
     const stub = await startStub();
     const dir = tempDir();
     const provider = {
@@ -555,34 +541,45 @@ describe("builtin provider routing", () => {
       apiKey: "sk",
       models: [{ id: "m1", label: "M1", contextWindow: 8_000 }],
     };
+    const body = () => stub.bodies.at(-1) as Record<string, unknown>;
     const toolNames = () =>
-      (((stub.bodies.at(-1)?.tools ?? []) as Array<{ function?: { name?: string } }>) ?? []).map(
+      ((body().tools ?? []) as Array<{ function?: { name?: string } }>).map(
         (t) => t.function?.name ?? "",
       );
-    const system = () =>
-      String(
-        ((stub.bodies.at(-1)?.messages ?? []) as Array<Record<string, unknown>>)[0]?.content,
-      );
+    /** The bytes ahead of every message: what a provider's cache matches. */
+    const head = () =>
+      JSON.stringify({
+        system: (body().messages as Array<Record<string, unknown>>)[0]?.content,
+        tools: body().tools,
+      });
+    const lastUser = () => {
+      const last = (body().messages as Array<Record<string, unknown>>).at(-1);
+      const content = last?.content;
+      return Array.isArray(content)
+        ? content.map((part) => String((part as { text?: unknown }).text ?? "")).join("")
+        : String(content ?? "");
+    };
     try {
       const harness = boot({ builtinProviders: [provider] }, dir);
       await harness.call("session/new", { cwd: dir });
       await harness.call("session/set_config_option", { configId: "model", value: "p1::m1" });
+      await harness.call("session/prompt", { prompt: [{ type: "text", text: "привет" }] });
+      const cached = head();
+      expect(toolNames()).toContain("write");
+
       await harness.call("session/prompt", {
         prompt: [{ type: "text", text: "/ask где лежит разбор промпта" }],
       });
-      expect(toolNames()).toContain("read");
+      // The very bytes the previous request sent.
+      expect(head()).toBe(cached);
       // Reading a test run and the history is still the work of a question.
       expect(toolNames()).toContain("bash");
-      expect(toolNames()).not.toContain("write");
-      expect(toolNames()).not.toContain("edit");
-      expect(toolNames()).not.toContain("plan");
-      expect(system()).toContain("This turn only reads");
+      expect(lastUser()).toContain("This turn only reads");
 
-      // The next turn is an ordinary one: the tools come back with it.
+      // And the way back is free too.
       await harness.call("session/prompt", { prompt: [{ type: "text", text: "поправь" }] });
-      expect(toolNames()).toContain("write");
-      expect(toolNames()).toContain("edit");
-      expect(system()).not.toContain("This turn only reads");
+      expect(head()).toBe(cached);
+      expect(lastUser()).not.toContain("This turn only reads");
     } finally {
       await stub.close();
     }
@@ -3040,6 +3037,89 @@ describe("builtin provider routing", () => {
     }
   });
 
+  it("keeps the declarations across a restart, whatever order the servers answer in", async () => {
+    // A restart rebuilds the head from its stored settings and lists the MCP
+    // tools again. Collected by arrival, the first request of the new process
+    // carried another order, and the provider — which answers only an unchanged
+    // prefix — billed the whole history (chat 13923ef4: 406 of 406 messages
+    // matched, `toolsChanged` true, on three restarts in a row).
+    const stub = await startStub();
+    const dir = tempDir();
+    const delay = { slow: 0, fast: 80 };
+    const serve = (name: keyof typeof delay) =>
+      createServer((req, res) => {
+        const chunks: Buffer[] = [];
+        req.on("data", (c: Buffer) => chunks.push(c));
+        req.on("end", () => {
+          const msg = JSON.parse(Buffer.concat(chunks).toString("utf8")) as {
+            id: number;
+            method: string;
+          };
+          const results: Record<string, unknown> = {
+            initialize: { protocolVersion: "2024-11-05", capabilities: {} },
+            "tools/list": {
+              tools: [{ name: `${name}-one`, inputSchema: { type: "object" } }],
+            },
+          };
+          setTimeout(() => {
+            res.setHeader("content-type", "application/json");
+            res.end(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: results[msg.method] }));
+          }, delay[name]);
+        });
+      });
+    const servers = [serve("slow"), serve("fast")];
+    for (const server of servers) {
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    }
+    const port = (server: (typeof servers)[number]) => (server.address() as { port: number }).port;
+    const mcpServers = [
+      { name: "slow", url: `http://127.0.0.1:${port(servers[0]!)}/mcp` },
+      { name: "fast", url: `http://127.0.0.1:${port(servers[1]!)}/mcp` },
+    ];
+    const settings = {
+      builtinProviders: [
+        {
+          id: "p1",
+          name: "P",
+          url: stub.url,
+          apiKey: "sk",
+          models: [{ id: "m1", label: "M1", contextWindow: 8_000 }],
+        },
+      ],
+    };
+    /** What the provider matches its cache on: the system text and the tools. */
+    const head = () => {
+      const body = stub.bodies.at(-1) as Record<string, unknown>;
+      return JSON.stringify({
+        system: (body.messages as Array<Record<string, unknown>>)[0]?.content,
+        tools: body.tools,
+      });
+    };
+    try {
+      const first = boot(settings, dir);
+      const session = await first.call<{ sessionId: string }>("session/new", {
+        cwd: dir,
+        mcpServers,
+      });
+      await first.call("session/set_config_option", { configId: "model", value: "p1::m1" });
+      await first.call("session/prompt", { prompt: [{ type: "text", text: "привет" }] });
+      const cached = head();
+      first.close();
+
+      // The same two servers in the same order, answering the other way round.
+      delay.slow = 80;
+      delay.fast = 0;
+      const second = boot(settings, dir);
+      await second.call("session/load", { sessionId: session.sessionId, cwd: dir, mcpServers });
+      await second.call("session/prompt", { prompt: [{ type: "text", text: "продолжай" }] });
+      expect(head()).toBe(cached);
+      second.close();
+    } finally {
+      await stub.close();
+      await Promise.all(servers.map((s) => new Promise<void>((done) => s.close(() => done()))));
+    }
+  });
+
   it("parks the turn on the drift card and stops it on the reader's word", async () => {
     // The head moved between two requests of one chat: with the diagnostics
     // switch on, the request that pays for it waits for the reader instead of
@@ -3157,6 +3237,57 @@ describe("builtin provider routing", () => {
       expect(cards).toBe(1);
       expect(stub.hits).toHaveLength(2);
       expect(result.stopReason).toBe("end_turn");
+    } finally {
+      await stub.close();
+    }
+  });
+
+  // A skill whose turn only reads is a mode of the turn, not of the prompt:
+  // `/ask` and the ordinary turn after it must send the same head, or every
+  // question costs the whole history twice (the card in the deep logs: chat
+  // 13923ef4, "системный промпт изменился целиком" on the way in, again on the
+  // way out, 891 messages each time).
+  it("draws no drift card when the reader switches to a read-only skill and back", async () => {
+    const stub = await startStub();
+    const dir = tempDir();
+    const cards: string[] = [];
+    const answerCard = (method: string) => {
+      if (method !== "builtin/context_drift") return {};
+      cards.push(method);
+      return {
+        outcome: {
+          outcome: "answered",
+          answers: [{ questionId: "drift", selectedOptionIds: ["continue"] }],
+        },
+      };
+    };
+    try {
+      const harness = boot(
+        {
+          builtinProviders: [
+            {
+              id: "p1",
+              name: "P",
+              url: stub.url,
+              apiKey: "sk",
+              models: [{ id: "m1", label: "M1", contextWindow: 8_000 }],
+            },
+          ],
+          diagnosticsContextDrift: true,
+        },
+        dir,
+        answerCard,
+      );
+      await harness.call("session/new", { cwd: dir });
+      await harness.call("session/set_config_option", { configId: "model", value: "p1::m1" });
+      await harness.call("session/prompt", { prompt: [{ type: "text", text: "привет" }] });
+      await harness.call("session/prompt", {
+        prompt: [{ type: "text", text: "/ask где лежит разбор промпта" }],
+      });
+      await harness.call("session/prompt", { prompt: [{ type: "text", text: "поправь" }] });
+
+      expect(stub.hits).toHaveLength(3);
+      expect(cards).toEqual([]);
     } finally {
       await stub.close();
     }

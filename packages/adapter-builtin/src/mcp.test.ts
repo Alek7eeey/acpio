@@ -164,6 +164,49 @@ describe("McpManager", () => {
     await expect(tools[0]!.call({})).resolves.toEqual({ text: "found", images: [] });
   });
 
+  it("keeps the configured order however the servers answer", async () => {
+    // The declarations sit in front of every message, so their order is part of
+    // the head the provider caches: collected by arrival, a restart could hand
+    // the very next request a set it had never seen and bill the whole history
+    // (chat 13923ef4 drew `toolsChanged` on the first request after each of
+    // three restarts).
+    const serve = (name: string, delayMs: number) => {
+      const server = createServer((req, res) => {
+        const chunks: Buffer[] = [];
+        req.on("data", (c: Buffer) => chunks.push(c));
+        req.on("end", () => {
+          const msg = JSON.parse(Buffer.concat(chunks).toString("utf8")) as {
+            id: number;
+            method: string;
+          };
+          const results: Record<string, unknown> = {
+            initialize: { protocolVersion: "2024-11-05", capabilities: {} },
+            "tools/list": { tools: [{ name: `${name}-one`, inputSchema: { type: "object" } }] },
+          };
+          setTimeout(() => {
+            res.setHeader("content-type", "application/json");
+            res.end(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: results[msg.method] }));
+          }, delayMs);
+        });
+      });
+      servers.push(server);
+      return server;
+    };
+    const slow = serve("slow", 80);
+    const fast = serve("fast", 0);
+    const listen = async (server: Server) => {
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      return (server.address() as { port: number }).port;
+    };
+    const [slowPort, fastPort] = [await listen(slow), await listen(fast)];
+
+    const { tools } = await manager([
+      { name: "slow", url: `http://127.0.0.1:${slowPort}/mcp` },
+      { name: "fast", url: `http://127.0.0.1:${fastPort}/mcp` },
+    ]).ensure();
+    expect(tools.map((t) => t.qualifiedName)).toEqual(["mcp__slow_slow-one", "mcp__fast_fast-one"]);
+  });
+
   it("keeps an image block as bytes instead of a placeholder", async () => {
     const PNG =
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";

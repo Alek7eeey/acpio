@@ -20,8 +20,9 @@ read-only: true
 ## The turn
 
 Reading, searching, read-only commands are the work: `grep`, `glob`, `read`, a test or
-a script run for its output, `git log -S`. The harness withholds `write` and `edit` for
-a read-only skill, so whatever the trace concludes, it concludes in the chat.
+a script run for its output, `git log -S`. The harness refuses the tools that write
+(`write`, `edit`, `plan`, `apply_plan`, `task`) for a read-only skill, so whatever the
+trace concludes, it concludes in the chat.
 
 ## The trace
 

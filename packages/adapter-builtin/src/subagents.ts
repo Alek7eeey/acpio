@@ -183,6 +183,11 @@ export interface TaskToolHost {
    * by prefix) while nothing there can execute.
    */
   bridge: () => SubagentsBridge | null;
+  /**
+   * A read-only turn (`/ask`) declares `task` all the same — the declaration is
+   * the head the cache answers — and refuses the spawn here: a child writes.
+   */
+  readOnly?: boolean;
 }
 
 /** The `task` tool: spawns a child run and returns its final report. */
@@ -202,6 +207,12 @@ export function makeTaskTool(host: TaskToolHost) {
       `${rules} Named: ${named}`,
     inputSchema: taskInputSchema,
     execute: async (input, ctx) => {
+      if (host.readOnly) {
+        throw new Error(
+          "Read-only turn: `task` was not performed. A child writes files — the answer in the " +
+            "chat is the whole result.",
+        );
+      }
       const bridge = host.bridge();
       if (!bridge) throw new Error("`task` runs only inside a turn — no turn is in flight.");
       const report = await runSubagent(bridge, ctx.toolCallId, input);

@@ -36,10 +36,21 @@ When you touch prompt assembly:
   for the tail.
 - A situational block lands once. Record that it landed (see `deliveredRules`) so
   the next request repeats neither the text nor the cost.
+- A **turn's own mode is not a head property**. A read-only skill (the `ask` and
+  `investigate` modes) keeps every declaration and every prompt line, and the
+  tools that write refuse instead — the turn says its limit in its own message
+  (see `readOnlyTurnNote`). Withholding two tools for one turn billed chat
+  `13923ef4` its whole history twice per question: once on the way into `/ask`,
+  again on the way out, 891 messages each time.
 - Any per-turn recomputation of something that goes into the head — a sorted MCP
   server list, an edited rule file, a touched-file check — is a cache miss waiting
   to happen. Ask: *can this differ between two requests of one session?* If yes, it
-  may not sit in the head.
+  may not sit in the head. Ask the same question **across a restart of the
+  process**: the MCP tool list was flattened in the order the servers answered, so
+  the first request of every restarted process carried another order and
+  `toolsChanged` on a history the provider had already cached. Configuration
+  order, `await Promise.all` never — the collectors are assembled per server and
+  flattened in `specs` order (see `McpManager.ensure`).
 
 ## Smallest change
 

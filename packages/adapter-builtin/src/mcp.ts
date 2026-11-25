@@ -457,45 +457,65 @@ export class McpManager {
 
   async ensure(): Promise<{ tools: McpToolEntry[]; warnings: string[] }> {
     if (this.built) return this.built;
-    const tools: McpToolEntry[] = [];
-    const warnings: string[] = [];
-    const rows: Array<Record<string, unknown>> = [];
-    await Promise.all(
+    // Collected per server and flattened in the configured order, never in the
+    // order the servers answered: the declarations ride in front of every
+    // message, so an order that follows whichever server was quicker rewrote
+    // the head of the first request of every restarted process — the provider
+    // saw a prompt it had never cached and billed the whole history (chat
+    // 13923ef4: 406 messages, `toolsChanged` on the very first request after
+    // three restarts).
+    const connected = await Promise.all(
       this.specs.map(async (spec) => {
+        const entries: McpToolEntry[] = [];
         const connection = new McpConnection(spec, this.cwd);
         const started = Date.now();
         try {
           const listed = await connection.connect();
           this.connections.push(connection);
-          rows.push({
-            name: spec.name,
-            endpoint: spec.url ?? [spec.command, ...(spec.args ?? [])].filter(Boolean).join(" "),
-            ok: true,
-            tools: listed.length,
-            ms: Date.now() - started,
-          });
           for (const def of listed) {
-            tools.push({
+            entries.push({
               ...def,
               qualifiedName: mcpToolName(spec.name, def.name),
               server: spec.name,
               call: (args) => connection.call(def.name, args),
             });
           }
+          return {
+            entries,
+            warning: "",
+            row: {
+              name: spec.name,
+              endpoint: spec.url ?? [spec.command, ...(spec.args ?? [])].filter(Boolean).join(" "),
+              ok: true,
+              tools: listed.length,
+              ms: Date.now() - started,
+            },
+          };
         } catch (err) {
           connection.close();
           const message = err instanceof Error ? err.message : String(err);
-          warnings.push(`${spec.name}: ${message}`);
-          rows.push({
-            name: spec.name,
-            endpoint: spec.url ?? [spec.command, ...(spec.args ?? [])].filter(Boolean).join(" "),
-            ok: false,
-            reason: message,
-            ms: Date.now() - started,
-          });
+          return {
+            entries,
+            warning: `${spec.name}: ${message}`,
+            row: {
+              name: spec.name,
+              endpoint: spec.url ?? [spec.command, ...(spec.args ?? [])].filter(Boolean).join(" "),
+              ok: false,
+              reason: message,
+              ms: Date.now() - started,
+            },
+          };
         }
       }),
     );
+    const tools: McpToolEntry[] = [];
+    const warnings: string[] = [];
+    const rows: Array<Record<string, unknown>> = [];
+    for (const result of connected) {
+      tools.push(...result.entries);
+      if (result.warning) warnings.push(result.warning);
+      rows.push(result.row);
+    }
     // Sanitising every non-word character to `_` makes two different pairs
     // collide (`a b`/`c` and `a`/`b_c` both become `mcp__a_b_c`), and a plain
     // assignment into the tool set would then drop one of them without a word.
