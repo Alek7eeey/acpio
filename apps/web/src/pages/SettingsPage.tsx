@@ -4170,6 +4170,13 @@ export function SettingsPage() {
                   aria-label={t("settings.builtinExtraInstructionsTitle")}
                   placeholder={t("settings.builtinExtraInstructionsPlaceholder")}
                 />
+                {/* The head is frozen once per chat: a chat already running keeps
+                    the instructions it started with, so the note says so before
+                    the reader wonders why the edit did nothing — and says it in
+                    the warning colour, not as one more grey hint. */}
+                <p className={styles.extraInstructionsNote}>
+                  {t("settings.builtinExtraInstructionsNote")}
+                </p>
               </SettingRow>
             </SettingTable>
 

@@ -8,7 +8,7 @@ import { db } from "./db/client.js";
 import { messages, messageParts, sessions } from "./db/schema.js";
 import { defaultSessionTitle, errorMessage } from "@acpio/i18n";
 import type { BuiltinKeyMode, BuiltinProviderKind } from "@acpio/shared";
-import { BUILD_INFO, EDITOR_NAV_PLACEMENTS, EDITOR_SPLITS, EDITOR_THEMES, EDITOR_TOOL_SOURCES, FILE_OPEN_TARGETS, CONSOLE_TERMINAL_LIMITS, CUSTOM_AGENT_MAX, BUILTIN_MAX_OUTPUT_TOKENS_MAX, BUILTIN_TURN_RETRY_ATTEMPTS_MIN, BUILTIN_TURN_RETRY_ATTEMPTS_MAX, BUILTIN_THINKING_LIMIT_MAX, BUILTIN_BASH_TIMEOUT_SEC_MIN, BUILTIN_BASH_TIMEOUT_SEC_MAX, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MIN, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MAX, BUILTIN_KEEP_RECENT_PERCENT_MIN, BUILTIN_KEEP_RECENT_PERCENT_MAX, BUILTIN_MAX_SUMMARY_TOKENS_MAX, BUILTIN_PRUNE_TOOL_RESULTS_KEEP_LAST_MAX, CHAT_TITLE_MAX_LEN_MIN, CHAT_TITLE_MAX_LEN_MAX, isShellSession, canonicalCwd, normalizeBuiltinSubagents, normalizeSkillModes, BUILTIN_PRESET_MAX, normalizeBuiltinPresets, SHELL_SESSION_PROVIDER, titleFromTaskDescription, titleFromUserText, titleFromSlashCommand, BUILTIN_MAX_PROVIDER_KEYS, BUILTIN_MAX_KEY_LENGTH, BUILTIN_PROVIDER_KINDS, BUILTIN_KEY_MODES } from "@acpio/shared";
+import { BUILD_INFO, EDITOR_NAV_PLACEMENTS, EDITOR_SPLITS, EDITOR_THEMES, EDITOR_TOOL_SOURCES, FILE_OPEN_TARGETS, CONSOLE_TERMINAL_LIMITS, CUSTOM_AGENT_MAX, BUILTIN_EXTRA_INSTRUCTIONS_MAX, BUILTIN_MAX_OUTPUT_TOKENS_MAX, BUILTIN_TURN_RETRY_ATTEMPTS_MIN, BUILTIN_TURN_RETRY_ATTEMPTS_MAX, BUILTIN_THINKING_LIMIT_MAX, BUILTIN_BASH_TIMEOUT_SEC_MIN, BUILTIN_BASH_TIMEOUT_SEC_MAX, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MIN, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MAX, BUILTIN_KEEP_RECENT_PERCENT_MIN, BUILTIN_KEEP_RECENT_PERCENT_MAX, BUILTIN_MAX_SUMMARY_TOKENS_MAX, BUILTIN_PRUNE_TOOL_RESULTS_KEEP_LAST_MAX, CHAT_TITLE_MAX_LEN_MIN, CHAT_TITLE_MAX_LEN_MAX, isShellSession, canonicalCwd, normalizeBuiltinSubagents, normalizeSkillModes, BUILTIN_PRESET_MAX, normalizeBuiltinPresets, SHELL_SESSION_PROVIDER, titleFromTaskDescription, titleFromUserText, titleFromSlashCommand, BUILTIN_MAX_PROVIDER_KEYS, BUILTIN_MAX_KEY_LENGTH, BUILTIN_PROVIDER_KINDS, BUILTIN_KEY_MODES } from "@acpio/shared";
 import { nextProviderKey } from "@acpio/adapter-builtin";
 import {
   buildSettingsFile,
@@ -551,6 +551,10 @@ const settingsSchema = z.object({
         .optional(),
     })
     .optional(),
+  // The reader's own instructions ride in the system prompt. Zod strips what it
+  // does not know, so a field missing here is dropped on save: the form read
+  // back empty on the next load and the prompt never carried the text.
+  builtinExtraInstructions: z.string().max(BUILTIN_EXTRA_INSTRUCTIONS_MAX).optional(),
   builtinAllowOutsideCwd: z.boolean().optional(),
   builtinReplyLanguage: z.enum(["auto", "ru", "en"]).optional(),
   builtinMarkdownImages: z.boolean().optional(),

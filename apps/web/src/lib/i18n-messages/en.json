@@ -1096,6 +1096,7 @@
     "builtinExtraInstructionsTitle": "Extra instructions for the agent",
     "builtinExtraInstructionsHint": "Appended to the built-in agent's system prompt and sent with every turn. Your own dial for what the built-in rules do not cover — a house style, a project convention, or a nudge to reason less. For reasoning models a budget-style rule works best: name a limit on private reasoning and say that exceeding it is a failure. Leave empty for the built-in prompt alone.",
     "builtinExtraInstructionsPlaceholder": "Hard rule: your private reasoning budget is 150 words. Think once, decide, then answer. No enumeration of options, no re-derivation of obvious facts, no restating the task, no planning commentary. Exceeding the budget is a failure; write the answer immediately once you have decided.",
+    "builtinExtraInstructionsNote": "Applies to new chats only — a chat already running keeps the instructions it started with.",
     "subagentsEnabled": "Subagents",
     "subagentsEnabledHint": "Let the built-in agent spawn subagents with the `task` tool. A subagent runs with its own context window in this workspace and returns one final report — only the report enters the conversation. Works in every mode; children of plan mode stay read-only.",
     "subagentsAllowAdhoc": "Allow ad-hoc subagents",

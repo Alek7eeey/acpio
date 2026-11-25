@@ -354,6 +354,16 @@
   line-height: var(--settings-hint-line);
 }
 
+/** A note the reader must see before saving: the warning colour, so it is not
+ *  read as one more grey hint under the field. */
+.extraInstructionsNote {
+  margin: 0;
+  font-size: var(--settings-hint-size);
+  font-weight: 600;
+  color: var(--warning);
+  line-height: var(--settings-hint-line);
+}
+
 .mcpApplyNote {
   margin: 0;
   padding: var(--settings-note-pad-y) var(--settings-note-pad-x);
