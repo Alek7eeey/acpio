@@ -62,6 +62,19 @@ describe("hydrateSessionSlashCommands", () => {
     const input = detail("s1", cmdsA);
     expect(hydrateSessionSlashCommands(input, cache)).toBe(input);
   });
+
+  it("answers a stale snapshot with one and the same hydrated object", () => {
+    // The chat pane reads its session through a zustand selector, and React
+    // re-renders until `getSnapshot` stops changing: a fresh object per read is
+    // "Maximum update depth exceeded" (#185), which is what switching chats
+    // did whenever the warm cache held a command the stored snapshot had not
+    // got — a raw GET commit leaves exactly that.
+    const cache = new Map([["s1", cmdsA]]);
+    const stale = detail("s1");
+    const first = hydrateSessionSlashCommands(stale, cache);
+    expect(first?.slashCommands).toEqual(cmdsA);
+    expect(hydrateSessionSlashCommands(stale, cache)).toBe(first);
+  });
 });
 
 describe("preferSessionSlashCommands", () => {
