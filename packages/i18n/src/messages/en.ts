@@ -646,7 +646,7 @@ export const en = {
     builtinSkillPathsReset: "Reset to defaults",
     builtinProjectRulesTitle: "Project rules",
     builtinProjectRulesHint:
-      "Files the built-in agent reads as the repository's own rules — AGENTS.md, the Cursor-compatible .cursor/rules — one glob per line, relative to each chat's folder (default: AGENTS.md, .cursorrules, .cursor/rules/**/*.mdc). A rule that always applies is added to the system prompt; one gated on globs is listed by path and read when a matching file is touched. Clear the list to turn project rules off.",
+      "Files the built-in agent reads as the repository's own rules — AGENTS.md, the Cursor-compatible .cursor/rules — one glob per line, relative to each chat's folder (default: AGENTS.md, .cursorrules, .cursor/rules/**/*.mdc). `~` is the server user's home: those rules sit outside the chat and apply to every project (e.g. ~/.agents/rules/**/*.md). A rule that always applies is added to the system prompt; one gated on globs is listed by path and read when a matching file is touched — a `~` rule arrives on its own once a matching file is touched. Clear the list to turn project rules off.",
     builtinProjectRulesReset: "Reset to defaults",
     builtinIgnoreFilesTitle: "Ignore files",
     builtinIgnoreFilesHint:

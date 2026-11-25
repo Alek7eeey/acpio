@@ -195,3 +195,56 @@ describe("renderProjectRules", () => {
     expect((await discoverProjectRules(cwd)).map((rule) => rule.path)).toEqual([".cursor/rules/a/b/deep.mdc"]);
   });
 });
+
+describe("~ — the user's own rules for every project", () => {
+  it("reads them from home and inlines the one that always applies", async () => {
+    const home = tempDir();
+    file(home, ".agents/rules/base.md", "Always answer in Russian.");
+    const cwd = tempDir();
+    file(cwd, "AGENTS.md", "Tabs, not spaces.");
+    const prompt = await renderProjectRules(cwd, ["AGENTS.md", "~/.agents/rules/**/*.md"], home);
+    expect(prompt).toContain("--- AGENTS.md ---\nTabs, not spaces.");
+    expect(prompt).toContain("--- ~/.agents/rules/base.md ---\nAlways answer in Russian.");
+    expect(prompt).toContain("the user's own rules, meant for every project");
+    // The same rule is the user's wherever the chat's folder is.
+    const other = tempDir();
+    expect(await renderProjectRules(other, ["~/.agents/rules/**/*.md"], home)).toContain(
+      "Always answer in Russian.",
+    );
+  });
+
+  it("never lists a globs-gated one — no tool can open a path outside the chat — but hands it over on a match", async () => {
+    const home = tempDir();
+    file(home, ".agents/rules/ts.md", "---\nglobs: **/*.ts\n---\nNo `as`.");
+    const cwd = tempDir();
+    const patterns = ["~/.agents/rules/**/*.md"];
+    // Nothing to read, so the head stays empty instead of naming an unreadable path.
+    expect(await renderProjectRules(cwd, patterns, home)).toBe("");
+    const note = await renderRuleNotes(cwd, patterns, ["src/a.ts"], new Set(), home);
+    expect(note.text).toContain("--- ~/.agents/rules/ts.md ---\nNo `as`.");
+    expect(note.paths).toEqual(["~/.agents/rules/ts.md"]);
+    expect((await renderRuleNotes(cwd, patterns, ["src/a.ts"], new Set(note.paths), home)).text).toBe("");
+  });
+
+  it("carries a home rule that gates on nothing whole: no globs to trigger it, no path to open", async () => {
+    const home = tempDir();
+    file(home, ".agents/rules/mine.md", "---\ndescription: my habits\nalwaysApply: false\n---\nBe brief.");
+    const cwd = tempDir();
+    expect(await renderProjectRules(cwd, ["~/.agents/rules/**/*.md"], home)).toContain(
+      "--- ~/.agents/rules/mine.md ---\nBe brief.",
+    );
+    expect((await renderRuleNotes(cwd, ["~/.agents/rules/**/*.md"], ["a.ts"], new Set(), home)).text).toBe(
+      "",
+    );
+  });
+
+  it("inlines what still fits when the budget runs out instead of listing it", async () => {
+    const home = tempDir();
+    file(home, "AGENTS.md", "x".repeat(9_000));
+    file(home, ".agents/rules/big.md", "y".repeat(9_000));
+    const prompt = await renderProjectRules(tempDir(), ["~/AGENTS.md", "~/.agents/rules/big.md"], home);
+    expect(prompt).toContain("--- ~/AGENTS.md ---");
+    expect(prompt).toContain("--- ~/.agents/rules/big.md ---");
+    expect(prompt).not.toContain("y".repeat(9_000));
+  });
+});

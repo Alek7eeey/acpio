@@ -1047,6 +1047,13 @@ describe("normalizeBuiltinProjectRules", () => {
       [],
     );
   });
+
+  it("keeps a ~-rooted pattern: the user's own rules, for every project", () => {
+    expect(normalizeBuiltinProjectRules(["~/.agents/rules/**/*.md", "~/AGENTS.md"])).toEqual([
+      "~/.agents/rules/**/*.md",
+      "~/AGENTS.md",
+    ]);
+  });
 });
 
 describe("normalizeIgnoreFiles", () => {

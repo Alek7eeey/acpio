@@ -794,8 +794,9 @@ export function normalizeIgnoreFiles(files: unknown): string[] {
 
 /**
  * Configured project-rule patterns: trimmed, forward-slashed, de-duplicated,
- * glob metacharacters kept. Absolute paths and paths escaping the chat's cwd are
- * dropped — these are the rules of the repository itself. A non-array (absent
+ * glob metacharacters kept. A `~`-rooted pattern names the user's own rules for
+ * every project (home of the server user) — like the skill folders' paths;
+ * absolute paths and paths escaping their root are dropped. A non-array (absent
  * setting) means the defaults.
  */
 export function normalizeBuiltinProjectRules(patterns: unknown): string[] {
@@ -2613,9 +2614,12 @@ export interface AppSettings {
   /**
    * Files the built-in agent reads as the repository's own rules, relative to
    * the chat's cwd and matched as glob patterns ({@link
-   * DEFAULT_BUILTIN_PROJECT_RULES} for the default). A rule that always applies
-   * is inlined into the system prompt; one gated on `globs` is listed by path
-   * for the model to read. An empty list turns the feature off.
+   * DEFAULT_BUILTIN_PROJECT_RULES} for the default). A `~`-rooted pattern names
+   * the user's own rules for every project instead of this repository's. A rule
+   * that always applies is inlined into the system prompt; one gated on `globs`
+   * is listed by path for the model to read, and a `~`-rooted one — which lies
+   * outside the chat and cannot be opened that way — arrives once a matching
+   * file is touched. An empty list turns the feature off.
    */
   builtinProjectRules: string[];
   /**

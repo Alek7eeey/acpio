@@ -6,6 +6,11 @@
 // is listed by path instead — the split Cursor itself makes, without a per-file
 // matcher here.
 //
+// A `~`-rooted pattern names the user's own rules for every project. They live
+// outside every chat's folder, so no tool of the chat can open one by path: such
+// a rule must be carried whole, or handed over when its globs start to match
+// (see `renderProjectRules`).
+//
 // The head is written once per chat. A provider's cache answers a prefix, so a
 // system prompt that gains a sentence between two requests bills the whole
 // history again (chat b0c36ffa: five `.mdc` rules inlined themselves into
@@ -14,14 +19,20 @@
 // hands it to the caller to append behind everything already sent, where only the
 // note itself is new.
 import fsp from "node:fs/promises";
+import { homedir } from "node:os";
 import path from "node:path";
 import { DEFAULT_BUILTIN_PROJECT_RULES, normalizeBuiltinProjectRules } from "@acpio/shared";
 import type { ModelMessage } from "ai";
 import { minimatch } from "minimatch";
 
 export interface ProjectRule {
-  /** Path the model opens it by: relative to the working directory, `/`-joined. */
+  /**
+   * Path it is named by: relative to the working directory, `/`-joined — or
+   * `~/…` for a rule of the user's own, which no tool of the chat can open.
+   */
   path: string;
+  /** The user's rules for every project (`~`-rooted pattern), not the repo's. */
+  home?: boolean;
   /** Frontmatter `description`, else "". */
   description: string;
   /** Frontmatter `globs`, comma-joined — the files this rule is about. */
@@ -39,6 +50,7 @@ const SKIP_DIRS = new Set(["node_modules", ".git"]);
 const MAX_RULES = 50;
 const PER_RULE_CHAR_LIMIT = 8_000;
 const INLINE_CHAR_LIMIT = 12_000;
+const TRUNCATED = "\n...[truncated]...";
 
 /**
  * One rule file. Cursor's `.mdc` frontmatter carries `description`, `globs` and
@@ -92,7 +104,30 @@ async function readText(file: string): Promise<string | null> {
 }
 
 /**
- * The rule files the configured patterns match in `cwd`, parsed. Patterns are
+ * Where one configured pattern is rooted: the chat's own folder, or `~` — the
+ * server user's home, whose rules are meant for every project. `prefix` is what
+ * the reported paths carry, so a rule says where it lives.
+ */
+function patternScope(
+  pattern: string,
+  cwd: string,
+  home: string,
+): { dir: string; glob: string; prefix: string } {
+  if (pattern === "~" || pattern.startsWith("~/")) {
+    return { dir: home, glob: pattern.slice(1).replace(/^\//, ""), prefix: "~/" };
+  }
+  return { dir: cwd, glob: pattern, prefix: "" };
+}
+
+function toRule(file: { shown: string; text: string; home: boolean }): ProjectRule {
+  const rule = parseRuleFile(file.text, file.shown);
+  if (file.home) rule.home = true;
+  return rule;
+}
+
+/**
+ * The rule files the configured patterns match in `cwd`, parsed — plus the ones
+ * a `~` pattern finds in `home`, which apply to every project. Patterns are
  * matched in the order they are configured, so the first one is what the inline
  * budget serves first; a path two patterns both match is read once. A malformed
  * pattern is skipped instead of failing the turn that only wanted the prompt.
@@ -100,28 +135,33 @@ async function readText(file: string): Promise<string | null> {
 export async function discoverProjectRules(
   cwd: string,
   patterns: unknown = DEFAULT_BUILTIN_PROJECT_RULES,
+  home: string = homedir(),
 ): Promise<ProjectRule[]> {
   if (!cwd) return [];
-  const files: Array<{ rel: string; text: string }> = [];
+  const files: Array<{ shown: string; text: string; home: boolean }> = [];
   const seen = new Set<string>();
   for (const pattern of normalizeBuiltinProjectRules(patterns)) {
+    const scope = patternScope(pattern, cwd, home);
+    // A bare `~` names the home folder itself, not a rule in it.
+    if (!scope.glob) continue;
     try {
-      for await (const match of fsp.glob(pattern, {
-        cwd,
+      for await (const match of fsp.glob(scope.glob, {
+        cwd: scope.dir,
         exclude: (file) => file.split(/[\\/]/).some((seg) => SKIP_DIRS.has(seg)),
       })) {
         const rel = match.split(path.sep).join("/").replace(/^\.\//, "");
-        if (seen.has(rel)) continue;
-        seen.add(rel);
-        const text = await readText(path.join(cwd, ...rel.split("/")));
-        if (text !== null) files.push({ rel, text });
-        if (files.length >= MAX_RULES) return files.map((file) => parseRuleFile(file.text, file.rel));
+        const shown = `${scope.prefix}${rel}`;
+        if (seen.has(shown)) continue;
+        seen.add(shown);
+        const text = await readText(path.join(scope.dir, ...rel.split("/")));
+        if (text !== null) files.push({ shown, text, home: !!scope.prefix });
+        if (files.length >= MAX_RULES) return files.map(toRule);
       }
     } catch {
       // A pattern the platform rejects contributes nothing.
     }
   }
-  return files.map((file) => parseRuleFile(file.text, file.rel));
+  return files.map(toRule);
 }
 
 /**
@@ -165,27 +205,43 @@ function globMatches(globs: string, touched: readonly string[]): boolean {
 /** One rule's text as the prompt carries it: capped, and marked when it was. */
 function ruleText(rule: ProjectRule): string {
   return rule.body.length > PER_RULE_CHAR_LIMIT
-    ? `${rule.body.slice(0, PER_RULE_CHAR_LIMIT)}\n...[truncated]...`
+    ? `${rule.body.slice(0, PER_RULE_CHAR_LIMIT)}${TRUNCATED}`
     : rule.body;
 }
 
 /**
- * The prompt block, or "" when the repository ships no rules. Always-on rules
- * keep their text in full (up to a per-rule and an overall cap); anything over
- * the cap, and every rule gated on `globs`, is listed by path instead. Built once
+ * The prompt block, or "" when neither the repository nor the user ships rules.
+ * Always-on rules keep their text in full (up to a per-rule and an overall cap);
+ * anything over the cap, and every rule gated on `globs`, is listed by path
+ * instead — except a `~/` rule of the user's own: its path is outside the chat's
+ * folder, so the model could not open it. One gated on `globs` waits for
+ * `renderRuleNotes`; one that does not fit is inlined short and marked. Built once
  * per chat and frozen after that — see the note at the top of this file.
  */
-export async function renderProjectRules(cwd: string, patterns?: unknown): Promise<string> {
-  const rules = await discoverProjectRules(cwd, patterns);
+export async function renderProjectRules(
+  cwd: string,
+  patterns?: unknown,
+  home?: string,
+): Promise<string> {
+  const rules = await discoverProjectRules(cwd, patterns, home);
   if (!rules.length) return "";
-  const inlined = rules.filter((rule) => rule.always);
-  const listed = rules.filter((rule) => !rule.always);
+  // A `~/` rule that gates on no globs has no trigger to arrive later, and no tool
+  // can open it by path either — its body is carried whole or lost.
+  const inlined = rules.filter((rule) => rule.always || (rule.home && !rule.globs));
+  const listed = rules.filter((rule) => !rule.always && !rule.home);
   const inline: string[] = [];
   let budget = INLINE_CHAR_LIMIT;
   for (const rule of inlined) {
     const body = ruleText(rule);
     if (!body) continue;
     if (body.length > budget) {
+      const head = `--- ${rule.path} ---\n`;
+      const room = rule.home ? budget - head.length - TRUNCATED.length : 0;
+      if (room > 0) {
+        inline.push(`${head}${body.slice(0, room)}${TRUNCATED}`);
+        budget = 0;
+        continue;
+      }
       listed.push(rule);
       continue;
     }
@@ -197,7 +253,10 @@ export async function renderProjectRules(cwd: string, patterns?: unknown): Promi
     "",
     // More specific than the laws above, like a skill (see `renderSkillsSection`):
     // the repository's own rules are what this project means by "smallest change".
-    "Project rules — this repository's own instructions for agents. They are more specific than the rules above: where they disagree, these win.",
+    // A `~/` path is labelled so the model knows whose rule it reads.
+    `Project rules — this repository's own instructions for agents.${
+      rules.some((rule) => rule.home) ? " A `~/` path is the user's own rules, meant for every project." : ""
+    } They are more specific than the rules above: where they disagree, these win.`,
     ...inline,
     ...(listed.length
       ? [
@@ -234,9 +293,10 @@ export async function renderRuleNotes(
   patterns: unknown,
   touched: readonly string[],
   delivered: ReadonlySet<string>,
+  home?: string,
 ): Promise<RuleNotes> {
   if (!touched.length) return { text: "", paths: [] };
-  const rules = await discoverProjectRules(cwd, patterns);
+  const rules = await discoverProjectRules(cwd, patterns, home);
   const fresh = rules.filter(
     (rule) => !rule.always && !!rule.globs && !delivered.has(rule.path) && globMatches(rule.globs, touched),
   );
@@ -250,7 +310,9 @@ export async function renderRuleNotes(
   if (!blocks.length) return { text: "", paths };
   return {
     text: [
-      "Project rules for the files this conversation has already opened — this repository's own instructions for agents. They are more specific than the rules above: where they disagree, these win. They arrive here, rather than in the instructions above, because those were written once when the chat started.",
+      `Project rules for the files this conversation has already opened — this repository's own instructions for agents. They are more specific than the rules above: where they disagree, these win. They arrive here, rather than in the instructions above, because those were written once when the chat started.${
+        fresh.some((rule) => rule.home) ? " A `~/` path is the user's own rules, meant for every project." : ""
+      }`,
       ...blocks,
     ].join("\n"),
     paths,
