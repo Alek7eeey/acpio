@@ -47,6 +47,7 @@ import { SlashCommandMenu } from "../components/SlashCommandMenu";
 import { ModeHoverMenu } from "../components/ModeMenu";
 import { api } from "../lib/api";
 import { COMPOSER_MODES, COMPOSER_MODE_LABEL_KEY, type ComposerMode } from "../lib/composerMode";
+import { useShiftModeCycle } from "../lib/useShiftModeCycle";
 import { composerEditShortcuts } from "../lib/editShortcuts";
 import { prefersHotkeyHints } from "../lib/messageHotkeys";
 import { isTypingKey } from "../lib/menuPosition";
@@ -482,6 +483,11 @@ const NewTaskComposer = memo(function NewTaskComposer({
   const [fieldMenu, setFieldMenu] = useState<{ x: number; y: number } | null>(null);
   /** The keys beside the editing rows, unless the reader switched them off. */
   const showEditShortcuts = prefersHotkeyHints();
+  /** Shift on its own over the description steps the mode the task is written
+   *  in — the ring the field's menu lists, the last mode wrapping to the first. */
+  const shiftMode = useShiftModeCycle(modePicker?.value ?? "agent", (next) =>
+    modePicker?.onChange(next),
+  );
   /**
    * The field's own undo/redo: the stack belongs to the browser and a menu row
    * cannot type for the reader, so the row reaches it the way the chat's does.
@@ -1146,6 +1152,9 @@ const NewTaskComposer = memo(function NewTaskComposer({
           offerPasteAsFile(text, { start, end });
         }}
         onKeyDown={(e) => {
+          // Every key counts: the mode shortcut is a press Shift makes alone,
+          // and Shift+«Ж» is a capital letter.
+          shiftMode.onKeyDown(e);
           // The menu holds the arrows, Enter and Escape while it is open, the
           // way the chat composer's does — those keys would otherwise send or
           // dismiss the task under a list the user is reading.
@@ -1177,6 +1186,7 @@ const NewTaskComposer = memo(function NewTaskComposer({
           }
           if (e.key === "Escape") onCancel();
         }}
+        onKeyUp={shiftMode.onKeyUp}
       />
       </div>
       {/* The chat composer's offer, over the field it was pasted into: the
@@ -3224,7 +3234,9 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                   <span
                     className={styles.modeChip}
                     data-composer-mode={mode}
-                    title={t(COMPOSER_MODE_LABEL_KEY[mode])}
+                    title={`${t(COMPOSER_MODE_LABEL_KEY[mode])} · ${t(
+                      "chat.modeShiftHint",
+                    )}`}
                   >
                     {t(COMPOSER_MODE_LABEL_KEY[mode])}
                     <button
@@ -3665,7 +3677,9 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                                   <span
                                     className={styles.modeChip}
                                     data-composer-mode={newTaskMode}
-                                    title={t(COMPOSER_MODE_LABEL_KEY[newTaskMode])}
+                                    title={`${t(COMPOSER_MODE_LABEL_KEY[newTaskMode])} · ${t(
+                                      "chat.modeShiftHint",
+                                    )}`}
                                   >
                                     <button
                                       type="button"

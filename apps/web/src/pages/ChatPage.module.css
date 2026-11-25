@@ -3414,6 +3414,20 @@ button.userSlashCmd:focus-visible {
   -webkit-text-fill-color: var(--text-secondary);
 }
 
+/* A wall of pasted text is waiting for its answer: the field takes no key until
+   then, and it looks shut rather than broken — dimmed like a loading one, with
+   the cursor saying why and the placeholder naming what is waited for. */
+.pillHeld .pillMirror {
+  opacity: 0.55;
+}
+.pillHeld .pillInput {
+  cursor: not-allowed;
+}
+.pillHeld .pillInput::placeholder {
+  color: var(--accent);
+  -webkit-text-fill-color: var(--accent);
+}
+
 /* No attached file in the draft: there is no name to colour, so the field
    paints its own text and the caret cannot part ways with it. The copy takes
    over only when a name has to read as a link (see `ComposerMirror`) — two
@@ -3814,6 +3828,14 @@ button.userSlashCmd:focus-visible {
 .pasteOfferHint {
   color: var(--text-secondary);
   font-size: 0.7rem;
+}
+
+/* The field takes no text until this is answered, so the question names what it
+   waits for in the accent the border already wears. */
+.pasteOfferAsk {
+  color: var(--accent);
+  font-size: 0.7rem;
+  font-weight: 650;
 }
 
 .pasteOfferActions {

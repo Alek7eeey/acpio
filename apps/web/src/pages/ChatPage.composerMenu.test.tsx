@@ -5,7 +5,7 @@
 // the way out, the bubble hides it again and shows the mode over the message.
 // The basic editing rows (paste, select all, undo, redo) come after them.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { DEFAULT_SETTINGS, type MessageDto, type SessionDetailDto } from "@acpio/shared";
@@ -243,6 +243,31 @@ describe("right click in the composer", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   }, 20_000);
 
+  // Every door to the mode is a press on a menu that closes itself, and the
+  // mode is only worth switching to write in it: the caret goes back into the
+  // field without a second click, whichever door was used.
+  it("hands the caret back to the field after a pick", async () => {
+    useAppStore.setState({
+      settings: { ...DEFAULT_SETTINGS, locale: "ru", chatMetaChips: ["promptMode"] },
+    } as never);
+    const { container } = renderChat();
+    const input = container.querySelector("textarea")!;
+
+    // The chip over the field.
+    await userEvent.click(screen.getByRole("button", { name: "Режим промпта: Агент" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "План" }));
+    await waitFor(() => expect(document.activeElement).toBe(input));
+
+    // The field's own right click.
+    menuOf(input);
+    await userEvent.click(screen.getByRole("menuitem", { name: "Вопрос" }));
+    await waitFor(() => expect(document.activeElement).toBe(input));
+
+    // The cross on the mode's pill, which is the way back to agent.
+    await userEvent.click(screen.getByRole("button", { name: "Вернуться к агенту" }));
+    await waitFor(() => expect(document.activeElement).toBe(input));
+  }, 20_000);
+
   // On a phone the paperclip keeps its two doors: a tap picks a file from the
   // device, a long press (the browser's own contextmenu) from the server. The
   // mode never answers either of them.
@@ -302,6 +327,45 @@ describe("right click in the composer", () => {
     expect(
       screen.getByRole("menuitem", { name: "План" }).getAttribute("aria-current"),
     ).toBe("true");
+  }, 20_000);
+
+  // Shift alone over the field steps the ring of modes and wraps at the end:
+  // the whole switcher without opening it. It is a press the key makes on its
+  // own — a Shift that types a capital letter is that letter's, not a step.
+  it("steps the mode on a Shift press alone", async () => {
+    useAppStore.setState({
+      settings: { ...DEFAULT_SETTINGS, locale: "ru", chatMetaChips: ["promptMode"] },
+    } as never);
+    const { container } = renderChat();
+    const input = container.querySelector("textarea")!;
+    /** The mode the chat is in: agent is the absence of an entry. */
+    const mode = () => useAppStore.getState().composerModes["s1"] ?? "agent";
+    const shiftTap = () => {
+      fireEvent.keyDown(input, { key: "Shift", shiftKey: true });
+      fireEvent.keyUp(input, { key: "Shift" });
+    };
+
+    shiftTap();
+    expect(mode()).toBe("plan");
+    // The chip above the field wears the mode the press reached, exactly as a
+    // row of its menu would have.
+    expect(screen.getByRole("button", { name: "Режим промпта: План" })).toBeTruthy();
+    shiftTap();
+    expect(mode()).toBe("ask");
+    shiftTap();
+    expect(mode()).toBe("investigate");
+    // The last mode wraps back to the first, and the ring starts over.
+    shiftTap();
+    expect(mode()).toBe("agent");
+    expect(screen.getByRole("button", { name: "Режим промпта: Агент" })).toBeTruthy();
+
+    // Shift+«Ж» is one capital letter: the key went down as part of something
+    // else, and the chat keeps the mode it had.
+    fireEvent.keyDown(input, { key: "Shift", shiftKey: true });
+    fireEvent.keyDown(input, { key: "Ж", shiftKey: true });
+    fireEvent.keyUp(input, { key: "Ж" });
+    fireEvent.keyUp(input, { key: "Shift" });
+    expect(mode()).toBe("agent");
   }, 20_000);
 
   // The pencil in the queue hands a request's text down to the field. The mode

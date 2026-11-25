@@ -1560,6 +1560,45 @@ describe("BoardPage new task form", () => {
     expect(within(group).getByPlaceholderText("Describe the task…")).toBeTruthy();
   });
 
+  // Shift alone over the description steps the mode the task is written in, the
+  // last one wrapping back to the first: the whole ring without opening a menu.
+  // A Shift that types a capital letter stays that letter's.
+  it("steps the mode of a task being written on a Shift press", async () => {
+    renderBoard();
+    await screen.findByText("Fix the login bug");
+    const group = document.querySelector("[data-group]") as HTMLElement;
+    await userEvent.click(within(group).getByLabelText("New task"));
+    const field = within(group).getByPlaceholderText("Describe the task…");
+    const shiftTap = () => {
+      fireEvent.keyDown(field, { key: "Shift", shiftKey: true });
+      fireEvent.keyUp(field, { key: "Shift" });
+    };
+    // Agent is the absence of a pill, so the pill's own word is the mode in
+    // force.
+    const pillMode = () =>
+      ["Plan", "Ask", "Investigate"].find((name) =>
+        within(group).queryByRole("button", { name }),
+      ) ?? null;
+
+    shiftTap();
+    expect(pillMode()).toBe("Plan");
+    shiftTap();
+    expect(pillMode()).toBe("Ask");
+    shiftTap();
+    expect(pillMode()).toBe("Investigate");
+    // The ring closes on the first mode: back to agent, which is a pill no more.
+    shiftTap();
+    expect(pillMode()).toBeNull();
+
+    // Shift+«Ж» is a capital letter: the press was part of the letter, and the
+    // task keeps the mode it had.
+    fireEvent.keyDown(field, { key: "Shift", shiftKey: true });
+    fireEvent.keyDown(field, { key: "Ж", shiftKey: true });
+    fireEvent.keyUp(field, { key: "Ж" });
+    fireEvent.keyUp(field, { key: "Shift" });
+    expect(pillMode()).toBeNull();
+  });
+
   // A phone has no right button, so the form's paperclip keeps its two doors:
   // a tap picks a file from the device, a long press (the browser's own
   // contextmenu) from the server. The mode never answers either of them — on a

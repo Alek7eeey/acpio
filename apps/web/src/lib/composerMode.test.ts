@@ -6,6 +6,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   composerModeOf,
+  nextComposerMode,
   readComposerModes,
   storeComposerMode,
   stripComposerMode,
@@ -30,6 +31,15 @@ describe("withComposerMode", () => {
   it("backs off an explicit command the reader typed themselves", () => {
     expect(withComposerMode("/compact", "plan")).toBe("/compact");
     expect(withComposerMode("  /ask про это", "plan")).toBe("  /ask про это");
+  });
+});
+
+describe("nextComposerMode", () => {
+  it("steps the menu's order and wraps the last mode back to the first", () => {
+    expect(nextComposerMode("agent")).toBe("plan");
+    expect(nextComposerMode("plan")).toBe("ask");
+    expect(nextComposerMode("ask")).toBe("investigate");
+    expect(nextComposerMode("investigate")).toBe("agent");
   });
 });
 

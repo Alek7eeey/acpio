@@ -377,6 +377,9 @@ export function ComposerMetaChips({
       } else if (id === "promptMode") {
         const label = t(COMPOSER_MODE_LABEL_KEY[promptMode]);
         const title = t("chat.modeChipTitle", { name: label });
+        // The tooltip names the gesture too: a reader who never opens the popup
+        // still finds the key that steps the ring.
+        const hint = `${title} · ${t("chat.modeShiftHint")}`;
         // An icon, not a pill: the row above the field is a line of chips, and a
         // fifth one carrying a word read as a status shouting over the field it
         // belongs to. The glyph changes with the mode; the word lives in the
@@ -389,7 +392,7 @@ export function ComposerMetaChips({
             aria-haspopup="menu"
             aria-expanded={modeMenuAnchor != null}
             aria-label={title}
-            title={title}
+            title={hint}
             disabled={composerLocked}
             onClick={(event) => {
               const el = event.currentTarget;

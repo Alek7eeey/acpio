@@ -20,6 +20,12 @@ export const COMPOSER_MODE_LABEL_KEY: Record<ComposerMode, string> = {
   investigate: "chat.modeInvestigate",
 };
 
+/** The mode after `mode` in the menu's order, the last one wrapping back to the
+ *  first: Shift over the field steps the same ring the menu lists. */
+export function nextComposerMode(mode: ComposerMode): ComposerMode {
+  return COMPOSER_MODES[(COMPOSER_MODES.indexOf(mode) + 1) % COMPOSER_MODES.length];
+}
+
 /** The modes by session id, kept in the browser: a mode survives a reload. */
 const STORAGE_KEY = "acpio.composerModes.v1";
 

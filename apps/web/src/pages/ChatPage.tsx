@@ -70,7 +70,7 @@ import {
   setComposerDraftFiles,
 } from "../lib/composerDrafts";
 import { splitLinkNames } from "../lib/linkNames";
-import { isLargePastedText, pastedTextFileName, spliceComposerText } from "../lib/pasteAsFile";
+import { isLargePastedText, pastedTextFileName } from "../lib/pasteAsFile";
 import { useChatSplitAllowed } from "../lib/panelLayout";
 import { isTypingKey, useFixedMenuPlacement } from "../lib/menuPosition";
 import { sanitizeCatalogModes, selectLiveSessionDetail, useAppStore, type PendingAttachment } from "../lib/store";
@@ -170,6 +170,7 @@ import {
   stripComposerMode,
   type ComposerMode,
 } from "../lib/composerMode";
+import { useShiftModeCycle } from "../lib/useShiftModeCycle";
 import { shouldShowGitComposerUi } from "../lib/gitUi";
 import { composerEditShortcuts, isAppleUi } from "../lib/editShortcuts";
 // The mode palette, read by the pill, the switcher and the sent message alike.
@@ -5160,6 +5161,17 @@ function ChatThread() {
    *  replaced. The block is not in the composer while the offer waits, so the
    *  range is kept aside and the text goes back in exactly there. */
   const pasteOfferAtRef = useRef<{ start: number; end: number } | null>(null);
+  /** An unanswered offer holds the field: it takes no text until the reader
+   *  says whether the block is a file or the text itself (see the textarea's
+   *  `readOnly`), and the caret sits on the answer meanwhile. */
+  const pasteOfferPending = pasteOffer !== null;
+  const pasteOfferAnswerRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!pasteOfferPending) return;
+    // The question is the next thing the reader has to do, and the field they
+    // were typing in no longer takes a key: the caret moves onto the answer.
+    requestAnimationFrame(() => pasteOfferAnswerRef.current?.focus({ preventScroll: true }));
+  }, [pasteOfferPending]);
   const [attachDialogOpen, setAttachDialogOpen] = useState(false);
   /** Native picker for files on the device the browser runs on. */
   const deviceFileInputRef = useRef<HTMLInputElement>(null);
@@ -6474,16 +6486,15 @@ function ChatThread() {
   }, [editingQueueId, promptQueueAll]);
 
   const submitMessage = (raw: string) => {
-    // A big paste still waiting for its answer must not be lost: sending
-    // without a choice means «paste as text», and the block goes back into the
-    // very range the paste replaced — not onto the end of what is typed.
+    // An unanswered offer holds the field: the block is neither in the text nor
+    // decided yet, so a prompt sent now would go out without it — and «as text»
+    // is an answer the reader never gave. The question's own buttons are the
+    // only way past it.
+    if (pasteOfferPending) return;
     // The text leaves as it was typed: an attached file is named here, and the
     // address the agent reads is written into its copy of the prompt on the
     // server — the message the reader sees keeps the name (see `UserMessage`).
-    const value =
-      pasteOffer === null
-        ? raw.trim()
-        : spliceComposerText(raw, pasteOffer, pasteOfferAtRef.current).trim();
+    const value = raw.trim();
     // Rewriting a queued request: the composer is its editor, so this is a
     // write back into the queue — nothing goes to the agent here. An empty text
     // is not worth a row, so the request keeps the text it had.
@@ -6570,7 +6581,15 @@ function ChatThread() {
     setComposerMenu(null);
     if (editingQueueId) setQueuedPromptMode(editingQueueId, mode);
     else if (sessionId) setComposerMode(sessionId, mode);
+    // Every door to the mode is a press on a menu that closes itself, and the
+    // row that was pressed leaves with the focus: the mode is only worth
+    // switching to write in it, so the caret goes back to the field at once.
+    requestAnimationFrame(() => textareaRef.current?.focus({ preventScroll: true }));
   };
+
+  /** Shift on its own over the field steps the mode, through the same door the
+   *  menu row takes — a queued request keeps its own mode either way. */
+  const shiftMode = useShiftModeCycle(composerMode, chooseComposerMode);
 
   /**
    * Every row of the input's right-click menu writes itself into the field and
@@ -8465,18 +8484,23 @@ function ChatThread() {
                 </div>
               )}
           </div>
-          {pasteOffer !== null && (
+          {pasteOfferPending && (
             <div
               className={styles.pasteOffer}
               role="group"
               aria-label={t("chat.pasteAsFileTitle")}
+              aria-live="polite"
             >
               <span className={styles.pasteOfferCopy}>
                 <span className={styles.pasteOfferTitle}>{t("chat.pasteAsFileTitle")}</span>
                 <span className={styles.pasteOfferHint}>{t("chat.pasteAsFileHint")}</span>
+                {/* The field is shut until this is answered: the line says so
+                    where the answer is, not in a tooltip. */}
+                <span className={styles.pasteOfferAsk}>{t("chat.pasteAsFileHold")}</span>
               </span>
               <span className={styles.pasteOfferActions}>
                 <button
+                  ref={pasteOfferAnswerRef}
                   type="button"
                   className={styles.pasteOfferPrimary}
                   onClick={pasteOfferAsFile}
@@ -8700,8 +8724,8 @@ function ChatThread() {
             className={`${styles.pill} ${composerMultiline ? styles.pillMultiline : ""} ${
               turnBusy ? styles.pillBusy : ""
             } ${composerLocked ? styles.pillLoading : ""} ${
-              attachmentLinks.length ? styles.pillPainted : ""
-            }`}
+              pasteOfferPending ? styles.pillHeld : ""
+            } ${attachmentLinks.length ? styles.pillPainted : ""}`}
           >
             <SlashCommandMenu
               open={slashMenuOpen}
@@ -8760,6 +8784,8 @@ function ChatThread() {
               }}
               onKeyUp={(e) => {
                 setCursorPos(e.currentTarget.selectionStart);
+                // A locked field changes no mode: its prompts cannot go out.
+                if (!composerLocked && !pasteOfferPending) shiftMode.onKeyUp(e);
               }}
               onPaste={(e) => {
                 if (composerLocked || rewriting) return;
@@ -8784,22 +8810,33 @@ function ChatThread() {
                 offerPasteAsFile(pasted, { start, end });
               }}
               placeholder={
-                planRejecting
-                  ? t("question.planRejectHint")
-                  : (slashInputHint ??
-                    (chatInitializing
-                      ? ""
-                      : composerLocked && !agentMissing && !agentUnavailable
-                        ? t("common.loadingModels")
-                        : t("common.messageOrCommand")))
+                pasteOfferPending
+                  ? t("chat.pasteAsFileHold")
+                  : planRejecting
+                    ? t("question.planRejectHint")
+                    : (slashInputHint ??
+                      (chatInitializing
+                        ? ""
+                        : composerLocked && !agentMissing && !agentUnavailable
+                          ? t("common.loadingModels")
+                          : t("common.messageOrCommand")))
               }
               rows={1}
               disabled={composerLocked}
-              readOnly={composerLocked}
+              readOnly={composerLocked || pasteOfferPending}
               aria-busy={composerLocked || undefined}
               onKeyDown={(e) => {
+                // Every key counts, locked field or not: the shortcut is a press
+                // Shift makes alone, and Shift+«Ж» is a capital letter.
+                shiftMode.onKeyDown(e);
                 if (composerLocked) {
                   e.preventDefault();
+                  return;
+                }
+                // An unanswered offer holds the field: no key reaches the text,
+                // and Tab still walks into the question's own buttons.
+                if (pasteOfferPending) {
+                  if (e.key !== "Tab") e.preventDefault();
                   return;
                 }
                 // Recalling history takes two ↑ presses in a row: any other key
@@ -9050,7 +9087,7 @@ function ChatThread() {
                       title={listening ? t("chat.voiceListening") : t("chat.voiceInput")}
                       aria-label={listening ? t("chat.voiceListening") : t("chat.voiceInput")}
                       aria-pressed={listening}
-                      disabled={composerLocked || !voiceSupported}
+                      disabled={composerLocked || pasteOfferPending || !voiceSupported}
                       onClick={toggleVoiceInput}
                     >
                       <svg
@@ -9083,7 +9120,9 @@ function ChatThread() {
                       <button
                         type="submit"
                         className={styles.sendBtn}
-                        disabled={composerLocked || attachmentsUploading || !canSend}
+                        disabled={
+                          composerLocked || attachmentsUploading || !canSend || pasteOfferPending
+                        }
                         title={
                           agentMissing
                             ? t("common.noAgentsOnline")
@@ -9093,9 +9132,11 @@ function ChatThread() {
                               ? t("common.thisChatAgentOffline")
                             : composerLocked
                               ? t("common.loadingModels")
-                              : attachmentsUploading
-                                ? t("chat.attachmentUploading")
-                                : t("common.send")
+                              : pasteOfferPending
+                                ? t("chat.pasteAsFileHold")
+                                : attachmentsUploading
+                                  ? t("chat.attachmentUploading")
+                                  : t("common.send")
                         }
                         aria-label={t("common.send")}
                       >
