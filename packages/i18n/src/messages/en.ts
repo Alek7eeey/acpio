@@ -532,7 +532,7 @@ export const en = {
       "How full the window may get before the agent starts squeezing the conversation. 80 leaves room for the answer. Lower squeezes earlier: sharper answers, more paid retellings. Higher means fewer retellings, but a bigger chance of hitting the limit and getting an error.",
     builtinKeepRecentPercent: "Newest part kept word for word, %",
     builtinKeepRecentPercentHint:
-      "This slice of the conversation reaches the model exactly as written — it is what the agent continues the work from, so it should stay fresh. Everything older goes into the retelling (or is dropped). Always held at least 10 points below the start line: otherwise there would be nothing left to retell.",
+      "This slice of the conversation reaches the model exactly as written — it is what the agent continues the work from, so it should stay fresh. Everything older goes into the retelling (or is dropped). The field takes 5 to 90 — the lower it is, the deeper a pass squeezes (5% of a 1M window stays ~70k as the provider counts it). On top of that the value is held 10 points below the start line, as far as the floor allows: otherwise there would be nothing left to retell.",
     builtinMaxSummaryTokens: "Maximum retelling length, tokens",
     builtinMaxSummaryTokensHint:
       "A cap on the length of the retelling. If the model writes longer, the retelling will not fit and gets thrown away along with the request you paid for. 16 384 is safe for any window. 0 = no cap.",

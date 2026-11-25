@@ -309,7 +309,12 @@ export function normalizeBuiltinBashTimeoutSec(value: unknown): number {
 /** Bounds for the built-in agent's compaction knobs. */
 export const BUILTIN_COMPACTION_THRESHOLD_PERCENT_MIN = 10;
 export const BUILTIN_COMPACTION_THRESHOLD_PERCENT_MAX = 95;
-export const BUILTIN_KEEP_RECENT_PERCENT_MIN = 10;
+// A reader running a wide window (1M) wants the verbatim tail below the 10% the
+// old floor allowed: the tail is a share of the window, and at 10% a 1M chat
+// landed at ~150k billed per pass — measured over 295 passes, median landing 46%
+// of the trigger. 5 is the floor that still leaves the digest something to be
+// worth: below it the fold keeps less than the digest itself retells.
+export const BUILTIN_KEEP_RECENT_PERCENT_MIN = 5;
 export const BUILTIN_KEEP_RECENT_PERCENT_MAX = 90;
 export const BUILTIN_MAX_SUMMARY_TOKENS_MAX = 1_000_000;
 export const BUILTIN_PRUNE_TOOL_RESULTS_KEEP_LAST_MAX = 100;
