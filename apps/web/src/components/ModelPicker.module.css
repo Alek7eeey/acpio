@@ -18,8 +18,11 @@
   z-index: 150;
 }
 
-.block {
+/* Settings field width: a picker in a settings row stays a select's size, and
+   a row that needs more names `stack`. */
+.modelPicker.block {
   width: 100%;
+  max-width: var(--settings-control-max, 320px);
   align-self: stretch;
 }
 

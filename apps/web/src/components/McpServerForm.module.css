@@ -75,7 +75,7 @@
   width: 100%;
   min-height: 8rem;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--settings-control-radius);
   background: var(--bg-secondary);
   color: var(--text);
   font: 0.78rem/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;

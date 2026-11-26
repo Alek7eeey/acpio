@@ -1,59 +1,85 @@
+/**
+ * VS Code settings item: «Category: Name», description under it, control under
+ * that, and a bar on the left while the item is hovered or focused. No card
+ * and no hairlines — the page itself is the list.
+ */
 .table {
   display: flex;
   flex-direction: column;
+  /* A little air between the settings themselves — the only spacing a VS Code
+     list does not have, kept to a hair. */
+  gap: 4px;
+  min-width: 0;
+}
+
+/* A list in a box: one border around the rows, a hairline between them. */
+.tableFramed {
+  gap: 0;
   border: 1px solid var(--border);
   border-radius: var(--settings-control-radius);
-  /* No overflow:hidden — it would clip OptionPicker dropdowns. */
-  background: var(--surface);
-  /* As a grid/flex item, allow shrinking below the widest row's min-content
-     (long unbreakable hints) instead of inflating the container. */
-  min-width: 0;
+  overflow: hidden;
+}
+
+.tableFramed > .row {
+  padding: 10px 14px 12px;
+  border-radius: 0;
+}
+
+.tableFramed > .row + .row {
+  border-top: 1px solid var(--border-soft);
 }
 
 .row {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  padding: 12px 16px;
   position: relative;
-  z-index: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+  padding: 10px 12px 12px;
+  border-radius: var(--settings-control-radius);
 }
 
-.row:focus-within {
-  z-index: 2;
-}
-
-.row:first-child {
-  border-top-left-radius: calc(var(--settings-control-radius) - 1px);
-  border-top-right-radius: calc(var(--settings-control-radius) - 1px);
-}
-
-.row:last-child {
-  border-bottom-left-radius: calc(var(--settings-control-radius) - 1px);
-  border-bottom-right-radius: calc(var(--settings-control-radius) - 1px);
-}
-
-.row + .row {
-  border-top: 1px solid var(--border);
+.row::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  border-radius: 1px;
+  background: transparent;
 }
 
 .row:hover {
-  background: color-mix(in srgb, var(--bg-secondary) 45%, transparent);
+  background: color-mix(in srgb, var(--bg-secondary) 55%, transparent);
 }
 
-.text {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
+.row:hover::before {
+  background: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.row:focus-within {
+  background: color-mix(in srgb, var(--bg-secondary) 55%, transparent);
+}
+
+.row:focus-within::before {
+  background: var(--accent);
 }
 
 .label {
   font-size: var(--settings-label-size);
-  font-weight: var(--settings-label-weight);
+  line-height: 1.45;
   color: var(--text);
-  line-height: 1.35;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.category {
+  font-weight: var(--settings-category-weight, 400);
+  color: var(--text-secondary);
+}
+
+.name {
+  font-weight: var(--settings-label-weight);
 }
 
 .hint {
@@ -61,18 +87,98 @@
   font-weight: var(--settings-hint-weight);
   line-height: var(--settings-hint-line);
   color: var(--text-secondary);
-  /* Let long unbreakable hint content (URLs) shrink and ellipsize instead
-     of forcing the row wider than the table. */
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .control {
-  flex: 0 0 auto;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
-  justify-content: flex-end;
+  gap: 8px;
   min-width: 0;
+  max-width: 100%;
+}
+
+/* A field keeps the width of a VS Code setting; wide rows ask for `stack`. */
+/* Width only: a field that brings its own size keeps it (the number fields
+   stay narrow), and a field that asks for the row is capped at this width. */
+.row:not(.rowStack) > .control > :is(input:not([type="checkbox"]):not([type="radio"]):not([type="color"]), select, textarea) {
+  max-width: var(--settings-control-max, 320px);
+}
+
+/**
+ * A list row: title and description on the left, the control on the right.
+ * Used where a row shows the state of a thing rather than a form field.
+ */
+/* The control column has one width on every row: two switches of a list sit
+   on one vertical line, whatever the state word in front of them is. */
+.rowInline {
+  grid-template-columns: minmax(0, 1fr) 300px;
+  align-items: center;
+  column-gap: 20px;
+}
+
+.rowInline > .label {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.rowInline > .hint {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.rowInline > .control {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  width: 100%;
+  justify-content: flex-end;
+  max-width: none;
+  flex-wrap: wrap;
+}
+
+/**
+ * A boolean setting: the box sits left of the description, the way VS Code
+ * draws it under the title. Only a lone box — a row whose control is a box
+ * plus buttons keeps them all in a stack of their own.
+ */
+.row:not(.rowInline):has(> .control > .toggle:only-child) {
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 8px;
+}
+
+.row:not(.rowInline):has(> .control > .toggle:only-child) > .label {
+  grid-column: 1 / -1;
+}
+
+.row:not(.rowInline):has(> .control > .toggle:only-child) > .control {
+  grid-column: 1;
+  grid-row: 2;
+  align-self: start;
+  margin-top: 2px;
+}
+
+.row:not(.rowInline):has(> .control > .toggle:only-child) > .hint {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+/* Stacked rows: controls one under another, wider than a plain field. */
+.rowStack > .control {
+  width: 100%;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+/* Fields fill the row; an action keeps the width of its own words. */
+.rowStack > .control > button {
+  align-self: flex-start;
+}
+
+.rowStack > .control > :is(input, select, textarea) {
+  max-width: min(100%, var(--settings-control-wide, 560px));
 }
 
 .table input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),
@@ -82,10 +188,10 @@
   background: var(--bg);
   border-radius: var(--settings-control-radius);
   padding: var(--settings-control-pad-y) var(--settings-control-pad-x);
-  font-weight: var(--settings-control-weight);
+  font: inherit;
   font-size: var(--settings-control-size);
+  font-weight: var(--settings-control-weight);
   color: var(--text);
-  font-family: inherit;
   box-sizing: border-box;
 }
 
@@ -97,62 +203,69 @@
   box-shadow: var(--settings-focus-ring);
 }
 
-.table input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):disabled {
+.table input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):disabled,
+.table select:disabled,
+.table textarea:disabled {
   opacity: 0.7;
   cursor: default;
 }
 
-/* --- toggle --- */
+/* --- checkbox --- */
 .toggle {
   position: relative;
   display: inline-flex;
-  cursor: pointer;
+  width: 16px;
+  height: 16px;
   flex: 0 0 auto;
+  cursor: pointer;
 }
 
 .toggleInput {
   position: absolute;
+  inset: 0;
+  width: 16px;
+  height: 16px;
+  margin: 0;
   opacity: 0;
-  width: 0;
-  height: 0;
+  cursor: pointer;
 }
 
 .toggleTrack {
-  width: 38px;
-  height: 20px;
-  border-radius: 999px;
-  background: var(--border-strong, var(--border));
-  position: relative;
-  transition: background 0.15s ease;
-  flex: 0 0 auto;
-}
-
-.toggleKnob {
-  position: absolute;
-  top: 2px;
-  left: 2px;
+  display: grid;
+  place-items: center;
   width: 16px;
   height: 16px;
-  border-radius: 50%;
-  background: #fff;
-  transition: transform 0.15s ease;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  border: 1px solid color-mix(in srgb, var(--text-secondary) 80%, transparent);
+  border-radius: 4px;
+  background: var(--bg);
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+/* The tick is drawn, not set in a font: one box in any theme. */
+.toggleTrack::after {
+  content: "";
+  width: 8px;
+  height: 4px;
+  border-left: 1.6px solid #fff;
+  border-bottom: 1.6px solid #fff;
+  transform: translateY(-1px) rotate(-45deg);
+  opacity: 0;
 }
 
 .toggleInput:checked + .toggleTrack {
   background: var(--accent);
+  border-color: var(--accent);
 }
 
-.toggleInput:checked + .toggleTrack .toggleKnob {
-  transform: translateX(18px);
+.toggleInput:checked + .toggleTrack::after {
+  opacity: 1;
 }
 
 .toggleInput:focus-visible + .toggleTrack {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
 }
 
-/* Disabled switch: greyed out, and the label stops acting as a hit area. */
 .toggle:has(.toggleInput:disabled) {
   cursor: not-allowed;
 }
@@ -161,61 +274,105 @@
   opacity: 0.45;
 }
 
-.rowStack {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 10px;
+/* --- switch: the same input, an on/off pill for list rows --- */
+.toggleSwitch {
+  width: 40px;
+  height: 22px;
 }
 
-/**
- * A stacked row puts its controls one under another, full width. As a flex ROW
- * (the inline default) several children landed side by side in one line — a
- * button pressed against its own note, a list of rows squeezed into a strip.
- */
-.rowStack .control {
-  width: 100%;
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: flex-start;
-  gap: 8px;
+.toggleSwitch .toggleInput {
+  width: 40px;
+  height: 22px;
 }
 
-/* Fields fill the row; an action keeps the width of its own words. */
-.rowStack .control > button {
-  align-self: flex-start;
+.toggleSwitch .toggleTrack {
+  place-items: center start;
+  width: 40px;
+  height: 22px;
+  padding: 3px;
+  border: none;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-secondary) 32%, transparent);
 }
 
+.toggleSwitch .toggleTrack::after {
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 50%;
+  background: #fff;
+  transform: none;
+  opacity: 1;
+  transition: transform 0.15s ease;
+}
+
+.toggleSwitch .toggleInput:checked + .toggleTrack {
+  background: var(--accent);
+}
+
+.toggleSwitch .toggleInput:checked + .toggleTrack::after {
+  transform: translateX(18px);
+}
+
+/* Phones: a list row stacks — the control would leave the title a sliver. */
 @media (max-width: 700px) {
-  .row {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 8px;
-    padding: 12px 14px;
+  .rowInline {
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  .control {
+  .rowInline > .control {
+    grid-column: 1;
+    grid-row: auto;
     justify-content: flex-start;
-    width: 100%;
+    max-width: 100%;
     flex-wrap: wrap;
   }
 
-  .control > * {
-    max-width: 100%;
+  .tableFramed > .row {
+    padding: 10px 12px 12px;
   }
 }
 
-@media (min-width: 900px) {
-  .toggleTrack {
-    width: 42px;
-    height: 22px;
+/* Phones: a box a thumb can hit. */
+@media (max-width: 899px) {
+  .row {
+    padding: 10px 10px 12px;
   }
 
-  .toggleKnob {
-    width: 18px;
-    height: 18px;
+  .toggle:not(.toggleSwitch),
+  .toggle:not(.toggleSwitch) .toggleInput,
+  .toggle:not(.toggleSwitch) .toggleTrack {
+    width: 24px;
+    height: 24px;
   }
 
-  .toggleInput:checked + .toggleTrack .toggleKnob {
-    transform: translateX(20px);
+  .toggle:not(.toggleSwitch) .toggleTrack {
+    border-radius: 6px;
+  }
+
+  .toggle:not(.toggleSwitch) .toggleTrack::after {
+    width: 11px;
+    height: 6px;
+  }
+
+  .toggleSwitch,
+  .toggleSwitch .toggleInput {
+    width: 44px;
+    height: 26px;
+  }
+
+  .toggleSwitch .toggleTrack {
+    width: 44px;
+    height: 26px;
+    padding: 3px;
+  }
+
+  .toggleSwitch .toggleTrack::after {
+    width: 20px;
+    height: 20px;
+  }
+
+  .toggleSwitch .toggleInput:checked + .toggleTrack::after {
+    transform: translateX(18px);
   }
 }

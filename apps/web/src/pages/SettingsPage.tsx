@@ -105,7 +105,7 @@ import { BuiltinModelsEditor } from "../components/BuiltinModelsEditor";
 import { BuiltinProviderLimits } from "../components/BuiltinProviderLimits";
 import { OptionPicker } from "../components/OptionPicker";
 import { PathPickField, PickButton } from "../components/PathPickField";
-import { SettingRow, SettingTable, Toggle } from "../components/SettingRow";
+import { SettingRow, SettingTable, SettingsCategoryProvider, Toggle } from "../components/SettingRow";
 import { ChatSettingsPreview } from "../components/ChatSettingsPreview";
 import { getDiagnosticsDump, submitDiagnosticsDump } from "../lib/diagnostics";
 import { startReadAloud, stopReadAloud } from "../lib/tts";
@@ -1742,16 +1742,23 @@ export function SettingsPage() {
   }, [settingsQuery, t, searchIndex]);
   const [form, setForm] = useState<AppSettings>(settings);
   /**
-   * The payload the last Save persisted. The footer button is disabled while
-   * the form matches it — right after a save, and on a page nobody edited — and
-   * lights up as soon as an edit is only in the form: an MCP server added to the
-   * list (or a draft applied) is not saved until that button is pressed.
+   * The payload the last Save persisted. The header's Save button is disabled
+   * while the form matches it — right after a save, and on a page nobody
+   * edited — and lights up as soon as an edit is only in the form: an MCP
+   * server added to the list (or a draft applied) is not saved until that
+   * button is pressed.
    */
   const [savedSnapshot, setSavedSnapshot] = useState(() => saveGatedSnapshot(settings));
   const formDirty = useMemo(
     () => saveGatedSnapshot(form) !== savedSnapshot,
     [form, savedSnapshot],
   );
+  /** Pages whose settings are one form and one Save; Connect and Remote act on
+   *  a press of their own, and the app page exports a file instead. */
+  const pageHasSave =
+    section === "interface" ||
+    section === "builtin" ||
+    (section === "agent" && leaf !== "connect" && leaf !== "remote");
   /**
    * The output-ceiling field is a free-text number input, like the chat-tree
    * limit: keep the raw string while the user types so a half-erased value
@@ -2595,7 +2602,9 @@ export function SettingsPage() {
                           ? t("settings.mcpTitle")
                           : leaf === "plugins"
                             ? t("settings.pluginsTitle")
-                            : t("settings.agentAdvancedTitle")
+                            : leaf === "cli"
+                              ? t("settings.cliTitle")
+                              : t("settings.agentAdvancedTitle")
               : t("settings.agentConnectTitle");
 
   const subtitle =
@@ -2619,8 +2628,10 @@ export function SettingsPage() {
                 ? t("settings.mcpHint")
                 : section === "agent" && leaf === "plugins"
                   ? t("settings.pluginsHint")
-                  : section === "agent" && leaf === "advanced"
-                    ? t("settings.agentAdvancedDesc")
+                  : section === "agent" && leaf === "cli"
+                    ? t("settings.cliDesc")
+                    : section === "agent" && leaf === "advanced"
+                      ? t("settings.agentAdvancedDesc")
                     : section === "agent" && leaf === "remote"
                       ? t("settings.remoteAccessDesc")
                       : section === "agent" && leaf === "diagnostics"
@@ -2675,6 +2686,7 @@ export function SettingsPage() {
           </button>
         ) : null}
       </div>
+      <SettingsCategoryProvider value={eyebrow}>
       <form
         className={`${styles.panel}${section === "interface" && leaf === "chat" ? ` ${styles.panelChat}` : ""}`}
         onSubmit={(e) => void onSubmit(e)}
@@ -2719,6 +2731,13 @@ export function SettingsPage() {
             <h1>{highlightText(title, settingsQuery)}</h1>
             <p className={styles.lead}>{highlightText(subtitle, settingsQuery)}</p>
           </div>
+          {pageHasSave ? (
+            <div className={styles.headerActions}>
+              <button type="submit" className={styles.primaryBtn} disabled={!formDirty}>
+                {t("common.save")}
+              </button>
+            </div>
+          ) : null}
         </header>
         )}
 
@@ -2728,7 +2747,7 @@ export function SettingsPage() {
         {section === "agent" && leaf === "connect" && (
           <>
             <p className={styles.hint}>{t("settings.agentEnabledHint")}</p>
-            <SettingTable>
+            <SettingTable framed>
               {providerRows.map((item) => {
                 const known = agentAvailability[item.id];
                 const checking = item.enabled && known !== true && known !== false;
@@ -2736,6 +2755,7 @@ export function SettingsPage() {
                 return (
                   <SettingRow
                     key={item.id}
+                    layout="row"
                     terms={[
                       item.title,
                       item.description,
@@ -2756,6 +2776,7 @@ export function SettingsPage() {
                               : t("common.offline")}
                       </span>
                       <Toggle
+                        variant="switch"
                         checked={item.enabled}
                         onChange={(next) => setProviderEnabled(item.id, next)}
                         label={t("settings.enabled")}
@@ -2765,8 +2786,9 @@ export function SettingsPage() {
                 );
               })}
             </SettingTable>
-            <SettingTable>
+            <SettingTable framed>
               <SettingRow
+                layout="row"
                 label={t("settings.defaultAgent")}
                 hint={t("settings.defaultAgentHint")}
                 terms={[t("settings.defaultAgent"), t("settings.defaultAgentHint")]}
@@ -2774,6 +2796,7 @@ export function SettingsPage() {
                 <OptionPicker
                   variant="block"
                   placement="down"
+                  className={styles.rowPicker}
                   menuTitle={t("settings.defaultAgent")}
                   value={form.defaultProvider}
                   onChange={(v) => {
@@ -2794,10 +2817,11 @@ export function SettingsPage() {
             </SettingTable>
 
             <p className={styles.hint}>{t("settings.customAgentsHint")}</p>
-            <SettingTable>
+            <SettingTable framed>
               {customAgents.map((agent) => (
                 <SettingRow
                   key={agent.id}
+                  layout="row"
                   terms={[
                     t("settings.customAgents"),
                     agent.label,
@@ -2846,6 +2870,7 @@ export function SettingsPage() {
               ))}
               {customAgents.length === 0 ? (
                 <SettingRow
+                  layout="row"
                   label={t("settings.customAgentsEmpty")}
                   hint={t("settings.customAgentsEmptyHint")}
                 />
@@ -3756,9 +3781,7 @@ export function SettingsPage() {
                           update({ enabled: !on });
                         }}
                       >
-                        <span className={styles.providerSwitchTrack} aria-hidden>
-                          <span className={styles.providerSwitchKnob} />
-                        </span>
+                        <span className={styles.providerSwitchTrack} aria-hidden />
                       </button>
                       <button
                         type="button"
@@ -4760,8 +4783,82 @@ export function SettingsPage() {
               </SearchGate>
             )}
 
-            <SearchGate terms={[t("settings.apiKeys"), "api", ...apiKeyRows.flatMap((row) => [row.label, row.env])]}>
-              <h2 className={styles.sectionHeading}>{highlightText(t("settings.apiKeys"), settingsQuery)}</h2>
+          </>
+        )}
+
+        {/* The launch command of every harness and the keys it calls its
+            provider with: one page of their own, out from under the folders
+            and the permissions of the Advanced leaf. */}
+        {section === "agent" && leaf === "cli" && (
+          <>
+            <SearchGate
+              terms={[
+                t("settings.cliLaunchTitle"),
+                t("settings.cliAndPermissions"),
+                ...adapters.flatMap((a) => [a.label, a.defaultCommand, ...a.defaultArgs]),
+              ]}
+            >
+              <h2 className={styles.sectionHeading}>
+                {highlightText(t("settings.cliLaunchTitle"), settingsQuery)}
+              </h2>
+              <SettingTable>
+                {adapters
+                  .filter((a) => a.custom !== true && a.commandField)
+                  .map((a) => {
+                    const command = String(
+                      (form as unknown as Record<string, unknown>)[a.commandField] ?? "",
+                    );
+                    const args = (form as unknown as Record<string, unknown>)[a.argsField];
+                    return (
+                      <SettingRow
+                        key={a.id}
+                        layout="stack"
+                        label={a.label}
+                        hint={`${t("common.default")}: ${a.defaultCommand}`}
+                        terms={[a.label, a.defaultCommand, ...a.defaultArgs]}
+                      >
+                        <div className={styles.cliFields}>
+                          <label className={styles.cliField}>
+                            <span className={styles.cliFieldLabel}>
+                              {t("settings.cliCommand")}
+                            </span>
+                            <input
+                              value={command}
+                              onChange={(e) => patchAny(a.commandField, e.target.value)}
+                              placeholder={a.defaultCommand}
+                              aria-label={`${a.label} · ${t("settings.cliCommand")}`}
+                            />
+                          </label>
+                          <label className={styles.cliField}>
+                            <span className={styles.cliFieldLabel}>
+                              {t("settings.cliArgs")}
+                            </span>
+                            <input
+                              value={Array.isArray(args) ? args.join(" ") : ""}
+                              onChange={(e) =>
+                                patchAny(a.argsField, e.target.value.split(/\s+/).filter(Boolean))
+                              }
+                              placeholder={a.defaultArgs.join(" ")}
+                              aria-label={`${a.label} · ${t("settings.cliArgs")}`}
+                            />
+                          </label>
+                        </div>
+                      </SettingRow>
+                    );
+                  })}
+              </SettingTable>
+            </SearchGate>
+
+            <SearchGate
+              terms={[
+                t("settings.apiKeys"),
+                "api",
+                ...apiKeyRows.flatMap((row) => [row.label, row.env]),
+              ]}
+            >
+              <h2 className={styles.sectionHeading}>
+                {highlightText(t("settings.apiKeys"), settingsQuery)}
+              </h2>
               <SettingTable>
                 {apiKeyRows.map((item) => {
                   const value = form[item.key] ?? "";
@@ -4791,60 +4888,6 @@ export function SettingsPage() {
                   );
                 })}
               </SettingTable>
-            </SearchGate>
-
-            <SearchGate
-              terms={[
-                t("settings.cliAndPermissions"),
-                t("settings.agentAdvancedDesc"),
-                ...adapters.flatMap((a) => [a.label, a.defaultCommand, ...a.defaultArgs]),
-              ]}
-            >
-            <details className={styles.cliDisclosure}>
-              <summary>{highlightText(t("settings.cliAndPermissions"), settingsQuery)}</summary>
-              <div className={styles.cliDisclosureBody}>
-                <p className={styles.fieldHint}>{highlightText(t("settings.agentAdvancedDesc"), settingsQuery)}</p>
-                <SettingTable>
-                  {adapters
-                    .filter((a) => a.custom !== true && a.commandField)
-                    .map((a) => {
-                    const command = String(
-                      (form as unknown as Record<string, unknown>)[a.commandField] ?? "",
-                    );
-                    const args = (form as unknown as Record<string, unknown>)[a.argsField];
-                    const apiKeyField = a.apiKeyField;
-                    const apiKey = apiKeyField
-                      ? String((form as unknown as Record<string, unknown>)[apiKeyField] ?? "")
-                      : "";
-                    return (
-                      <SettingRow key={a.id} layout="stack" label={a.label} terms={[a.label, a.defaultCommand]}>
-                        <div className={styles.cliFields}>
-                          <input
-                            value={command}
-                            onChange={(e) => patchAny(a.commandField, e.target.value)}
-                            placeholder={a.defaultCommand}
-                          />
-                          <input
-                            value={Array.isArray(args) ? args.join(" ") : ""}
-                            onChange={(e) =>
-                              patchAny(a.argsField, e.target.value.split(/\s+/).filter(Boolean))
-                            }
-                            placeholder={a.defaultArgs.join(" ")}
-                          />
-                          {apiKeyField ? (
-                            <input
-                              value={apiKey}
-                              onChange={(e) => patchAny(apiKeyField, e.target.value)}
-                              placeholder={a.envApiKeyName ?? "API key"}
-                            />
-                          ) : null}
-                        </div>
-                      </SettingRow>
-                    );
-                  })}
-                </SettingTable>
-              </div>
-            </details>
             </SearchGate>
           </>
         )}
@@ -5026,12 +5069,13 @@ export function SettingsPage() {
                 {t("settings.mcpApplyHint")}
               </div>
             </SearchGate>
-            <SettingTable>
+            <SettingTable framed>
               {/* acpio's own servers: no endpoint to edit, no row to delete —
                   the same switch every other server has. */}
               {builtinMcpServers(form).map((server) => (
                 <SettingRow
                   key={server.id}
+                  layout="row"
                   terms={[server.name, t("settings.mcpBuiltin"), mcpServerEndpoint(server)]}
                   label={
                     <span className={styles.mcpRowMetaInline}>
@@ -5044,6 +5088,7 @@ export function SettingsPage() {
                   }
                 >
                   <Toggle
+                    variant="switch"
                     checked={Boolean(server.enabled)}
                     onChange={(v) =>
                       patch(
@@ -5064,6 +5109,7 @@ export function SettingsPage() {
                 return (
                   <SettingRow
                     key={server.id}
+                    layout="row"
                     terms={[server.name, server.label, t("settings.pluginsTitle")]}
                     label={
                       <span className={styles.mcpRowMetaInline}>
@@ -5082,6 +5128,7 @@ export function SettingsPage() {
                     }
                   >
                     <Toggle
+                      variant="switch"
                       checked={!off}
                       disabled={!server.configured}
                       onChange={(v) =>
@@ -5100,6 +5147,7 @@ export function SettingsPage() {
               {mcpServers.map((server) => (
                 <SettingRow
                   key={server.id}
+                  layout="row"
                   terms={[
                     server.name,
                     mcpServerEndpoint(server),
@@ -5142,6 +5190,7 @@ export function SettingsPage() {
                   }
                 >
                   <Toggle
+                    variant="switch"
                     checked={Boolean(server.enabled)}
                     onChange={(v) => updateMcp(server.id, { enabled: v })}
                     label={server.enabled ? t("settings.enabled") : t("settings.disabled")}
@@ -5169,7 +5218,11 @@ export function SettingsPage() {
                 </SettingRow>
               ))}
               {mcpServers.length === 0 ? (
-                <SettingRow label={t("settings.mcpHint")} hint={t("settings.mcpEmptyHint")} />
+                <SettingRow
+                  layout="row"
+                  label={t("settings.mcpHint")}
+                  hint={t("settings.mcpEmptyHint")}
+                />
               ) : null}
             </SettingTable>
 
@@ -5204,7 +5257,7 @@ export function SettingsPage() {
               />
             )}
 
-            <SettingTable>
+            <SettingTable framed>
               <SettingRow
                 layout="stack"
                 label={t("settings.mcpFolderFilesTitle")}
@@ -5756,18 +5809,10 @@ export function SettingsPage() {
           </>
         )}
 
-        {(section === "interface" ||
-          section === "builtin" ||
-          (section === "agent" && leaf !== "connect" && leaf !== "remote")) && (
-          <div className={styles.footerBar}>
-            <button type="submit" disabled={!formDirty}>
-              {t("common.save")}
-            </button>
-          </div>
-        )}
         </div>)}
         </SettingsSearchProvider>
       </form>
+      </SettingsCategoryProvider>
     </div>
   );
 }

@@ -1,46 +1,50 @@
 /**
- * Shared settings UI tokens — import wherever settings controls/text are styled
- * (SettingRow, SettingsPage). Keep control + typography metrics identical.
+ * Shared settings UI tokens — VS Code settings-editor metrics: compact fields,
+ * 13px text, corners rounded a little. Import wherever settings controls/text
+ * are styled (SettingRow, SettingsPage). Keep control + typography metrics
+ * identical.
  */
 :root {
-  --settings-label-size: 0.92rem;
+  --settings-label-size: 0.86rem;
   --settings-label-weight: 600;
+  --settings-category-weight: 400;
   --settings-hint-size: 0.8rem;
-  --settings-hint-weight: 500;
-  --settings-hint-line: 1.4;
-  --settings-section-size: 0.92rem;
-  --settings-section-weight: 700;
-  --settings-control-radius: 10px;
-  --settings-control-pad-y: 11px;
-  --settings-control-pad-x: 12px;
-  --settings-control-weight: 500;
-  --settings-control-size: 0.88rem;
-  --settings-btn-weight: 650;
+  --settings-hint-weight: 400;
+  --settings-hint-line: 1.5;
+  --settings-section-size: 1rem;
+  --settings-section-weight: 600;
+  --settings-control-radius: 6px;
+  --settings-control-pad-y: 4px;
+  --settings-control-pad-x: 8px;
+  --settings-control-weight: 400;
+  --settings-control-size: 0.84rem;
+  /* A field keeps a VS Code setting's width; a `stack` row may grow wider. */
+  --settings-control-max: 320px;
+  --settings-control-wide: 560px;
+  --settings-btn-weight: 500;
   --settings-btn-size: 0.82rem;
-  --settings-btn-pad-y: 7px;
+  --settings-btn-pad-y: 5px;
   --settings-btn-pad-x: 12px;
-  --settings-note-pad-y: 10px;
-  --settings-note-pad-x: 12px;
-  --settings-focus-ring: 0 0 0 4px var(--accent-soft);
+  --settings-note-pad-y: 8px;
+  --settings-note-pad-x: 10px;
+  --settings-focus-ring: 0 0 0 1px var(--accent);
 }
 
-/* Desktop: fields and buttons a bit larger; phones keep the compact tokens. */
-@media (min-width: 900px) {
-  :root {
-    --settings-control-size: 0.94rem;
-    --settings-control-pad-y: 13px;
-    --settings-control-pad-x: 14px;
-    --settings-btn-size: 0.9rem;
-    --settings-btn-pad-y: 10px;
-    --settings-btn-pad-x: 14px;
-  }
-}
-
-/* Phones: buttons match fields (desktop buttons stay slightly smaller than fields). */
+/* Phones: fields are finger-sized (≥44px), take the full width of the row,
+   and the text around them grows with them — a 14px label over a 46px field
+   reads as a caption, not as the setting's name. */
 @media (max-width: 899px) {
   :root {
-    --settings-btn-size: var(--settings-control-size);
-    --settings-btn-pad-y: var(--settings-control-pad-y);
-    --settings-btn-pad-x: var(--settings-control-pad-x);
+    --settings-label-size: 1.05rem;
+    --settings-hint-size: 0.95rem;
+    --settings-section-size: 1.15rem;
+    --settings-control-pad-y: 10px;
+    --settings-control-pad-x: 14px;
+    --settings-control-size: 1rem;
+    --settings-control-max: 100%;
+    --settings-control-wide: 100%;
+    --settings-btn-size: 1rem;
+    --settings-btn-pad-y: 9px;
+    --settings-btn-pad-x: 16px;
   }
 }

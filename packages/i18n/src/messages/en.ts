@@ -469,8 +469,7 @@ export const en = {
     builtinTitle: "Built-in agent",
     builtinDesc:
       "Agent that runs inside the server — no CLI to install. Add one or more OpenAI-compatible endpoints and tick the models the agent may use.",
-    builtinHint:
-      "Works out of the box: reads and edits files in the chat folder, runs commands and asks for permission like any other harness.",
+    builtinHint: "Reads and edits the chat folder, runs commands and asks for permissions.",
     builtinBlockGenerationContext: "Generation and context",
     builtinBlockProviders: "Providers and models",
     builtinBlockPrompt: "Prompt",
@@ -478,7 +477,7 @@ export const en = {
     builtinBlockSubagents: "Subagents",
     builtinPresetsTitle: "Agent presets",
     builtinPresetsHint:
-      "Your own cuts of the built-in agent for a specific kind of work: say “Chat (Fast)” for the same model with less thinking and no turn retries, and “Chat (Think)” for the one with room to reason. Every preset joins the agent picker — when a chat or a board task is created — exactly like the built-in agent. An empty field means “as set above”, so a preset overrides only what it fills in.",
+      "Your own cuts of the built-in agent: a preset joins the agent picker and overrides only the fields it fills.",
     builtinPresetsEmpty: "No presets yet — add your own cut of the agent.",
     builtinPresetsAdd: "Add preset",
     builtinPresetDefaultLabel: "Built-in ({{id}})",
@@ -646,15 +645,14 @@ export const en = {
     builtinSkillPathsReset: "Reset to defaults",
     builtinProjectRulesTitle: "Project rules",
     builtinProjectRulesHint:
-      "Files the built-in agent reads as the repository's own rules — AGENTS.md, the Cursor-compatible .cursor/rules — one glob per line, relative to each chat's folder (default: AGENTS.md, .cursorrules, .cursor/rules/**/*.mdc). `~` is the server user's home: those rules sit outside the chat and apply to every project (e.g. ~/.agents/rules/**/*.md). A rule that always applies is added to the system prompt; one gated on globs is listed by path and read when a matching file is touched — a `~` rule arrives on its own once a matching file is touched. Clear the list to turn project rules off.",
+      "Repository rule files, one glob per line, relative to the chat folder (default: AGENTS.md, .cursorrules, .cursor/rules/**/*.mdc). `~` for global rules. Empty turns them off.",
     builtinProjectRulesReset: "Reset to defaults",
     builtinIgnoreFilesTitle: "Ignore files",
     builtinIgnoreFilesHint:
       "Files whose gitignore-style patterns the agent's glob and grep honour, one path per line, relative to each chat's folder (default: .gitignore, .cursorignore). A later file decides over an earlier one, so .cursorignore can bring back what .gitignore hides. A file or folder the agent names explicitly is still read or searched, and grep lists the skipped folders when it finds nothing. Clear the list to search everything.",
     builtinIgnoreFilesReset: "Reset to defaults",
     builtinSkillsTitle: "Built-in skills",
-    builtinSkillsHint:
-      "Skills the app itself ships — every chat has them, and the folders above do not affect them. “Disabled” — the chat has no such skill at all, `/name` included. “Not visible” — the system prompt says nothing about it (not even the skills block, when nothing else is left to show), while `/name` and the `/` menu still work. “Visible, not activated” — the agent sees it listed and reads the SKILL.md when a task matches. “Active by default” — the SKILL.md body goes into the system prompt of every turn, so the skill is in effect from the first message, at the cost of context in every request.",
+    builtinSkillsHint: "The skills the app ships, in every chat; each one's mode is listed below.",
     builtinSkillsEmpty: "This build ships no built-in skills.",
     builtinSkillModeOff: "Disabled",
     builtinSkillModeHidden: "Not visible",
@@ -711,7 +709,7 @@ export const en = {
     agentAdvancedTitle: "Advanced",
     profileTitle: "Profile",
     agentConnectDesc: "Agents are checked automatically when the app starts",
-    agentAdvancedDesc: "Default folder, API keys and CLI launch",
+    agentAdvancedDesc: "Default folder, permissions and session restore",
     skillsTitle: "Skills",
     skillsDesc:
       "Folders the agent scans for skills, and the modes of the skills the app itself ships.",
@@ -978,6 +976,12 @@ export const en = {
     attachmentsDirHint:
       "Where a chat's uploads are stored. Empty keeps .acpio-attachments in the chat's folder (the project root). The button picks any folder, including one inside the project.",
     folderPickSwapHint: "Right-click: pick inside the app",
+    cliTitle: "CLI & keys",
+    cliDesc:
+      "Launch commands of the ACP agents and the keys they call their providers with — in one place.",
+    cliLaunchTitle: "Agent launch",
+    cliCommand: "command",
+    cliArgs: "args",
     cliAndPermissions: "CLI & permissions",
     permissionPolicy: "Permission policy",
     permissionPrompt: "Ask",
@@ -1350,7 +1354,7 @@ export const en = {
       "Append JSONL traces to the dump folder: prompts, skills, model, MCP, and all ACP traffic (acpio-deep-YYYY-MM-DD.jsonl).",
     contextDrift: "Pause when the context changes",
     contextDriftHint:
-      "Compares every request with the previous one. When the head stops matching somewhere in the middle rather than at the tail, the chat says so and the turn pauses: nothing reaches the provider until you pick “Continue” or “Stop the turn”. The provider's cache only answers an unchanged head, and everything past that point is billed in full. With the wire log in “Full”, the same warning offers this chat's log archive.",
+      "Compares each request with the previous one and pauses the turn when their common prefix drifts.",
     wireLog: "Provider request log (wire log)",
     wireLogHint:
       "Records every request of the built-in agent: a line with the hashes, the key fingerprint and the token usage in “Summary”, plus the request body itself in “Full”. Turns on and off without a restart.",
