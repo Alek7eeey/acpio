@@ -82,8 +82,7 @@ function fileDiff(path: string) {
 }
 
 function renderPanel(props: Partial<Parameters<typeof GitChangesSidePanel>[0]> = {}) {
-  const onFullscreenChange = vi.fn();
-  const view = render(
+  return render(
     <I18nProvider>
       <div>
         <GitChangesSidePanel
@@ -91,18 +90,15 @@ function renderPanel(props: Partial<Parameters<typeof GitChangesSidePanel>[0]> =
           open
           status={STATUS}
           branchBusy={false}
-          fullscreen={false}
           onClose={vi.fn()}
           onStatusChange={vi.fn()}
           onCheckout={vi.fn().mockResolvedValue(undefined)}
           onDeleteBranch={vi.fn().mockResolvedValue({ ok: true, unmerged: false })}
-          onFullscreenChange={onFullscreenChange}
           {...props}
         />
       </div>
     </I18nProvider>,
   );
-  return { onFullscreenChange, ...view };
 }
 
 beforeEach(() => {
@@ -213,19 +209,11 @@ describe("GitChangesSidePanel", () => {
     expect(stash).toBeTruthy();
   });
 
-  it("fills the screen from the full view, and stays a dock otherwise", async () => {
-    const { container, unmount } = renderPanel({ fullscreen: false });
+  it("stays a dock on a desktop page", async () => {
+    const { container } = renderPanel();
     const docked = await screen.findByRole("complementary", { name: "Git" });
     expect(container.contains(docked)).toBe(true);
     expect(docked.parentElement).not.toBe(document.body);
-    unmount();
-
-    const full = renderPanel({ fullscreen: true });
-    const panel = await screen.findByRole("dialog", { name: "Diff на весь экран" });
-    // The full view is the whole screen: portalled onto the body, so no page
-    // container or panel dock can clip it to a slice.
-    expect(full.container.contains(panel)).toBe(false);
-    expect(panel.parentElement).toBe(document.body);
   });
 
   it("reads a changed file with the editor's diff, inside the panel", async () => {
@@ -247,6 +235,50 @@ describe("GitChangesSidePanel", () => {
     // Still the panel's own stage: nothing was handed to the code pane.
     expect(useAppStore.getState().editorReveal).toBeNull();
     expect(apiMock.gitDiff).not.toHaveBeenCalled();
+  });
+
+  it("reads a commit's file between its parent and the commit itself", async () => {
+    const user = userEvent.setup();
+    const parent = "pppppppppppppppppppppppppppppppppppppppp";
+    const hash = "cccccccccccccccccccccccccccccccccccccccc";
+    apiMock.gitLog.mockResolvedValue({
+      commits: [{ ...COMMIT, hash, shortHash: "ccccccc", parents: [parent], subject: "a past change" }],
+      outgoing: [],
+      branches: ["main"],
+    });
+    apiMock.gitCommitDetail.mockResolvedValue({
+      detail: {
+        hash,
+        shortHash: "ccccccc",
+        subject: "a past change",
+        body: "",
+        author: "Tester",
+        authorEmail: "t@example.com",
+        date: "2026-01-02T12:00:00+03:00",
+        parents: [parent],
+        parentShortHashes: ["ppppppp"],
+        files: [{ path: "src/a.ts", status: "modified", additions: 3, deletions: 1 }],
+        additions: 3,
+        deletions: 1,
+        modifiedCount: 1,
+        addedCount: 0,
+        deletedCount: 0,
+      },
+    });
+    renderPanel();
+
+    await user.click(await screen.findByRole("tab", { name: "История" }));
+    // The changes tab read the working copy on the way in; the commit is next.
+    editorFileMock.mockClear();
+    apiMock.gitFileText.mockClear();
+    await user.click(await screen.findByText("a past change"));
+
+    // The commit's diff is the editor's too, read between the two revisions —
+    // the working copy has nothing to do with a change already committed.
+    await waitFor(() => expect(apiMock.gitFileText).toHaveBeenCalledWith("s1", "src/a.ts", parent));
+    expect(apiMock.gitFileText).toHaveBeenCalledWith("s1", "src/a.ts", hash);
+    expect(editorFileMock).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-editor-diff="src/a.ts"]')).toBeTruthy();
   });
 
   it("marks the refresh button busy while the re-read is still running", async () => {

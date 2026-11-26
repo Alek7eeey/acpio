@@ -70,17 +70,21 @@
  * component), fixed to the viewport and above the shell chrome — under dialogs
  * (500) and toasts (400), which must still be able to appear over it.
  */
-.panelFullscreen {
-  position: fixed;
-  inset: 0;
-  z-index: 380;
+/* The bar a phone takeover shows in place of the shell header it covers. */
+.stageHead {
   flex: 0 0 auto;
-  width: auto;
-  max-width: none;
-  height: auto;
-  border-left: none;
-  box-shadow: none;
-  animation: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: max(6px, env(safe-area-inset-top)) 8px 6px;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--surface);
+}
+
+.stageHeadTitle {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text);
 }
 
 /* Grab strip for the dock edge. The shell hides every separator once the panel

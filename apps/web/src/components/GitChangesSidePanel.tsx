@@ -10,8 +10,8 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import type { GitCommitDetailDto, GitCommitDto, GitCommitFileDto, GitStatusDto } from "@acpio/shared";
-import { GitBlameView, GitDiffStage, GitStageHeader, type GitDiffFile } from "./GitDiffStage";
+import type { GitCommitDetailDto, GitCommitDto, GitStatusDto } from "@acpio/shared";
+import { GitBlameView } from "./GitBlameView";
 import { EditorDiff } from "./EditorDiff";
 import {
   CHANGES_VIEW_KEY,
@@ -41,7 +41,7 @@ import {
   gitDefaultPanelWidth,
   gitNavigatorWidthFor,
 } from "../lib/gitLayout";
-import { firstChangedFilePath, normalizeGitPath } from "../lib/gitFileTree";
+import { firstChangedFilePath } from "../lib/gitFileTree";
 import { formatGitErrorToast, gitConflictFiles, gitPullConflictMessage, gitSyncSuccessMessage, isGitConflictFile } from "../lib/gitUi";
 import styles from "./GitChangesSidePanel.module.css";
 
@@ -55,16 +55,6 @@ const OPS_MENU_WIDTH = 200;
  */
 const REFRESH_MIN_VISIBLE_MS = 450;
 
-/** Single-letter badge for a commit file row in the stage's file list. */
-const COMMIT_FILE_BADGE: Record<GitCommitFileDto["status"], string> = {
-  added: "A",
-  copied: "A",
-  deleted: "D",
-  modified: "M",
-  renamed: "R",
-  typeChanged: "T",
-  other: "M",
-};
 /** Which list the navigator column is showing. */
 type PanelTab = "changes" | "history" | "branches";
 
@@ -133,6 +123,36 @@ function readStoredNavigatorWidth(): number | null {
   }
 }
 
+/**
+ * The bar a phone takeover shows in place of the shell header it covers: what
+ * the panel is, and the way back out of it.
+ */
+function StageHeader({ onBack }: { onBack: () => void }) {
+  const t = useT();
+  return (
+    <header className={styles.stageHead}>
+      <button
+        type="button"
+        className={styles.iconBtn}
+        onClick={onBack}
+        title={t("git.diffStageBack")}
+        aria-label={t("git.diffStageBack")}
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+          <path
+            d="M15 5l-7 7 7 7"
+            stroke="currentColor"
+            strokeWidth="1.9"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </button>
+      <span className={styles.stageHeadTitle}>{t("git.title")}</span>
+    </header>
+  );
+}
+
 export function GitChangesSidePanel({
   sessionId,
   open,
@@ -140,12 +160,10 @@ export function GitChangesSidePanel({
   statusLoading = false,
   awaitingGit = false,
   branchBusy,
-  fullscreen,
   onClose,
   onStatusChange,
   onCheckout,
   onDeleteBranch,
-  onFullscreenChange,
 }: {
   sessionId: string;
   open: boolean;
@@ -153,14 +171,11 @@ export function GitChangesSidePanel({
   statusLoading?: boolean;
   awaitingGit?: boolean;
   branchBusy: boolean;
-  /** Reader asked for the diff alone: the chat steps aside and the page is the review. */
-  fullscreen: boolean;
   onClose: () => void;
   onStatusChange: (status: GitStatusDto) => void;
   /** Create and switch: a new branch may start at any branch, not only at HEAD. */
   onCheckout: (branch: string, create?: boolean, start?: string) => Promise<void>;
   onDeleteBranch: (branch: string, opts?: { force?: boolean }) => Promise<GitBranchDeleteOutcome>;
-  onFullscreenChange: (fullscreen: boolean) => void;
 }) {
   const t = useT();
   const narrowPanel = useNarrowPanelLayout();
@@ -168,9 +183,7 @@ export function GitChangesSidePanel({
   const syncInFlightRef = useRef(false);
   const [tab, setTab] = useState<PanelTab>("changes");
   const [selection, setSelection] = useState<Selection>({ kind: "working", path: null });
-  /** Bumped on every file pick so the stage re-centres even on the same path. */
-  const [jumpToken, setJumpToken] = useState(0);
-  /** Bumped on refresh so the stage re-reads diffs whose paths did not change. */
+  /** Bumped on refresh so the diff re-reads a file whose numbers did not change. */
   const [reloadToken, setReloadToken] = useState(0);
   /** A manual refresh is in flight: the footer button turns and refuses re-clicks. */
   const [refreshing, setRefreshing] = useState(false);
@@ -740,26 +753,6 @@ export function GitChangesSidePanel({
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [navigatorOpen]);
 
-  useEffect(() => {
-    if (!fullscreen) return;
-    // Same rule as the sheet: Escape unwinds the innermost layer, so the full
-    // view goes back to the board instead of taking the whole panel with it.
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.stopPropagation();
-      onFullscreenChange(false);
-    };
-    window.addEventListener("keydown", onKeyDown, true);
-    return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [fullscreen, onFullscreenChange]);
-
-  // The full view belongs to a commit's diff, the one thing whose stage carries
-  // the way out: anything else on the stage would leave a screen-wide panel with
-  // no button back.
-  useEffect(() => {
-    if (fullscreen && (blame !== null || selection.kind !== "commit")) onFullscreenChange(false);
-  }, [blame, fullscreen, onFullscreenChange, selection.kind]);
-
   /**
    * A changed file is read in the panel itself, by the code pane's own diff —
    * picking it is what puts it on the stage.
@@ -771,21 +764,16 @@ export function GitChangesSidePanel({
   }, [sheetNavigator]);
 
   /**
-   * Selecting a commit's file is what feeds the stage; selecting it again empties
-   * it. On a phone the sheet gets out of the way: the diff is what was asked for.
+   * Picking a commit's file puts its diff on the stage. On a phone the sheet
+   * gets out of the way: the diff is what was asked for.
    */
-  const toggleCommitFile = useCallback(
+  const selectCommitFile = useCallback(
     (hash: string, filePath: string) => {
       setBlame(null);
-      setSelection(
-        selection.kind === "commit" && selection.hash === hash && selection.filePath === filePath
-          ? { kind: "commit", hash, filePath: null }
-          : { kind: "commit", hash, filePath },
-      );
-      setJumpToken((token) => token + 1);
+      setSelection({ kind: "commit", hash, filePath });
       if (sheetNavigator) setNavigatorOpen(false);
     },
-    [selection, sheetNavigator],
+    [sheetNavigator],
   );
 
   const setFilesStage = useCallback(
@@ -1160,14 +1148,25 @@ export function GitChangesSidePanel({
   const workingSelected = selection.kind === "working";
   const commitSelected = selection.kind === "commit";
 
-  const stageFiles: GitDiffFile[] = (commitDetail?.files ?? []).map((file) => ({
-    path: normalizeGitPath(file.path),
-    badge: COMMIT_FILE_BADGE[file.status],
-    additions: file.additions,
-    deletions: file.deletions,
-  }));
-  /** The stage shows a commit's files, one at a time; nothing picked means the top. */
-  const stagePath = commitSelected ? selection.filePath : null;
+  /**
+   * The commit's file on the stage: the one picked, or the first of the commit —
+   * a commit opens with something to read, the way the changes tab does.
+   */
+  const commitFiles = commitDetail?.files ?? [];
+  const commitPath = commitSelected
+    ? (selection.filePath && commitFiles.some((file) => file.path === selection.filePath)
+        ? selection.filePath
+        : (commitFiles[0]?.path ?? null))
+    : null;
+  const commitFile = commitFiles.find((file) => file.path === commitPath) ?? null;
+  /** What a commit's change is read between: its parent's copy and its own. */
+  const commitCompare = commitDetail?.hash
+    ? {
+        from: commitDetail.parents[0] ?? null,
+        fromPath: commitFile?.oldPath,
+        to: commitDetail.hash,
+      }
+    : null;
   /** The working file on the stage, and whether git reports it gone. */
   const workingFile = files.find((file) => file.path === workingPath) ?? null;
   const workingDeleted = Boolean(workingFile && (workingFile.index === "D" || workingFile.worktree === "D"));
@@ -1211,7 +1210,7 @@ export function GitChangesSidePanel({
     outgoingFiles:
       commitSelected && commitDetail?.hash === selection.hash ? commitDetail.files : [],
     onInspectOutgoing: (hash: string) => void selectCommit(hash, { keepChangesTab: true }),
-    onSelectOutgoingFile: (hash: string, path: string) => toggleCommitFile(hash, path),
+    onSelectOutgoingFile: (hash: string, path: string) => selectCommitFile(hash, path),
   };
 
   /**
@@ -1683,7 +1682,7 @@ export function GitChangesSidePanel({
                 wipFiles={workingSelected && status?.dirty ? files : undefined}
                 selectedFilePath={commitSelected ? selection.filePath : workingPath}
                 onSelectFile={(path) => {
-                  if (commitSelected) toggleCommitFile(selection.hash, path);
+                  if (commitSelected) selectCommitFile(selection.hash, path);
                   else openWorkingDiff(path);
                 }}
                 onSelectParent={(hash) => void selectCommit(hash)}
@@ -1710,20 +1709,14 @@ export function GitChangesSidePanel({
       deleted={workingDeleted}
       signature={workingSignature}
     />
-  ) : commitSelected ? (
-    <GitDiffStage
+  ) : commitPath && commitCompare && status?.root ? (
+    /* A commit is read the same way, between its parent's copy and its own —
+       the diff of a past change, not of the working copy. */
+    <EditorDiff
       sessionId={sessionId}
-      rev={selection.hash}
-      files={stageFiles}
-      initialPath={stagePath}
-      jumpToken={jumpToken}
-      reloadToken={reloadToken}
-      compact={sheetNavigator && !fullscreen}
-      filesInHost={!fullscreen}
-      expanded={fullscreen}
-      flushTop={fullscreen || takeover}
-      onToggleExpand={() => onFullscreenChange(!fullscreen)}
-      onClose={sheetNavigator && !fullscreen ? onClose : undefined}
+      root={status.root}
+      path={commitPath}
+      compare={commitCompare}
     />
   ) : null;
 
@@ -1732,7 +1725,6 @@ export function GitChangesSidePanel({
     overlay && styles.panelOverlay,
     takeover && styles.panelTakeover,
     sheetNavigator && styles.panelSheetNav,
-    fullscreen && styles.panelFullscreen,
     resizing && styles.resizing,
   ]
     .filter(Boolean)
@@ -1742,9 +1734,7 @@ export function GitChangesSidePanel({
     <aside
       ref={panelRef}
       className={panelClasses}
-      role={fullscreen ? "dialog" : undefined}
-      aria-modal={fullscreen ? true : undefined}
-      aria-label={fullscreen ? t("git.diffFullscreenOpen") : t("git.title")}
+      aria-label={t("git.title")}
       style={
         {
           ["--git-panel-width" as string]: `${panelWidth}px`,
@@ -1752,7 +1742,7 @@ export function GitChangesSidePanel({
         } as CSSProperties
       }
     >
-      {!overlay && !fullscreen ? (
+      {!overlay ? (
         <div
           className={styles.splitter}
           onPointerDown={onSplitterDown}
@@ -1769,9 +1759,7 @@ export function GitChangesSidePanel({
       {repoPending ? (
         <>
           {/* A takeover covers the shell header: its own bar carries the way back. */}
-          {takeover ? (
-            <GitStageHeader title={t("git.title")} flushTop onBack={onClose} />
-          ) : null}
+          {takeover ? <StageHeader onBack={onClose} /> : null}
           <div className={`${styles.empty} ${styles.emptyLoading}`}>
             <span className={styles.loaderSpin} aria-hidden />
             {t("git.initializing")}
@@ -1779,15 +1767,13 @@ export function GitChangesSidePanel({
         </>
       ) : !status?.repo ? (
         <>
-          {takeover ? (
-            <GitStageHeader title={t("git.title")} flushTop onBack={onClose} />
-          ) : null}
+          {takeover ? <StageHeader onBack={onClose} /> : null}
           <div className={styles.empty}>{t("git.noRepo")}</div>
         </>
       ) : (
         <>
           {stageSlot ? <div className={styles.stageHost}>{stageSlot}</div> : null}
-          {!stageSlot || fullscreen || sheetNavigator ? null : (
+          {!stageSlot || sheetNavigator ? null : (
             <div
               className={styles.navSplitter}
               onPointerDown={onNavigatorSplitterDown}
@@ -1800,7 +1786,7 @@ export function GitChangesSidePanel({
               title={t("common.resizeChangesHint")}
             />
           )}
-          {fullscreen ? null : sheetNavigator ? (            <>
+          {sheetNavigator ? (            <>
               <button
                 type="button"
                 className={styles.puller}
@@ -1876,5 +1862,5 @@ export function GitChangesSidePanel({
    * portalled to the body so no page container (or its `container-type`) can clip
    * them, and no ancestor stacking context can hold them under the shell header.
    */
-  return fullscreen || takeover ? createPortal(panel, document.body) : panel;
+  return takeover ? createPortal(panel, document.body) : panel;
 }

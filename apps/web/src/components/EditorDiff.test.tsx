@@ -22,6 +22,9 @@ const PATH = "src/a.ts";
 beforeEach(() => {
   useAppStore.setState((s) => ({ settings: { ...s.settings, locale: "ru", editorTheme: "dark" } }));
   localStorage.clear();
+  // Two columns unless a test says otherwise: the default is one page, and the
+  // tests below are about what the columns carry.
+  localStorage.setItem("acpio.diffMode.v1", "split");
   // The component remembers what it read; every test starts with an empty one.
   forgetDiffs();
   apiMock.gitFileText.mockResolvedValue({ text: "const a = 1;\n", exists: true });
@@ -63,20 +66,27 @@ describe("EditorDiff", () => {
     expect(text).toContain("const a = 2;");
   });
 
-  it("switches between the two columns and one, and remembers the choice", async () => {
+  it("opens a change on one page by default, and keeps the reader's choice", async () => {
+    // Nothing stored yet: the reader has never picked a layout.
+    localStorage.removeItem("acpio.diffMode.v1");
     const user = userEvent.setup();
-    const { container } = renderDiff();
-    await waitFor(() => expect(container.querySelector(".cm-mergeView")).toBeTruthy());
+    const first = renderDiff();
 
-    await user.click(screen.getByRole("button", { name: "Одна колонка — изменения внутри текста" }));
+    // One column: no merge view, and both sides inside the one document.
+    await waitFor(() => expect(first.container.querySelector(".cm-editor")).toBeTruthy());
+    expect(first.container.querySelector(".cm-mergeView")).toBeNull();
+    expect(first.container.textContent).toContain("const a = 2;");
 
-    // Inline: one editor, the deletions inside the text.
-    await waitFor(() => expect(container.querySelector(".cm-mergeView")).toBeNull());
-    expect(localStorage.getItem("acpio.diffMode.v1")).toBe("inline");
-
-    await user.click(screen.getByRole("button", { name: "Две колонки — было и стало" }));
-    await waitFor(() => expect(container.querySelector(".cm-mergeView")).toBeTruthy());
+    await user.click(
+      within(first.container).getByRole("button", { name: "Две колонки — было и стало" }),
+    );
+    await waitFor(() => expect(first.container.querySelector(".cm-mergeView")).toBeTruthy());
     expect(localStorage.getItem("acpio.diffMode.v1")).toBe("split");
+    first.unmount();
+
+    // The next diff opens the way the reader left the last one.
+    const second = renderDiff();
+    await waitFor(() => expect(second.container.querySelector(".cm-mergeView")).toBeTruthy());
   });
 
   it("takes a deleted file's empty working copy", async () => {

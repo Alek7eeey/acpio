@@ -163,6 +163,7 @@ export function EditorDiff({
   path,
   deleted = false,
   signature = "",
+  compare,
 }: {
   sessionId: string;
   /** The folder git talks in: `path` is relative to it. */
@@ -175,6 +176,13 @@ export function EditorDiff({
    * refresh: a different value means the sides are read again.
    */
   signature?: string;
+  /**
+   * Read both sides at these revisions instead of from the disk: a commit's
+   * change is what the commit did, and the working copy has nothing to do with
+   * it. `from` is the parent (null for a root commit), `fromPath` the name the
+   * file had there — a rename reads the old name.
+   */
+  compare?: { from: string | null; fromPath?: string; to: string };
 }) {
   const t = useT();
   const settings = useAppStore((s) => s.settings);
@@ -199,11 +207,37 @@ export function EditorDiff({
     writeDiffMode(mode);
   }, [mode]);
 
+  /** The working copy against what git holds: a change not yet committed. */
+  const readWorking = async (): Promise<Sides> => {
+    // The cheap side first: the working copy is one file read, and the pane
+    // refuses a file past its limit before anything is transferred. The
+    // revision is a `git show`, which for a generated file is megabytes we
+    // would fetch only to throw away.
+    const text = deleted ? "" : (await editorApi.file(root, path)).text;
+    const revision = await api.gitFileText(sessionId, path);
+    return { base: revision.text, text };
+  };
+
+  /** The two revisions of a commit: its parent's copy and its own. */
+  const readRevisions = async (): Promise<Sides> => {
+    const [base, committed] = await Promise.all([
+      fromRev === null ? { text: "" } : api.gitFileText(sessionId, fromPath, fromRev),
+      api.gitFileText(sessionId, path, toRev ?? undefined),
+    ]);
+    return { base: base.text, text: committed.text };
+  };
+
   // Both sides of the diff: the revision git holds, and the file as it is now.
   // A new file has no revision and a deleted one has no copy — both are a diff
   // of the whole file, which is what the editor shows too.
+  // Pulled out of `compare` one by one: an object literal from the parent is a
+  // new identity on every render, and the effect below must not re-run for it.
+  const fromRev = compare?.from ?? null;
+  const fromPath = compare?.fromPath ?? path;
+  const toRev = compare?.to ?? null;
+
   useEffect(() => {
-    const key = `${sessionId}\n${path}\n${deleted}\n${signature}`;
+    const key = `${sessionId}\n${path}\n${deleted}\n${signature}\n${fromRev}\n${fromPath}\n${toRev}`;
     const cached = sidesCache.get(key);
     setFailed(null);
     if (cached) {
@@ -221,14 +255,8 @@ export function EditorDiff({
     setSides(null);
     void (async () => {
       try {
-        // The cheap side first: the working copy is one file read, and the pane
-        // refuses a file past its limit before anything is transferred. The
-        // revision is a `git show`, which for a generated file is megabytes we
-        // would fetch only to throw away.
-        const text = deleted ? "" : (await editorApi.file(root, path)).text;
-        const revision = await api.gitFileText(sessionId, path);
+        const next = toRev === null ? await readWorking() : await readRevisions();
         if (!alive) return;
-        const next = { base: revision.text, text };
         remember(key, next);
         setSides(next);
       } catch (err) {
@@ -241,7 +269,7 @@ export function EditorDiff({
     return () => {
       alive = false;
     };
-  }, [deleted, path, root, sessionId, signature]);
+  }, [deleted, fromPath, fromRev, path, root, sessionId, signature, toRev]);
 
   useEffect(() => {
     const host = hostRef.current;

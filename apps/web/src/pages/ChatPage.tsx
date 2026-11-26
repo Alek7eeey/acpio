@@ -4982,8 +4982,6 @@ function ChatThread() {
   /** The pace the reader picked — the card's popup, the panel's switch, and the
    *  approval that follows them all read this, not the file's lagging copy. */
   const [planPace, setPlanPace] = useState<"whole" | "step">("whole");
-  /** The git diff in the full view: portalled to the body, pinned to the viewport. */
-  const [gitFullscreen, setGitFullscreen] = useState(false);
   const prevPaneCountRef = useRef(bind?.paneCount ?? 1);
 
   const openPlanPanel = useCallback(() => {
@@ -5022,11 +5020,6 @@ function ChatThread() {
     prevPaneCountRef.current = n;
   }, [bind?.paneCount, setConsoleOpen, setGitPanelOpen]);
 
-  useEffect(() => {
-    // The panel keeps its own state across sessions; the page-wide takeover does
-    // not outlive the panel or the session it was asked for.
-    setGitFullscreen(false);
-  }, [gitPanelOpen, activeSession?.id]);
   const [modelParamValues, setModelParamValues] = useState<Record<string, string>>(
     () => modelParamsForSession(settings, null),
   );
@@ -9346,12 +9339,10 @@ function ChatThread() {
           statusLoading={git.loading}
           awaitingGit={git.awaiting}
           branchBusy={git.branchBusy}
-          fullscreen={gitFullscreen}
           onClose={() => setGitPanelOpen(false)}
           onStatusChange={git.applyStatus}
           onCheckout={git.checkout}
           onDeleteBranch={git.deleteBranch}
-          onFullscreenChange={setGitFullscreen}
         />
       ) : null}
     </div>
