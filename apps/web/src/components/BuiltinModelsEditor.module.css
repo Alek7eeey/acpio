@@ -1,4 +1,12 @@
-/* Settings → Built-in agent → Models: toolbar, add form, scrolling model list. */
+/* Settings → Built-in agent → Models and Subagents: toolbar, add form, list.
+   Both editors mount `styles.editor` as their root — without a rule the rows,
+   the form and the add button sat flush against each other. */
+
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 
 .toolbar {
   display: flex;
@@ -84,6 +92,28 @@
   padding: 4px 0 2px;
 }
 
+/* The subagent form: three short fields on one line, the tool boxes and the
+   prompt across the whole width. Under auto-fit minmax(150px) the prompt was a
+   165px column of wrapped placeholder and the boxes split off their names. */
+.agentForm {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr) 110px;
+}
+
+.fieldWide {
+  grid-column: 1 / -1;
+}
+
+/* Tool boxes: a box never shrinks away from the name it belongs to. */
+.tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+}
+
+.tools > .check {
+  flex: 0 0 auto;
+}
+
 .field {
   display: flex;
   flex-direction: column;
@@ -124,6 +154,11 @@
   color: var(--danger);
 }
 
+/* A lone button in the editor column keeps the width of its own words. */
+.alignStart {
+  align-self: flex-start;
+}
+
 .list {
   list-style: none;
   margin: 0;
@@ -147,6 +182,21 @@
   align-items: center;
   padding: 6px 10px;
   border-bottom: 1px solid var(--border-soft);
+}
+
+/* An agent row: name, prose, its own buttons. The model row's tracks (field,
+   110px number, 28px remove) put an agent's description in a half-width column
+   and left the last two tracks empty, so subagents get their own tracks. */
+.agentRow {
+  grid-template-columns: minmax(0, 200px) minmax(0, 1fr) auto;
+}
+
+/* Edit + remove of an agent row: a bare span left them inline, where the
+   remove button's 24px box never applied. */
+.rowActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .remove {
@@ -195,6 +245,19 @@
   font-size: var(--settings-control-size);
 }
 
+/* A cell that holds prose rather than a field. It used to carry `.labelInput`,
+   which is a width-only class for inputs that bring their own chrome — on a
+   span nothing set the size, so the description fell back to the body's 1rem and
+   read as a heading next to the 0.8rem hints around it. */
+.rowText {
+  min-width: 0;
+  font-size: var(--settings-hint-size);
+  font-weight: var(--settings-hint-weight);
+  line-height: var(--settings-hint-line);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
 .tag {
   flex: 0 0 auto;
   padding: 0 6px;
@@ -213,7 +276,9 @@
 }
 
 @media (max-width: 700px) {
-  .row {
+  .row,
+  .agentRow,
+  .agentForm {
     grid-template-columns: minmax(0, 1fr);
   }
 }

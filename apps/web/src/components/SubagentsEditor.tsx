@@ -85,24 +85,24 @@ export function SubagentsEditor({
   return (
     <div className={styles.editor}>
       <ul className={styles.list}>
-        <li className={styles.row}>
+        <li className={`${styles.row} ${styles.agentRow}`}>
           <span className={styles.check}>
             <span className={styles.id}>explore</span>
             <span className={styles.tag}>{t("settings.subagentsBuiltInTag")}</span>
           </span>
-          <span className={styles.labelInput}>{t("settings.subagentsExploreDesc")}</span>
+          <span className={styles.rowText}>{t("settings.subagentsExploreDesc")}</span>
           <span aria-hidden />
         </li>
         {value.agents.map((agent) => (
-          <li key={agent.id} className={styles.row}>
+          <li key={agent.id} className={`${styles.row} ${styles.agentRow}`}>
             <span className={styles.check} title={agent.id}>
               <span className={styles.id}>{agent.name}</span>
             </span>
-            <span className={styles.labelInput}>
+            <span className={styles.rowText}>
               {agent.tools.join(", ")}
               {agent.description ? ` — ${agent.description}` : ""}
             </span>
-            <span>
+            <span className={styles.rowActions}>
               <button
                 type="button"
                 className={styles.btn}
@@ -137,7 +137,7 @@ export function SubagentsEditor({
       </ul>
 
       {adding ? (
-        <div className={styles.addForm}>
+        <div className={`${styles.addForm} ${styles.agentForm}`}>
           <label className={styles.field}>
             <span className={styles.fieldLabel}>{t("settings.subagentsName")}</span>
             <input
@@ -157,18 +157,18 @@ export function SubagentsEditor({
             />
           </label>
           <label className={styles.field}>
-            <span className={styles.fieldLabel}>{t("settings.subagentsSystemPrompt")}</span>
-            <textarea
-              className={styles.labelInput}
-              rows={4}
-              value={draft.systemPrompt}
-              onChange={(e) => setDraft((d) => ({ ...d, systemPrompt: e.target.value }))}
-              placeholder={t("settings.subagentsSystemPromptHint")}
+            <span className={styles.fieldLabel}>{t("settings.subagentsMaxTurns")}</span>
+            <input
+              type="number"
+              min={1}
+              max={BUILTIN_SUBAGENT_MAX_TURNS_CAP}
+              value={draft.maxTurns}
+              onChange={(e) => setDraft((d) => ({ ...d, maxTurns: e.target.value }))}
             />
           </label>
-          <div className={styles.field}>
+          <div className={`${styles.field} ${styles.fieldWide}`}>
             <span className={styles.fieldLabel}>{t("settings.subagentsTools")}</span>
-            <div className={styles.check}>
+            <div className={styles.tools}>
               {ALL_TOOLS.map((tool) => (
                 <label key={tool} className={styles.check}>
                   <input
@@ -181,17 +181,17 @@ export function SubagentsEditor({
               ))}
             </div>
           </div>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>{t("settings.subagentsMaxTurns")}</span>
-            <input
-              type="number"
-              min={1}
-              max={BUILTIN_SUBAGENT_MAX_TURNS_CAP}
-              value={draft.maxTurns}
-              onChange={(e) => setDraft((d) => ({ ...d, maxTurns: e.target.value }))}
+          <label className={`${styles.field} ${styles.fieldWide}`}>
+            <span className={styles.fieldLabel}>{t("settings.subagentsSystemPrompt")}</span>
+            <textarea
+              className={styles.labelInput}
+              rows={4}
+              value={draft.systemPrompt}
+              onChange={(e) => setDraft((d) => ({ ...d, systemPrompt: e.target.value }))}
+              placeholder={t("settings.subagentsSystemPromptHint")}
             />
           </label>
-          <div className={styles.addActions}>
+          <div className={`${styles.addActions} ${styles.fieldWide}`}>
             <button
               type="button"
               className={styles.btnPrimary}
@@ -217,7 +217,7 @@ export function SubagentsEditor({
       {atLimit ? <p className={styles.hint}>{t("settings.subagentsMaxReached", { max: BUILTIN_SUBAGENT_AGENTS_MAX })}</p> : null}
       <button
         type="button"
-        className={styles.btn}
+        className={`${styles.btn} ${styles.alignStart}`}
         disabled={atLimit}
         onClick={() => {
           setDraft(emptyDraft());
