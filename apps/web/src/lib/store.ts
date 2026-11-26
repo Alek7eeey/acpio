@@ -533,7 +533,10 @@ type AppState = {
     flags?: { optimistic?: boolean },
   ) => Promise<void>;
   removeQueuedPrompt: (id: string) => void;
-  updateQueuedPrompt: (id: string, text: string) => void;
+  /** Write a rewrite back into a queued request. `attachments` replaces the
+   *  list it carries when given — a file pasted into its field while it was
+   *  being rewritten rides the request from there. */
+  updateQueuedPrompt: (id: string, text: string, attachments?: PendingAttachment[]) => void;
   /**
    * Rewrite the mode a queued request goes out in — the composer's chip while
    * its text sits in the field. The chat's own mode stays where it is: the
@@ -3605,9 +3608,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ promptQueue: get().promptQueue.filter((item) => item.id !== id) });
   },
 
-  updateQueuedPrompt(id, text) {
+  updateQueuedPrompt(id, text, attachments) {
     set({
-      promptQueue: get().promptQueue.map((item) => (item.id === id ? { ...item, text } : item)),
+      promptQueue: get().promptQueue.map((item) =>
+        item.id === id ? { ...item, text, ...(attachments ? { attachments } : {}) } : item,
+      ),
     });
   },
 

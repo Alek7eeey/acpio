@@ -616,3 +616,80 @@ describe("paste from the field's menu", () => {
     expect(apiMock.uploadAttachment).not.toHaveBeenCalled();
   });
 });
+
+// The report: the pencil on a queued request hands its text to the composer,
+// and there Ctrl+V of a copied file did nothing at all — the rewrite was read as
+// an edit of a sent message, and an edit rewrites words only. A queued request
+// has gone nowhere yet: its field takes files, and Send writes them back into
+// the row instead of handing anything to the agent.
+describe("a file pasted into a rewritten queued request", () => {
+  function idleChat(): SessionDetailDto {
+    const detail = runningSession();
+    detail.status = "idle";
+    return detail;
+  }
+
+  it("stages the file and writes it into the row on Send", async () => {
+    const detail = idleChat();
+    useAppStore.setState({
+      sessions: [detail],
+      activeSession: detail,
+      sessionDetails: { s1: detail },
+      promptQueue: [{ id: "q1", text: "вопрос на потом", sessionId: "s1", editMessageId: null }],
+    });
+
+    const { container } = renderComposer();
+    fireEvent.click(
+      container.querySelector('[data-queue-id="q1"] button[aria-label="Редактировать"]')!,
+    );
+    const textarea = container.querySelector("textarea")!;
+
+    pasteImage(textarea);
+
+    // Staged rather than swallowed: the chip is there and the text names it.
+    expect((await stagedChip(container)).textContent).toContain("screenshot.png");
+    await waitFor(() => expect(textarea.value).toContain("screenshot.png"));
+    await waitFor(() =>
+      expect(
+        container.querySelector(`.${styles.pendingFileChip}`)?.getAttribute("data-status"),
+      ).toBe("ready"),
+    );
+
+    fireEvent.click(screen.getByLabelText("Отправить"));
+
+    await waitFor(() => {
+      const row = useAppStore.getState().promptQueue.find((q) => q.id === "q1");
+      expect(row?.text).toContain("screenshot.png");
+      expect(row?.attachments).toEqual([
+        { name: "screenshot.png", path: "E:/proj/.acpio-attachments/s1/screenshot.png" },
+      ]);
+    });
+    // The request is still waiting: nothing was sent to the agent.
+    expect(apiMock.prompt).not.toHaveBeenCalled();
+  });
+
+  // The other half of the same rule: an edit of a message the agent already has
+  // still names no new file — its chips are the message's own, and a paste there
+  // would point the text at a file nothing carries.
+  it("takes no new file while a sent message is being rewritten", async () => {
+    const detail = landedImageSession();
+    useAppStore.setState({
+      sessions: [detail],
+      activeSession: detail,
+      sessionDetails: { s1: detail },
+      promptQueue: [],
+    });
+
+    const { container } = renderComposer();
+    fireEvent.click(await screen.findByLabelText("Редактировать"));
+    const textarea = container.querySelector("textarea")!;
+
+    pasteImage(textarea);
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(apiMock.uploadAttachment).not.toHaveBeenCalled();
+    expect(textarea.value).not.toContain("screenshot.png");
+    // Only the message's own picture is up there.
+    expect(container.querySelectorAll(`.${styles.pendingFileChip}`).length).toBe(1);
+  });
+});

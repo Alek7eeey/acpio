@@ -4961,8 +4961,13 @@ function ChatThread() {
    *  its own: the pencil above hands the text down here (see `PromptQueueBar`). */
   const [editingQueueId, setEditingQueueId] = useState<string | null>(null);
   /** The composer holds a rewrite — of a sent message or of a queued request —
-   *  so it stages no files and recalls no history: an edit rewrites text only. */
+   *  so it recalls no history. */
   const rewriting = editingMessageId !== null || editingQueueId !== null;
+  /** The rewrite is of a message the agent already has: that one takes no
+   *  files, because an edit rewrites words and the message keeps the files it
+   *  came with. A queued request has gone nowhere yet — the field takes files
+   *  and Send hands them to the row (see `submitMessage`). */
+  const editingSent = editingMessageId !== null;
   /** The plan card was refused and the reader is answering it with words: the
    *  composer is that answer's field, and what it sends goes back to the turn
    *  that asked — not out as a prompt of its own. */
@@ -5068,10 +5073,10 @@ function ChatThread() {
   modelRef.current = model;
   const [pendingFiles, setPendingFiles] = useState<ComposerAttachment[]>([]);
   /** Staged files that would go with this prompt—a picture is a message on its
-   *  own, so a chip is enough to send. Editing keeps the file out: an edit only
-   *  rewrites the text of a message that is already there. */
+   *  own, so a chip is enough to send. Rewriting a sent message keeps them out:
+   *  an edit only rewrites the text of a message that is already there. */
   const hasSendableAttachments =
-    !rewriting && pendingFiles.some((f) => f.status === "ready" && f.path);
+    !editingSent && pendingFiles.some((f) => f.status === "ready" && f.path);
   const canSend = hasText || hasSendableAttachments;
   /** A drag carrying files is over the composer right now. */
   const [fileDropActive, setFileDropActive] = useState(false);
@@ -6096,7 +6101,7 @@ function ChatThread() {
       // instead of Send, so nothing can go out by accident. Blocking it here
       // (and on the paperclip and paste) meant a screenshot taken while the
       // agent worked could not be queued at all.
-      if (rewriting || composerLocked) return [];
+      if (editingSent || composerLocked) return [];
 
       const oversized = files.find((f) => f.size > MAX_ATTACH_SIZE);
       if (oversized) {
@@ -6192,7 +6197,7 @@ function ChatThread() {
       activeSession?.id,
       composerLocked,
       discardStagedFile,
-      rewriting,
+      editingSent,
       insertComposerText,
       pendingFiles.length,
       t,
@@ -6222,6 +6227,9 @@ function ChatThread() {
       at: { start: number; end: number } | "end" = "end",
     ): void => {
       if (files.length === 0) return;
+      // The same door the clipboard meets: a sent message's edit names no file
+      // the agent does not already have, and its link would point at nothing.
+      if (editingSent) return;
       if (pendingFiles.length + files.length > MAX_ATTACH_COUNT) {
         setAttachError(t("chat.tooManyFiles"));
         return;
@@ -6240,7 +6248,7 @@ function ChatThread() {
       ]);
       insertComposerText(files.map((f) => composerAttachmentText(f.name)).join(" "), at);
     },
-    [insertComposerText, pendingFiles.length, t],
+    [editingSent, insertComposerText, pendingFiles.length, t],
   );
 
   const pasteOfferAsText = useCallback(() => {
@@ -6320,7 +6328,7 @@ function ChatThread() {
 
   const onComposerDragOver = useCallback(
     (e: ReactDragEvent<HTMLElement>) => {
-      if (composerLocked || rewriting) return;
+      if (composerLocked || editingSent) return;
       if (!dragHasFiles(e.dataTransfer)) return;
       // Without preventDefault the browser would open the dropped file
       // instead of handing it to the composer.
@@ -6328,7 +6336,7 @@ function ChatThread() {
       e.dataTransfer.dropEffect = "copy";
       setFileDropActive(true);
     },
-    [composerLocked, rewriting],
+    [composerLocked, editingSent],
   );
 
   const onComposerDragLeave = useCallback((e: ReactDragEvent<HTMLElement>) => {
@@ -6340,7 +6348,7 @@ function ChatThread() {
 
   const onComposerDrop = useCallback(
     (e: ReactDragEvent<HTMLElement>) => {
-      if (composerLocked || rewriting) return;
+      if (composerLocked || editingSent) return;
       if (!dragHasFiles(e.dataTransfer)) return;
       e.preventDefault();
       setFileDropActive(false);
@@ -6349,7 +6357,7 @@ function ChatThread() {
       const files = Array.from(e.dataTransfer.files ?? []);
       if (files.length > 0) attachPickedFiles(files);
     },
-    [attachPickedFiles, composerLocked, rewriting],
+    [attachPickedFiles, composerLocked, editingSent],
   );
 
   /** A file dropped anywhere in the chat belongs to the composer: the thread
@@ -6359,9 +6367,9 @@ function ChatThread() {
     (e: ReactDragEvent<HTMLElement>) => {
       if (!dragHasFiles(e.dataTransfer)) return;
       e.preventDefault();
-      e.dataTransfer.dropEffect = composerLocked || rewriting ? "none" : "copy";
+      e.dataTransfer.dropEffect = composerLocked || editingSent ? "none" : "copy";
     },
-    [composerLocked, rewriting],
+    [composerLocked, editingSent],
   );
 
   const onPageDrop = useCallback(
@@ -6371,11 +6379,11 @@ function ChatThread() {
       if (e.defaultPrevented) return;
       e.preventDefault();
       setFileDropActive(false);
-      if (composerLocked || rewriting) return;
+      if (composerLocked || editingSent) return;
       const files = Array.from(e.dataTransfer.files ?? []);
       if (files.length > 0) attachPickedFiles(files);
     },
-    [attachPickedFiles, composerLocked, rewriting],
+    [attachPickedFiles, composerLocked, editingSent],
   );
 
   const attachDefaultSource: AttachSource =
@@ -6491,9 +6499,28 @@ function ChatThread() {
     // Rewriting a queued request: the composer is its editor, so this is a
     // write back into the queue — nothing goes to the agent here. An empty text
     // is not worth a row, so the request keeps the text it had.
+    // A file staged here is being staged for this request: the row keeps the
+    // files it already carries (nothing in this field can delete one of those —
+    // the queue still owns them) and gains the ones the field added.
     if (editingQueueId) {
+      // An upload still on the wire has no path yet, so the row would carry a
+      // link to a file nobody can read: Send waits for it, as it does for any
+      // other prompt.
+      if (attachmentsUploading) return;
       const queued = promptQueueAll.find((q) => q.id === editingQueueId);
-      if (queued && value && value !== queued.text) updateQueuedPrompt(queued.id, value);
+      const added = readyAttachments(pendingFiles);
+      if (queued && (added.length > 0 || (value && value !== queued.text))) {
+        updateQueuedPrompt(
+          queued.id,
+          value || queued.text,
+          added.length > 0 ? [...(queued.attachments ?? []), ...added] : undefined,
+        );
+      }
+      if (pendingFiles.length > 0) {
+        for (const url of previewUrlsRef.current.values()) URL.revokeObjectURL(url);
+        previewUrlsRef.current.clear();
+        setPendingFiles([]);
+      }
       cancelQueueEdit();
       return;
     }
@@ -6529,7 +6556,7 @@ function ChatThread() {
     const editId = editingMessageId;
     // An edit sends no files: the chips it shows are the message's own and stay
     // on it (see `replaceUserMessageText`), and a file staged here cannot reach
-    // an edit at all — `rewriting` keeps the paperclip shut.
+    // an edit at all — `editingSent` keeps the paperclip shut.
     const attach = editId ? [] : readyAttachments(pendingFiles);
     for (const url of previewUrlsRef.current.values()) URL.revokeObjectURL(url);
     previewUrlsRef.current.clear();
@@ -8553,10 +8580,12 @@ function ChatThread() {
                         <span className={styles.pendingFileSize}>{status}</span>
                       ) : null}
                     </span>
-                    {/* A chip an edit shows is the message's own file: it is
-                        there to be seen, not to be taken away — an edit
-                        rewrites words, and the files stay. */}
-                    {rewriting ? null : (
+                    {/* A chip an edit of a sent message shows is the
+                        message's own file: it is there to be seen, not to be
+                        taken away — that edit rewrites words, and the files
+                        stay. A queued request's chip is a staged file still
+                        waiting for its prompt, so it goes like any other. */}
+                    {editingSent ? null : (
                       <button
                         type="button"
                         className={styles.pendingFileRemove}
@@ -8781,7 +8810,7 @@ function ChatThread() {
                 if (!composerLocked && !pasteOfferPending) shiftMode.onKeyUp(e);
               }}
               onPaste={(e) => {
-                if (composerLocked || rewriting) return;
+                if (composerLocked || editingSent) return;
                 const files = collectClipboardFiles(e.clipboardData);
                 if (files.length > 0) {
                   e.preventDefault();
@@ -8961,7 +8990,7 @@ function ChatThread() {
                 title={`${attachSourceLabels[attachDefaultSource]} · ${t("chat.attachSwapHint", {
                   other: attachSourceLabels[attachOtherSource],
                 })}`}
-                disabled={composerLocked || rewriting}
+                disabled={composerLocked || editingSent}
                 onClick={() => openAttachSource(attachDefaultSource)}
                 onContextMenu={(e) => {
                   e.preventDefault();
