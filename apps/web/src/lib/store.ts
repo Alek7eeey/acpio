@@ -570,8 +570,11 @@ type AppState = {
   setComposerMode: (sessionId: string, mode: ComposerMode) => void;
   /** Optimistic local toggle; the save happens in the background. */
   setMultitask: (value: boolean) => Promise<void>;
-  /** `keepQueue` leaves the queued requests alone (a promotion, not a halt). */
-  cancelPrompt: (sessionId?: string, opts?: { keepQueue?: boolean }) => Promise<void>;
+  /**
+   * Halt the live turn. The queue is not part of the halt: those rows are text
+   * the reader typed, and dropping them here lost it for good — the only copy.
+   */
+  cancelPrompt: (sessionId?: string) => Promise<void>;
   setSidebarOpen: (open: boolean) => void;
   /**
    * Point the collapse flag at another sidebar scope and restore the state it
@@ -3503,10 +3506,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     // answer that turn is writing. The interrupted answer stops here, and the
     // new text goes to the agent at once instead of standing in the queue as a
     // second copy of a message the reader already has on screen.
-    // `keepQueue`: the requests queued behind the turn are other questions and
-    // are not part of the answer being replaced.
     const editing = Boolean(opts?.editMessageId) && Boolean(sid);
-    if (editing) await get().cancelPrompt(sid ?? undefined, { keepQueue: true });
+    if (editing) await get().cancelPrompt(sid ?? undefined);
     const limit = get().settings.multitask ? 2 : 1;
     const detail = sid ? liveDetail(get(), sid) : get().activeSession;
     const listed = sid ? get().sessions.find((s) => s.id === sid) : null;
@@ -3639,8 +3640,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!item) return;
     const sid = item.sessionId;
     set({ promptQueue: get().promptQueue.filter((q) => q.id !== id) });
-    // Stop itself drops the queue — this is a promotion, so keep the rest.
-    await get().cancelPrompt(sid, { keepQueue: true });
+    await get().cancelPrompt(sid);
     const inf = (get().inflightBySession?.[sid] ?? 0) + 1;
     const inflightBySession = { ...get().inflightBySession, [sid]: inf };
     set({
@@ -4014,7 +4014,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  async cancelPrompt(sessionId, opts) {
+  async cancelPrompt(sessionId) {
     const id = sessionId ?? get().activeSessionId;
     if (!id) return;
     const state = get();
@@ -4036,11 +4036,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({
       cancelledPromptEpoch: epoch,
       cancelledPromptEpochBySession: { ...state.cancelledPromptEpochBySession, [id]: epoch },
-      // Stop drops every queued request too (the user asked to halt the work);
-      // a caller promoting one of them leaves the others in place.
-      promptQueue: opts?.keepQueue
-        ? state.promptQueue
-        : state.promptQueue.filter((item) => item.sessionId !== id),
       inflightBySession,
       inflight: Object.values(inflightBySession).reduce((a, b) => a + b, 0),
       pendingPermission:
