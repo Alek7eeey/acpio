@@ -9,6 +9,7 @@ import {
   type BuiltinSubagentsSetting,
 } from "@acpio/shared";
 import type { ModelMessage } from "ai";
+import type { McpToolDecl } from "./mcp.js";
 
 /**
  * The prompt mode the composer's ⋯ menu picks (`prompt_style`, once `thinking`).
@@ -146,6 +147,18 @@ export interface BuiltinStoredSession {
      */
     subagents: BuiltinSubagentsSetting;
   };
+  /**
+   * The MCP tool declarations this chat's first turn sent — the half of the head
+   * the servers write, frozen with the rest of it.
+   *
+   * Rebuilt from the servers on every transport instead, they moved for reasons
+   * the chat could not see: another answer order, a tool a newer server version
+   * added, a server that timed out on this boot. The provider answers only an
+   * unchanged prefix, so each of those billed the whole history again (chat
+   * 26c9d529: 0 of 391 659 input tokens from cache on the first request after a
+   * restart, while its own neighbours read 99 %).
+   */
+  promptTools?: McpToolDecl[];
 }
 
 /** Session ids become file names, so never trust one blindly. */
@@ -223,6 +236,25 @@ export function loadBuiltinSession(stateDir: string, sessionId: string): Builtin
       Array.isArray(rules.delivered) &&
       rules.delivered.every((rule) => typeof rule === "string")
         ? { section: rules.section, delivered: rules.delivered as string[] }
+        : undefined;
+    // A declaration list that lost a field would be sent as a different head,
+    // which is the one thing this field exists to prevent: anything short of a
+    // whole list reads as "the chat froze none" and is written again from the
+    // servers on its next turn.
+    const toolsRaw = parsed.promptTools;
+    const promptTools =
+      Array.isArray(toolsRaw) &&
+      toolsRaw.every(
+        (decl) =>
+          !!decl &&
+          typeof decl === "object" &&
+          typeof decl.server === "string" &&
+          typeof decl.tool === "string" &&
+          typeof decl.qualifiedName === "string" &&
+          typeof decl.description === "string" &&
+          typeof decl.readOnly === "boolean",
+      )
+        ? (toolsRaw as McpToolDecl[])
         : undefined;
     const stored = parsed.usage;
     // A head with one broken field reads as "no frozen head": the first turn
@@ -308,6 +340,7 @@ export function loadBuiltinSession(stateDir: string, sessionId: string): Builtin
       ...(promptSkills ? { promptSkills } : {}),
       ...(promptRules ? { promptRules } : {}),
       ...(promptHead ? { promptHead } : {}),
+      ...(promptTools ? { promptTools } : {}),
     };
   } catch {
     // Missing or corrupt file: start fresh instead of bricking the session.

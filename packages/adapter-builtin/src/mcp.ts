@@ -441,6 +441,22 @@ export interface McpToolEntry extends McpToolDef {
   call: (args: Record<string, unknown>) => Promise<McpCallResult>;
 }
 
+/**
+ * One declaration exactly as a chat's first request sent it — the MCP half of
+ * the head, kept with the session (see `declaredMcpTools`).
+ */
+export interface McpToolDecl {
+  /** Server name as the chat's MCP list had it. */
+  server: string;
+  /** The server's own tool name — what `tools/call` wants. */
+  tool: string;
+  /** Name the model calls, de-duplicated when the chat froze its head. */
+  qualifiedName: string;
+  description: string;
+  inputSchema: unknown;
+  readOnly: boolean;
+}
+
 /** Connects every configured server and collects its tools; failures degrade. */
 export class McpManager {
   private built: { tools: McpToolEntry[]; warnings: string[] } | null = null;
@@ -545,6 +561,55 @@ export class McpManager {
     this.connections.length = 0;
     this.built = null;
   }
+}
+
+/** The declarations a chat's first turn fixed, ready to be stored with it. */
+export function snapshotMcpTools(entries: McpToolEntry[]): McpToolDecl[] {
+  return entries.map((entry) => ({
+    server: entry.server,
+    tool: entry.name,
+    qualifiedName: entry.qualifiedName,
+    description: entry.description,
+    inputSchema: entry.inputSchema,
+    readOnly: entry.readOnly,
+  }));
+}
+
+/**
+ * The entries a chat declares: the list its first turn fixed, with every call
+ * handed to the live connection behind it.
+ *
+ * Listed again from the servers instead, a transport built a second time sent
+ * whatever they answered that boot — another order, a tool a new server version
+ * added, or nothing at all from one that timed out — and the provider, which
+ * answers only an unchanged prefix, billed the whole history for the difference
+ * (chat 26c9d529: 0 of 391 659 input tokens from cache on the first request
+ * after a restart, its neighbours reading 99 %). A chat keeps the tools it
+ * started with; a tool the servers no longer offer says so when it is called,
+ * and the new ones arrive with the next chat.
+ */
+export function declaredMcpTools(decls: McpToolDecl[], live: McpToolEntry[]): McpToolEntry[] {
+  const byTool = new Map(live.map((entry) => [`${entry.server}\u0000${entry.name}`, entry]));
+  return decls.map((decl) => {
+    const found = byTool.get(`${decl.server}\u0000${decl.tool}`);
+    return {
+      name: decl.tool,
+      description: decl.description,
+      inputSchema: decl.inputSchema,
+      readOnly: decl.readOnly,
+      qualifiedName: decl.qualifiedName,
+      server: decl.server,
+      call: async (args) => {
+        if (!found) {
+          throw new Error(
+            `MCP server ${decl.server} no longer offers "${decl.tool}" — this chat declares the ` +
+              "tools it started with. Start a new chat to use the server as it is now.",
+          );
+        }
+        return found.call(args);
+      },
+    };
+  });
 }
 
 /** Wrap MCP tools as AI SDK tools; a non-read-only call asks the same user. */

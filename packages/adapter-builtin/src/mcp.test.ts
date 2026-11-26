@@ -4,7 +4,14 @@ import { createServer, type Server } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
-import { McpManager, mcpToolName, mcpToolSet, parseMcpServers } from "./mcp.js";
+import {
+  declaredMcpTools,
+  McpManager,
+  mcpToolName,
+  mcpToolSet,
+  parseMcpServers,
+  snapshotMcpTools,
+} from "./mcp.js";
 
 const FIXTURE = fileURLToPath(new URL("./fixtures/mcpStdioFixture.mjs", import.meta.url));
 const stdioSpec = { name: "fixture", command: process.execPath, args: [FIXTURE] };
@@ -296,6 +303,18 @@ describe("mcpToolSet", () => {
     ).execute;
     await expect(execute({}, { toolCallId: "call-7" })).resolves.toBe("rendered");
     expect(images).toEqual([["call-7", [{ data: PNG, mimeType: "image/png" }]]]);
+  });
+
+  it("declares what the chat froze, and refuses a tool the server dropped", async () => {
+    const { tools } = await manager([stdioSpec]).ensure();
+    const frozen = snapshotMcpTools(tools);
+    // A tool the servers no longer offer is still declared (the head is the
+    // bytes the provider cached) and says so when it is called.
+    const declared = declaredMcpTools(frozen, tools.filter((t) => t.name === "echo"));
+    expect(declared.map((t) => t.qualifiedName)).toEqual(frozen.map((d) => d.qualifiedName));
+    expect(declared[0]?.description).toBe(frozen[0]?.description);
+    const commit = declared.find((t) => t.name === "commit");
+    await expect(commit?.call({})).rejects.toThrow(/no longer offers "commit"/);
   });
 
   it("offers every tool and asks before a mutating one", async () => {

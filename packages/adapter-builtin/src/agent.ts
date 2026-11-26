@@ -61,7 +61,14 @@ import {
   type TurnModel,
   type TurnOutcome,
 } from "./loop.js";
-import { McpManager, mcpToolSet, parseMcpServers } from "./mcp.js";
+import {
+  declaredMcpTools,
+  McpManager,
+  mcpToolSet,
+  parseMcpServers,
+  snapshotMcpTools,
+  type McpToolDecl,
+} from "./mcp.js";
 import { renderProjectRules, renderRuleNotes, touchedFiles } from "./projectRules.js";
 import {
   builtinSlashCommands,
@@ -997,6 +1004,20 @@ export class BuiltinAgent implements InProcessAgentTransport {
     subagents: BuiltinSubagentsSetting;
   } | null = null;
   /**
+   * The MCP declarations this chat's first turn sent, in the order it sent them
+   * — the other half of the head, and the one the servers write.
+   *
+   * `frozenHead.servers` only names the servers. Listed live, their tools moved
+   * for any of the reasons a chat cannot control — another answer order before
+   * that was fixed, a tool a newer server version added, a server that timed out
+   * on this boot — and since the declarations ride ahead of every message, each
+   * move billed the whole history again (chat 26c9d529: 0 of 391 659 input
+   * tokens from cache on the first request after a restart, its neighbours
+   * reading 99 %). A chat keeps the declarations it started with; see
+   * `declaredMcpTools` for what a tool the servers dropped answers.
+   */
+  private frozenTools: McpToolDecl[] | null = null;
+  /**
    * The plan as this session last read it out of `.acpio/plan.md` — title,
    * overview, the Markdown, the steps and the stage. The file is the source of
    * truth (the tools write it, the reader may edit it by hand, the watcher
@@ -1400,6 +1421,10 @@ export class BuiltinAgent implements InProcessAgentTransport {
     // transport built again mid-chat (a restart, a settings save) must resume on
     // the bytes the provider has cached, not on the settings as they are now.
     this.frozenHead = stored?.promptHead ? { ...stored.promptHead } : null;
+    // …and the declarations themselves, for the same reason: the servers may
+    // answer differently on this boot, and the provider's cache holds the ones
+    // the chat already sent.
+    this.frozenTools = stored?.promptTools ? [...stored.promptTools] : null;
     // …and whether the history that head wrote went out with the reasoning echo:
     // the field is added to every assistant message that has none, so a
     // transport built again mid-chat may not take that decision again either.
@@ -1503,6 +1528,7 @@ export class BuiltinAgent implements InProcessAgentTransport {
         ? { promptRules: { section: this.frozenRules ?? "", delivered: [...this.deliveredRules] } }
         : {}),
       ...(this.frozenHead ? { promptHead: { ...this.frozenHead, servers: [...this.frozenHead.servers] } } : {}),
+      ...(this.frozenTools ? { promptTools: this.frozenTools } : {}),
       // The echo decision rides with the same bytes: a restart that retook it
       // would add the field to messages the provider has already cached.
       ...(this.echoThinking !== undefined ? { echoReasoning: this.echoThinking } : {}),
@@ -2754,6 +2780,19 @@ export class BuiltinAgent implements InProcessAgentTransport {
       };
       this.persist();
     }
+    // The declarations are the half of the head the *servers* write, and they
+    // are as much a part of it as the system prompt: listed live on every
+    // transport, they moved whenever a server answered in another order, gained
+    // a tool or missed its timeout, and the whole history was billed for it.
+    // What the first turn declared stays declared. A chat stored before this
+    // existed freezes on this turn, which sends those very declarations — so
+    // the change costs no request anything.
+    if (this.frozenTools === null) {
+      const servers = new Set(this.frozenHead?.servers ?? []);
+      const { tools: mcpEntries } = await this.mcp.ensure();
+      this.frozenTools = snapshotMcpTools(mcpEntries.filter((entry) => servers.has(entry.server)));
+      this.persist();
+    }
   }
 
   /**
@@ -2789,9 +2828,12 @@ export class BuiltinAgent implements InProcessAgentTransport {
     const ask = (toolCall: { title: string; kind: string; input: Record<string, unknown> }) =>
       this.askPermission(toolCall);
     // The tools follow the head: a server connected mid-chat (or a switch
-    // flipped) must not add one here — its tools arrive with the next session.
+    // flipped) must not add one here — its tools arrive with the next session —
+    // and the ones it declared are the declarations this chat froze, not what
+    // the servers answer on this boot (see `frozenTools`).
     const { tools: mcpEntries } = await this.mcp.ensure();
     const offered = mcpEntries.filter((entry) => head.servers.includes(entry.server));
+    const declared = this.frozenTools ? declaredMcpTools(this.frozenTools, offered) : offered;
     const system = systemPrompt(
       head.locale,
       head.replyLanguage,
@@ -2826,7 +2868,7 @@ export class BuiltinAgent implements InProcessAgentTransport {
         // the turn, which puts them right after that call's result.
         onImages: opts.onImages,
       }),
-      ...mcpToolSet(offered, { ask, onImages: opts.onImages }),
+      ...mcpToolSet(declared, { ask, onImages: opts.onImages }),
     };
     return { system, tools };
   }

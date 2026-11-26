@@ -3120,6 +3120,87 @@ describe("builtin provider routing", () => {
     }
   });
 
+  it("keeps the declarations a chat started with when a server answers differently", async () => {
+    // The declarations are the half of the head the servers write. Listed live
+    // on every transport instead of frozen with the rest of the head, a server
+    // that reordered its tools, added one or timed out on this boot moved the
+    // head of a chat that had already sent it — and the provider, which answers
+    // only an unchanged prefix, billed the whole history for it.
+    const stub = await startStub();
+    const dir = tempDir();
+    const answer = { text: "one", extra: false };
+    const server = createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on("data", (c: Buffer) => chunks.push(c));
+      req.on("end", () => {
+        const msg = JSON.parse(Buffer.concat(chunks).toString("utf8")) as {
+          id: number;
+          method: string;
+        };
+        const tools: Array<Record<string, unknown>> = [
+          { name: "render", description: answer.text, inputSchema: { type: "object" } },
+        ];
+        if (answer.extra) {
+          tools.push({ name: "extra", description: "new", inputSchema: { type: "object" } });
+        }
+        const results: Record<string, unknown> = {
+          initialize: { protocolVersion: "2024-11-05", capabilities: {} },
+          "tools/list": { tools },
+          "tools/call": { content: [{ type: "text", text: "rendered" }] },
+        };
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: results[msg.method] }));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const mcpServers = [
+      { name: "cad", url: `http://127.0.0.1:${(server.address() as { port: number }).port}/mcp` },
+    ];
+    const settings = {
+      builtinProviders: [
+        {
+          id: "p1",
+          name: "P",
+          url: stub.url,
+          apiKey: "sk",
+          models: [{ id: "m1", label: "M1", contextWindow: 8_000 }],
+        },
+      ],
+    };
+    /** What the provider matches its cache on: the system text and the tools. */
+    const head = () => {
+      const body = stub.bodies.at(-1) as Record<string, unknown>;
+      return JSON.stringify({
+        system: (body.messages as Array<Record<string, unknown>>)[0]?.content,
+        tools: body.tools,
+      });
+    };
+    try {
+      const first = boot(settings, dir);
+      const session = await first.call<{ sessionId: string }>("session/new", {
+        cwd: dir,
+        mcpServers,
+      });
+      await first.call("session/set_config_option", { configId: "model", value: "p1::m1" });
+      await first.call("session/prompt", { prompt: [{ type: "text", text: "привет" }] });
+      const cached = head();
+      expect(cached).toContain("mcp__cad_render");
+      first.close();
+
+      // This boot the server describes its tool differently and offers one more.
+      answer.text = "two";
+      answer.extra = true;
+      const second = boot(settings, dir);
+      await second.call("session/load", { sessionId: session.sessionId, cwd: dir, mcpServers });
+      await second.call("session/prompt", { prompt: [{ type: "text", text: "продолжай" }] });
+      expect(head()).toBe(cached);
+      second.close();
+    } finally {
+      await stub.close();
+      await new Promise<void>((done) => server.close(() => done()));
+    }
+  });
+
   it("parks the turn on the drift card and stops it on the reader's word", async () => {
     // The head moved between two requests of one chat: with the diagnostics
     // switch on, the request that pays for it waits for the reader instead of
@@ -5205,6 +5286,30 @@ describe("builtin session store", () => {
       promptHead: { ...frozen, servers: "fs" } as never,
     });
     expect(loadBuiltinSession(dir, "s-head-broken")?.promptHead).toBeUndefined();
+  });
+
+  it("keeps the declarations the chat sent, and drops a half-written list", () => {
+    const dir = tempDir();
+    const decls = [
+      {
+        server: "fs",
+        tool: "render",
+        qualifiedName: "mcp__fs_render",
+        description: "Render a file.",
+        inputSchema: { type: "object", properties: { path: { type: "string" } } },
+        readOnly: true,
+      },
+    ];
+    saveBuiltinSession(dir, "s-tools", { ...sample, promptTools: decls });
+    expect(loadBuiltinSession(dir, "s-tools")?.promptTools).toEqual(decls);
+
+    // One broken declaration and the whole list is none: the next turn writes
+    // it again from the servers rather than sending a head nobody cached.
+    saveBuiltinSession(dir, "s-tools-broken", {
+      ...sample,
+      promptTools: [{ ...decls[0], readOnly: "yes" }] as never,
+    });
+    expect(loadBuiltinSession(dir, "s-tools-broken")?.promptTools).toBeUndefined();
   });
 
   it("keeps the echo decision the history was sent with, and drops a broken one", () => {

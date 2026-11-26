@@ -23,9 +23,9 @@ read a `**/*.ts` file. Before that request the same chat was running at 92% cach
 
 When you touch prompt assembly:
 
-- Build the head once (system prompt, skills block, project rules, and the
-  settings those are written from) and persist it with the session, like
-  `frozenSkills`, `frozenRules` and `frozenHead` in
+- Build the head once (system prompt, skills block, project rules, the MCP tool
+  declarations, and the settings those are written from) and persist it with the
+  session, like `frozenSkills`, `frozenRules`, `frozenTools` and `frozenHead` in
   `packages/adapter-builtin/src/agent.ts`. A transport rebuilt mid-chat must resume
   on the same bytes — the stored `promptHead` is what makes a restart or a saved
   settings page land on them instead of on whatever the settings say now.
