@@ -1,0 +1,228 @@
+/* The editor's diff, embedded: the page's own `.mergeHost` rules do not reach a
+   panel that never mounted the editor, so the frame and the diff tints live
+   here too, scoped to this root. */
+.diff {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--surface);
+  /* Same tints as the code pane's diff editor, per its own scheme. */
+  --diff-add: rgba(46, 160, 67, 0.13);
+  --diff-add-text: rgba(46, 160, 67, 0.35);
+  --diff-add-bar: #2ea043;
+  --diff-del: rgba(248, 81, 73, 0.13);
+  --diff-del-text: rgba(248, 81, 73, 0.35);
+  --diff-del-bar: #cf222e;
+}
+
+.diff[data-scheme="dark"] {
+  --diff-add: rgba(46, 160, 67, 0.22);
+  --diff-add-text: rgba(46, 160, 67, 0.5);
+  --diff-add-bar: #3fb950;
+  --diff-del: rgba(248, 81, 73, 0.2);
+  --diff-del-text: rgba(248, 81, 73, 0.45);
+  --diff-del-bar: #f85149;
+}
+
+/* Red on the old side, green on the new one, the changed tokens filled in
+   instead of underlined — VS Code's reading of a diff. */
+.diff :global(.cm-merge-b .cm-changedLine),
+.diff :global(.cm-insertedLine),
+.diff :global(.cm-insertedLine .cm-lineNumbers) {
+  background-color: var(--diff-add) !important;
+}
+
+.diff :global(.cm-merge-a .cm-changedLine),
+.diff :global(.cm-deletedChunk),
+.diff :global(.cm-deletedLine) {
+  background-color: var(--diff-del) !important;
+}
+
+/* The mark in the margin: a solid bar per changed line, green on the new side
+   and red on the old one — where in the file the change sits, read at a
+   glance. */
+.diff :global(.cm-changeGutter) {
+  width: 7px;
+  min-width: 7px;
+  padding: 0;
+}
+
+.diff :global(.cm-merge-b .cm-changedLineGutter),
+.diff :global(.cm-insertedLineGutter) {
+  background: var(--diff-add-bar) !important;
+  box-shadow: inset 0 0 0 0 transparent;
+}
+
+.diff :global(.cm-merge-a .cm-changedLineGutter),
+.diff :global(.cm-deletedLineGutter) {
+  background: var(--diff-del-bar) !important;
+}
+
+/* A folded stretch of unchanged code: a thin band, and one icon at its left
+   edge — two chevrons, because the band opens onto the change above it as much
+   as onto the one below. The count lives in the tooltip. */
+.diff :global(.cm-diffGap) {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 22px;
+  padding: 0 2px;
+  border: none;
+  border-top: 1px solid var(--border-soft);
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.diff :global(.cm-diffGap svg) {
+  width: 14px;
+  height: 14px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--surface);
+}
+
+.diff :global(.cm-diffGap:hover) {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.diff :global(.cm-diffGap:hover svg) {
+  border-color: var(--accent);
+}
+
+/* The divider between the two columns, dragged to give one side more room. */
+.diff :global(.cm-diffSplitter) {
+  flex: 0 0 6px;
+  align-self: stretch;
+  cursor: col-resize;
+  touch-action: none;
+  background: var(--border-soft);
+}
+
+.diff :global(.cm-diffSplitter:hover) {
+  background: var(--accent);
+}
+
+.diff :global(.cm-merge-b .cm-changedText) {
+  background: var(--diff-add-text) !important;
+  text-decoration: none !important;
+}
+
+.diff :global(.cm-merge-a .cm-changedText),
+.diff :global(.cm-deletedText),
+.diff :global(.cm-deletedChunk .cm-deletedText) {
+  background: var(--diff-del-text) !important;
+  text-decoration: none !important;
+}
+
+.bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--surface);
+}
+
+.path {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font: 0.75rem var(--font-mono);
+  color: var(--text-secondary);
+}
+
+.modes {
+  flex: none;
+  display: flex;
+  gap: 2px;
+}
+
+.modeBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.modeBtn svg {
+  width: 15px;
+  height: 15px;
+}
+
+.modeBtn:hover {
+  background: var(--bg-tertiary);
+  color: var(--text);
+}
+
+.modeBtn[aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.note {
+  padding: 12px;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.host {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.host :global(.cm-mergeView) {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: 0;
+}
+
+/* flex-grow: without it the pair keeps its shrink-to-fit width (one gutter per
+   half) after a reload, and CodeMirror draws three lines of the file. */
+.host :global(.cm-mergeViewEditors) {
+  flex: 1 1 auto;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  padding: 0;
+}
+
+.host :global(.cm-mergeViewEditor) {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.host :global(.cm-editor) {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+.host :global(.cm-scroller) {
+  flex: 1 1 auto;
+  min-height: 0;
+}

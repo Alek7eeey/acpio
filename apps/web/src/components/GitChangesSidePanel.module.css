@@ -218,6 +218,13 @@
   border-left: none;
 }
 
+/* Nothing beside it: the list is the panel, so it takes the whole dock. */
+.navigatorAlone {
+  flex: 1 1 auto;
+  width: 100%;
+  border-left: none;
+}
+
 /* --- navigator: repo, branch, sync ------------------------------------- */
 
 .navHead {

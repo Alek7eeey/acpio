@@ -31,10 +31,6 @@ import {
   lineNumbers,
 } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
-import { StreamLanguage } from "@codemirror/language";
-import { javascript } from "@codemirror/lang-javascript";
-import { csharp } from "@codemirror/legacy-modes/mode/clike";
-import { sass } from "@codemirror/legacy-modes/mode/sass";
 import { lintGutter, setDiagnostics, type Diagnostic } from "@codemirror/lint";
 import {
   autocompletion,
@@ -55,7 +51,10 @@ import { editorApi, type EditorEntry, type LintItem, type ToolStatus } from "../
 import { toolsForPath } from "../lib/editorTools";
 import { dropBuffer, loadBuffers, requestPersistence, saveBuffer } from "../lib/editorStore";
 import { editorTheme, type EditorScheme } from "../lib/editorTheme";
+import { languageFor, primeLanguage } from "../lib/editorLanguage";
+import { readDiffMode, writeDiffMode, type DiffMode } from "../lib/editorDiffMode";
 import { NavHistory, trapBrowserBack } from "../lib/editorNav";
+import { syncMergeScroll } from "../lib/mergeScrollSync";
 import { TsLsp, languageIdOf, uriToRelPath, type LspLocation } from "../lib/tsLsp";
 import { MergeView, unifiedMergeView } from "@codemirror/merge";
 import type { GitChangedFileDto } from "@acpio/shared";
@@ -209,10 +208,6 @@ type PanelPlacement = { left: number; bottom: number; maxHeight: number };
 
 /** A file and its diff are two tabs over one document, as in VS Code. */
 type EditorTab = { path: string; kind: "file" | "diff"; pinned: boolean };
-
-/** VS Code offers the same two: changes side by side, or in one column. */
-type DiffMode = "split" | "inline";
-const DIFF_MODE_KEY = "acpio.diffMode.v1";
 
 /** Absolute path as the OS writes it, taken from the pane root. */
 const absOf = (root: string, path: string) => `${root.replace(/[\\/]+$/, "")}/${path}`;
@@ -564,54 +559,6 @@ function pointerExtensions(handlers: { current: EditorHandlers }) {
 
 export { hoverPoint };
 
-/**
- * Languages that are loaded on demand: a pane that opens no YAML should not ship
- * a YAML parser. A document is created without them and gets the extension in
- * its state before the tab appears (`ensureDocument` primes the cache first).
- */
-const lazyLanguage: Record<string, () => Promise<Extension>> = {
-  json: async () => (await import("@codemirror/lang-json")).json(),
-  jsonc: async () => (await import("@codemirror/lang-json")).json(),
-  css: async () => (await import("@codemirror/lang-css")).css(),
-  html: async () => (await import("@codemirror/lang-html")).html(),
-  htm: async () => (await import("@codemirror/lang-html")).html(),
-  yaml: async () => (await import("@codemirror/lang-yaml")).yaml(),
-  yml: async () => (await import("@codemirror/lang-yaml")).yaml(),
-};
-
-/** Extension loaded so far, keyed by file path. */
-const languageCache = new Map<string, Extension>();
-
-/** Load a lazy language before its document is built. */
-async function primeLanguage(path: string) {
-  if (languageCache.has(path)) return;
-  const ext = lazyLanguage[extensionOf(path)];
-  if (ext === undefined) return;
-  try {
-    languageCache.set(path, await ext());
-  } catch {
-    // A chunk that will not load costs highlighting, not the file.
-    languageCache.set(path, []);
-  }
-}
-
-function extensionOf(path: string) {
-  return path.split(".").pop()?.toLowerCase() ?? "";
-}
-
-function languageFor(path: string) {
-  const ext = extensionOf(path);
-  const cached = languageCache.get(path);
-  if (cached) return cached;
-  if (["ts", "tsx", "js", "jsx", "mjs", "cjs"].includes(ext)) {
-    return javascript({ typescript: ext.startsWith("ts"), jsx: ext === "tsx" || ext === "jsx" });
-  }
-  // SCSS has no CM6 parser of its own; the CM5 mode beats plain text.
-  if (ext === "scss" || ext === "sass") return StreamLanguage.define(sass);
-  if (ext === "cs") return StreamLanguage.define(csharp);
-  return [];
-}
-
 function toDiagnostic(view: EditorView, item: LintItem): Diagnostic | null {
   if (item.line > view.state.doc.lines) return null;
   const startLine = view.state.doc.line(Math.max(1, item.line));
@@ -787,12 +734,10 @@ export function EditorPage({
   const mergeRef = useRef<MergeView | null>(null);
   const mergeHostRef = useRef<HTMLDivElement | null>(null);
   /** Diff layout: two columns like VS Code's split view, or one unified column. */
-  const [diffMode, setDiffMode] = useState<DiffMode>(() =>
-    localStorage.getItem(DIFF_MODE_KEY) === "inline" ? "inline" : "split",
-  );
+  const [diffMode, setDiffMode] = useState<DiffMode>(readDiffMode);
 
   useEffect(() => {
-    localStorage.setItem(DIFF_MODE_KEY, diffMode);
+    writeDiffMode(diffMode);
   }, [diffMode]);
 
   // The pane list on the tasks page shows how much each editor holds open.
@@ -1303,6 +1248,10 @@ export function EditorPage({
         // The ordinary open first: the tab, the language server and the linter,
         // exactly as a plain open would give them.
         await openFile(path);
+        // A deleted file has no working copy to put on the right, and the diff
+        // effect refuses a tab without a document: the open above has already
+        // said why it failed.
+        if (!statesRef.current.has(path)) return;
         const base = await api.gitFileText(sessionId, paneToRepo(changes.root, root, path));
         diffBaseRef.current.set(path, base.text);
         const tab: EditorTab = tabs.find((t) => t.kind === "diff" && t.path === path) ?? {
@@ -1714,6 +1663,8 @@ export function EditorPage({
       merge.b.requestMeasure();
     });
     observer.observe(host);
+    // Two columns are one document: a scroll of either half carries the other.
+    const unsync = syncMergeScroll(merge.a.scrollDOM, merge.b.scrollDOM);
     // The merge view owns the document from now on: its state is the live one.
     statesRef.current.set(diff.path, merge.b.state);
     applyEditorConfig(merge.b);
@@ -1722,6 +1673,7 @@ export function EditorPage({
     // opening a diff stops at the diff. Upgrade when edits have to be undoable
     // through the tab view as one history.
     return () => {
+      unsync();
       observer.disconnect();
       statesRef.current.set(diff.path, merge.b.state);
       merge.destroy();

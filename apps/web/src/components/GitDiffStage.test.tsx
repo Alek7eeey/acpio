@@ -7,7 +7,10 @@ import { useAppStore } from "../lib/store";
 import { setDiffLayout } from "../lib/diffLayout";
 import { GitDiffStage } from "./GitDiffStage";
 
-const apiMock = vi.hoisted(() => ({ gitDiff: vi.fn(), gitShow: vi.fn() }));
+const apiMock = vi.hoisted(() => ({ gitShow: vi.fn() }));
+
+/** The commit the stage reads its diffs from. */
+const COMMIT_REV = "abc1234";
 vi.mock("../lib/api", () => ({ api: apiMock }));
 
 function fileDiff(path: string, body: string) {
@@ -31,7 +34,7 @@ function renderViewer(paths: string[] = SMALL, props: Partial<Parameters<typeof 
     <I18nProvider>
       <GitDiffStage
         sessionId="s1"
-        scope={{ mode: "working" }}
+        rev={COMMIT_REV}
         files={paths.map((path) => ({ path, badge: "M" }))}
         initialPath={null}
         onClose={onClose}
@@ -45,7 +48,6 @@ function renderViewer(paths: string[] = SMALL, props: Partial<Parameters<typeof 
 beforeEach(() => {
   useAppStore.setState((s) => ({ settings: { ...s.settings, locale: "ru" } }));
   act(() => setDiffLayout("stacked"));
-  apiMock.gitDiff.mockImplementation((_id: string, path: string) => Promise.resolve(fileDiff(path, `new-${path}`)));
   apiMock.gitShow.mockImplementation((_id: string, _rev: string, path: string) =>
     Promise.resolve(fileDiff(path, `new-${path}`)),
   );
@@ -63,12 +65,13 @@ describe("GitDiffStage", () => {
     renderViewer();
 
     await waitFor(() => expect(fileBlock("src/b.ts")).toBeTruthy());
-    // One request per file, keyed by path — not one whole-repo diff.
-    expect(apiMock.gitDiff.mock.calls.map((call) => call[1]).sort()).toEqual([
+    // One request per file, keyed by path — not one whole-diff for the commit.
+    expect(apiMock.gitShow.mock.calls.map((call) => call[2]).sort()).toEqual([
       "assets/logo.png",
       "src/a.ts",
       "src/b.ts",
     ]);
+    expect(apiMock.gitShow.mock.calls.every((call) => call[1] === COMMIT_REV)).toBe(true);
     expect(fileBlock("src/b.ts")?.textContent).toContain("new-src/b.ts");
     expect(fileBlock("src/b.ts")?.textContent).not.toContain("new-src/a.ts");
   });
@@ -76,8 +79,8 @@ describe("GitDiffStage", () => {
   it("loads only what is on screen in a large changeset", async () => {
     renderViewer(MANY);
 
-    await waitFor(() => expect(apiMock.gitDiff).toHaveBeenCalled());
-    const requested = apiMock.gitDiff.mock.calls.map((call) => call[1] as string);
+    await waitFor(() => expect(apiMock.gitShow).toHaveBeenCalled());
+    const requested = apiMock.gitShow.mock.calls.map((call) => call[2] as string);
     // The tail of the list must stay unloaded until it is scrolled to.
     expect(requested).not.toContain("src/f39.ts");
     expect(requested.length).toBeLessThan(MANY.length);
@@ -144,7 +147,7 @@ describe("GitDiffStage", () => {
   it("re-centres whenever the host picks a file, even the one already open", async () => {
     const viewerProps: Partial<Parameters<typeof GitDiffStage>[0]> = {
       sessionId: "s1",
-      scope: { mode: "working" },
+      rev: COMMIT_REV,
       initialPath: "src/a.ts",
       jumpToken: 0,
       onClose: () => {},
@@ -210,7 +213,7 @@ describe("GitDiffStage", () => {
       <I18nProvider>
         <GitDiffStage
           sessionId="s1"
-          scope={{ mode: "working" }}
+          rev={COMMIT_REV}
           files={SMALL.map((path) => ({ path, badge: "M" }))}
           initialPath={null}
           expanded
@@ -229,7 +232,7 @@ describe("GitDiffStage", () => {
     const user = userEvent.setup();
     const viewerProps: Partial<Parameters<typeof GitDiffStage>[0]> = {
       sessionId: "s1",
-      scope: { mode: "working" },
+      rev: COMMIT_REV,
       initialPath: "src/a.ts",
       onClose: () => {},
     };
@@ -266,7 +269,7 @@ describe("GitDiffStage", () => {
     const bottomBar = screen.getByRole("button", { name: "Следующий файл" }).closest("nav");
     // The header names the file being read; everything the reader touches sits
     // in the bar under it, next to the file stepper.
-    expect(topBar?.textContent).toContain("Изменения");
+    expect(topBar?.textContent).toContain(COMMIT_REV);
     expect(topBar?.textContent).toContain("1 / 3");
     expect(bottomBar).toBeTruthy();
     for (const name of [
@@ -301,7 +304,7 @@ describe("GitDiffStage", () => {
   });
 
   it("reports a file whose diff failed to load", async () => {
-    apiMock.gitDiff.mockImplementation((_id: string, path: string) =>
+    apiMock.gitShow.mockImplementation((_id: string, _rev: string, path: string) =>
       path === "src/b.ts" ? Promise.reject(new Error("boom")) : Promise.resolve(fileDiff(path, "new")),
     );
     renderViewer();

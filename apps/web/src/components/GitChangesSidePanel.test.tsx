@@ -5,17 +5,23 @@ import userEvent from "@testing-library/user-event";
 import { I18nProvider } from "../lib/i18n";
 import { useAppStore } from "../lib/store";
 import { GitChangesSidePanel } from "./GitChangesSidePanel";
+import { forgetDiffs } from "./EditorDiff";
 
 const apiMock = vi.hoisted(() => ({
   gitStatus: vi.fn(),
   gitLog: vi.fn(),
   gitDiff: vi.fn(),
   gitShow: vi.fn(),
+  gitFileText: vi.fn(),
   gitCommitDetail: vi.fn(),
   gitSync: vi.fn(),
   gitStash: vi.fn(),
 }));
 vi.mock("../lib/api", () => ({ api: apiMock }));
+
+/** The panel reads a change with the editor's diff, which reads the file itself. */
+const editorFileMock = vi.hoisted(() => vi.fn());
+vi.mock("../lib/editorApi", () => ({ editorApi: { file: editorFileMock } }));
 
 const STATUS = {
   repo: true,
@@ -100,7 +106,14 @@ function renderPanel(props: Partial<Parameters<typeof GitChangesSidePanel>[0]> =
 }
 
 beforeEach(() => {
-  useAppStore.setState((s) => ({ settings: { ...s.settings, locale: "ru" } }));
+  // The panel's diff remembers the files it read; every test starts empty.
+  forgetDiffs();
+  useAppStore.setState((s) => ({
+    settings: { ...s.settings, locale: "ru" },
+    editorReveal: null,
+  }));
+  apiMock.gitFileText.mockResolvedValue({ text: "const a = 1;", exists: true });
+  editorFileMock.mockResolvedValue({ path: "src/a.ts", text: "const a = 2;" });
   apiMock.gitStatus.mockResolvedValue(STATUS);
   apiMock.gitLog.mockResolvedValue({ commits: [], outgoing: [] });
   apiMock.gitCommitDetail.mockResolvedValue({ detail: null });
@@ -142,6 +155,11 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
+
+/** A changed file's row in the navigator: the diff on the stage repeats the path
+ *  as its own title, so the row is the one that is also a button. */
+const fileRow = (path: string) =>
+  document.querySelector<HTMLElement>(`[role="button"][title="${path}"]`);
 
 /** jsdom has no real viewport: pin the width the panel reads for its layout. */
 async function withViewportWidth(width: number, run: () => Promise<void>) {
@@ -210,23 +228,31 @@ describe("GitChangesSidePanel", () => {
     expect(panel.parentElement).toBe(document.body);
   });
 
-  it("re-reads the file diffs when the reader asks for a refresh", async () => {
+  it("reads a changed file with the editor's diff, inside the panel", async () => {
     const user = userEvent.setup();
     renderPanel();
-    await waitFor(() => expect(apiMock.gitDiff).toHaveBeenCalledWith("s1", "src/a.ts"));
-    apiMock.gitDiff.mockClear();
 
-    // The same file set can still hold different content: a refresh must re-read
-    // the diff, not just the status the poll already keeps current.
-    await user.click(await screen.findByRole("button", { name: "Обновить" }));
+    // The panel opens on the first change, and a click moves the diff to its
+    // own file: both sides come from the editor's reader, not from a git patch.
+    const diff = await waitFor(() => {
+      const node = document.querySelector('[data-editor-diff="src/a.ts"]');
+      expect(node).toBeTruthy();
+      return node as HTMLElement;
+    });
+    expect(apiMock.gitFileText).toHaveBeenCalledWith("s1", "src/a.ts");
+    expect(editorFileMock).toHaveBeenCalledWith("C:/repo", "src/a.ts");
+    expect(diff.textContent).toContain("const a = 2;");
 
-    await waitFor(() => expect(apiMock.gitDiff).toHaveBeenCalledWith("s1", "src/a.ts"));
+    await user.click(fileRow("src/a.ts")!);
+    // Still the panel's own stage: nothing was handed to the code pane.
+    expect(useAppStore.getState().editorReveal).toBeNull();
+    expect(apiMock.gitDiff).not.toHaveBeenCalled();
   });
 
   it("marks the refresh button busy while the re-read is still running", async () => {
     const user = userEvent.setup();
     renderPanel();
-    await waitFor(() => expect(apiMock.gitDiff).toHaveBeenCalledWith("s1", "src/a.ts"));
+    await waitFor(() => expect(fileRow("src/a.ts")).toBeTruthy());
 
     // The poll already keeps the lists current, so a manual refresh can finish
     // without changing a pixel: the button itself has to say the work is pending.

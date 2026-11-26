@@ -25,6 +25,16 @@ if (dom) {
   }
 }
 
+// jsdom has no layout, and a text range has no rects to give: CodeMirror
+// measures with `Range.getClientRects` on a pass it schedules itself, so the
+// missing method surfaced as an unhandled error from a timer nobody awaited
+// ("textRange(...).getClientRects is not a function") rather than as a failed
+// test. An empty list is what a layout-less engine would answer.
+const range = (globalThis as { Range?: { prototype: Range } }).Range;
+if (range && typeof range.prototype.getClientRects !== "function") {
+  range.prototype.getClientRects = () => [] as unknown as DOMRectList;
+}
+
 // jsdom has no canvas, and says so — `Not implemented: HTMLCanvasElement's
 // getContext()` — on every call, which xterm makes while feature-detecting in
 // its module body. Answer `null` instead: that is exactly what jsdom answers

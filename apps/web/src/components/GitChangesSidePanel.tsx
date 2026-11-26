@@ -11,13 +11,8 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import type { GitCommitDetailDto, GitCommitDto, GitCommitFileDto, GitStatusDto } from "@acpio/shared";
-import {
-  GitBlameView,
-  GitDiffStage,
-  GitStageHeader,
-  type GitDiffFile,
-  type GitDiffScope,
-} from "./GitDiffStage";
+import { GitBlameView, GitDiffStage, GitStageHeader, type GitDiffFile } from "./GitDiffStage";
+import { EditorDiff } from "./EditorDiff";
 import {
   CHANGES_VIEW_KEY,
   GitChangesCommitPane,
@@ -46,8 +41,8 @@ import {
   gitDefaultPanelWidth,
   gitNavigatorWidthFor,
 } from "../lib/gitLayout";
-import { normalizeGitPath } from "../lib/gitFileTree";
-import { formatGitErrorToast, gitConflictFiles, gitPullConflictMessage, gitStatusBadge, gitSyncSuccessMessage, isGitConflictFile, isUntrackedGitFile } from "../lib/gitUi";
+import { firstChangedFilePath, normalizeGitPath } from "../lib/gitFileTree";
+import { formatGitErrorToast, gitConflictFiles, gitPullConflictMessage, gitSyncSuccessMessage, isGitConflictFile } from "../lib/gitUi";
 import styles from "./GitChangesSidePanel.module.css";
 
 /** Assumed width of the ops menu, used to keep it inside the viewport. */
@@ -279,9 +274,27 @@ export function GitChangesSidePanel({
         Math.max(GIT_NAVIGATOR_MIN_WIDTH, draggedNavigatorWidth),
       )
     : gitNavigatorWidthFor(panelWidth);
+  const files = status?.files ?? [];
+  const conflictFiles = files.filter(isGitConflictFile);
+  const stagedFiles = files.filter((f) => f.staged && !isGitConflictFile(f));
+  const unstagedFiles = files.filter((f) => f.unstaged && !isGitConflictFile(f));
+  /**
+   * The working file whose diff the panel shows: the reader's pick, or the first
+   * row of the list — an open panel does not show an empty half while there is a
+   * diff to read. A commit on the stage owns the half, so nothing falls back.
+   */
+  const workingPath =
+    selection.kind === "working"
+      ? (selection.path && files.some((file) => file.path === selection.path)
+          ? selection.path
+          : firstChangedFilePath({ conflictFiles, unstagedFiles, stagedFiles }))
+      : null;
+  /* One diff at a time beside the list: a change read by the editor, a commit's
+     files read by the stage, or a file's blame. */
+  const withStage = blame !== null || selection.kind === "commit" || workingPath !== null;
   /* The bottom sheet is for phone-width overlay only; a docked desktop panel
      always keeps the split navigator column, however narrow the user drags it. */
-  const sheetNavigator = overlay && panelWidth < GIT_SPLIT_MIN_WIDTH;
+  const sheetNavigator = overlay && panelWidth < GIT_SPLIT_MIN_WIDTH && withStage;
 
   const onSplitterDown = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -740,54 +753,39 @@ export function GitChangesSidePanel({
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [fullscreen, onFullscreenChange]);
 
+  // The full view belongs to a commit's diff, the one thing whose stage carries
+  // the way out: anything else on the stage would leave a screen-wide panel with
+  // no button back.
+  useEffect(() => {
+    if (fullscreen && (blame !== null || selection.kind !== "commit")) onFullscreenChange(false);
+  }, [blame, fullscreen, onFullscreenChange, selection.kind]);
+
   /**
-   * Selecting a file is what feeds the stage; selecting it again empties it.
-   * On a phone the sheet gets out of the way: the diff is what was asked for.
+   * A changed file is read in the panel itself, by the code pane's own diff —
+   * picking it is what puts it on the stage.
    */
-  const showFile = useCallback(
-    (next: Selection) => {
-      setBlame(null);
-      setSelection(next);
-      setJumpToken((token) => token + 1);
-      if (sheetNavigator && (next.kind === "working" ? next.path : next.filePath)) {
-        setNavigatorOpen(false);
-      }
-    },
-    [sheetNavigator],
-  );
+  const openWorkingDiff = useCallback((path: string) => {
+    setBlame(null);
+    setSelection({ kind: "working", path });
+    if (sheetNavigator) setNavigatorOpen(false);
+  }, [sheetNavigator]);
 
-  const toggleWorkingFile = useCallback(
-    (path: string) => {
-      showFile(
-        selection.kind === "working" && selection.path === path
-          ? { kind: "working", path: null }
-          : { kind: "working", path },
-      );
-    },
-    [selection, showFile],
-  );
-
-  /** Jump to the previous/next changed file, GitHub Desktop style. */
-  const stepFile = useCallback(
-    (delta: number) => {
-      const paths = (status?.files ?? []).map((f) => f.path);
-      if (paths.length === 0) return;
-      const current = selection.kind === "working" ? paths.indexOf(selection.path ?? "") : -1;
-      const next = current < 0 ? 0 : Math.min(paths.length - 1, Math.max(0, current + delta));
-      showFile({ kind: "working", path: paths[next]! });
-    },
-    [status, selection, showFile],
-  );
-
+  /**
+   * Selecting a commit's file is what feeds the stage; selecting it again empties
+   * it. On a phone the sheet gets out of the way: the diff is what was asked for.
+   */
   const toggleCommitFile = useCallback(
     (hash: string, filePath: string) => {
-      showFile(
+      setBlame(null);
+      setSelection(
         selection.kind === "commit" && selection.hash === hash && selection.filePath === filePath
           ? { kind: "commit", hash, filePath: null }
           : { kind: "commit", hash, filePath },
       );
+      setJumpToken((token) => token + 1);
+      if (sheetNavigator) setNavigatorOpen(false);
     },
-    [selection, showFile],
+    [selection, sheetNavigator],
   );
 
   const setFilesStage = useCallback(
@@ -1154,38 +1152,29 @@ export function GitChangesSidePanel({
   if (!open) return null;
 
   const repoPending = statusLoading || (awaitingGit && !status);
-  const files = status?.files ?? [];
   const repo = status?.repo ?? false;
   /** Local branches: the branch board lists them and picks them as targets. */
   const branchNames = status?.branches ?? [];
   /** Local names first, then remote ones — a merge source or a start point. */
   const branchRefs = commitBranches.length > 0 ? commitBranches : branchNames;
-  const conflictFiles = files.filter(isGitConflictFile);
-  const stagedFiles = files.filter((f) => f.staged && !isGitConflictFile(f));
-  const unstagedFiles = files.filter((f) => f.unstaged && !isGitConflictFile(f));
   const workingSelected = selection.kind === "working";
   const commitSelected = selection.kind === "commit";
 
-  const stageFiles: GitDiffFile[] = commitSelected
-    ? (commitDetail?.files ?? []).map((file) => ({
-        path: normalizeGitPath(file.path),
-        badge: COMMIT_FILE_BADGE[file.status],
-        additions: file.additions,
-        deletions: file.deletions,
-      }))
-    : files.map((file) => ({
-        path: normalizeGitPath(file.path),
-        badge: gitStatusBadge(file),
-        additions: file.additions,
-        deletions: file.deletions,
-        untracked: isUntrackedGitFile(file),
-      }));
-  /** The stage shows one file at a time; nothing selected means it starts at the top. */
-  const stagePath = commitSelected ? selection.filePath : selection.path;
-  const stageScope: GitDiffScope =
-    commitSelected && selection.hash
-      ? { mode: "commit", rev: selection.hash }
-      : { mode: "working" };
+  const stageFiles: GitDiffFile[] = (commitDetail?.files ?? []).map((file) => ({
+    path: normalizeGitPath(file.path),
+    badge: COMMIT_FILE_BADGE[file.status],
+    additions: file.additions,
+    deletions: file.deletions,
+  }));
+  /** The stage shows a commit's files, one at a time; nothing picked means the top. */
+  const stagePath = commitSelected ? selection.filePath : null;
+  /** The working file on the stage, and whether git reports it gone. */
+  const workingFile = files.find((file) => file.path === workingPath) ?? null;
+  const workingDeleted = Boolean(workingFile && (workingFile.index === "D" || workingFile.worktree === "D"));
+  /** What the diff re-reads on: git's numbers for the file, and a manual refresh. */
+  const workingSignature = workingFile
+    ? `${workingFile.index}${workingFile.worktree}:${workingFile.additions}:${workingFile.deletions}:${reloadToken}`
+    : String(reloadToken);
 
   const commitPaneProps = {
     files,
@@ -1196,7 +1185,9 @@ export function GitChangesSidePanel({
     stagedCount: status?.stagedCount ?? 0,
     busy,
     workingSelected,
-    selectionPath: workingSelected ? selection.path : null,
+    // What the panel shows, not only what was clicked: the first change opens
+    // the panel with its diff, so its row is the one marked.
+    selectionPath: workingSelected ? workingPath : null,
     commitSummary,
     commitDescription,
     onSummaryChange: setCommitSummary,
@@ -1204,7 +1195,7 @@ export function GitChangesSidePanel({
     onStageAll: () => void stageAll(),
     onUnstageAll: () => void unstageAll(),
     onStagePaths: (paths: string[], staged: boolean) => void setFilesStage(paths, staged),
-    onSelectFile: toggleWorkingFile,
+    onSelectFile: openWorkingDiff,
     onCommit: (e: FormEvent) => void onCommit(e),
     onCommitAndPush: () => void onCommitAndPush(),
     onStageAndCommit: () => void stageAll(),
@@ -1363,7 +1354,7 @@ export function GitChangesSidePanel({
   };
 
   const navigatorInner = (
-    <div className={styles.navigator}>
+    <div className={`${styles.navigator}${withStage ? "" : ` ${styles.navigatorAlone}`}`}>
       <header className={styles.navHead}>
         <div className={styles.navHeadTop}>
           <span className={styles.navRepoIcon} aria-hidden>
@@ -1484,7 +1475,7 @@ export function GitChangesSidePanel({
               <span className={styles.navChangeCaption}>
                 {t("git.changesCount", { count: files.length })}
               </span>
-              {/* The stage already says the copy is clean; the header only counts. */}
+              {/* The header counts the copy; the diff itself is the code pane's. */}
               {status?.dirty ? (
                 <span className={styles.navStats}>
                   <span className={styles.statAdd}>+{status.additions}</span>
@@ -1517,65 +1508,37 @@ export function GitChangesSidePanel({
       <div className={styles.navTools} role="toolbar" aria-label={t("git.title")} ref={setToolsEl}>
         <div className={styles.navToolsLead} ref={setToolsLeadEl}>
           {tab === "changes" ? (
-            <>
-              <div className={styles.navStep}>
-                <button
-                  type="button"
-                  className={styles.segBtn}
-                  disabled={files.length === 0}
-                  title={t("git.diffStagePrev")}
-                  aria-label={t("git.diffStagePrev")}
-                  onClick={() => stepFile(-1)}
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-                    <path d="M6 15l6-6 6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </button>
-                <button
-                  type="button"
-                  className={styles.segBtn}
-                  disabled={files.length === 0}
-                  title={t("git.diffStageNext")}
-                  aria-label={t("git.diffStageNext")}
-                  onClick={() => stepFile(1)}
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-                    <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </button>
-              </div>
-              <div className={styles.segSwitch}>
-                <button
-                  type="button"
-                  className={`${styles.segBtn}${view === "list" ? ` ${styles.segBtnActive}` : ""}`}
-                  aria-pressed={view === "list"}
-                  aria-label={t("git.fileViewList")}
-                  title={t("git.fileViewList")}
-                  onClick={() => setView("list")}
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-                    <path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                  </svg>
-                </button>
-                <button
-                  type="button"
-                  className={`${styles.segBtn}${view === "tree" ? ` ${styles.segBtnActive}` : ""}`}
-                  aria-pressed={view === "tree"}
-                  aria-label={t("git.fileViewTree")}
-                  title={t("git.fileViewTree")}
-                  onClick={() => setView("tree")}
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-                    <path
-                      d="M4 6h6M4 12h6M4 18h6M14 6h6M14 12h6"
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                </button>
-              </div>
-            </>
+            <div className={styles.segSwitch}>
+              <button
+                type="button"
+                className={`${styles.segBtn}${view === "list" ? ` ${styles.segBtnActive}` : ""}`}
+                aria-pressed={view === "list"}
+                aria-label={t("git.fileViewList")}
+                title={t("git.fileViewList")}
+                onClick={() => setView("list")}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                className={`${styles.segBtn}${view === "tree" ? ` ${styles.segBtnActive}` : ""}`}
+                aria-pressed={view === "tree"}
+                aria-label={t("git.fileViewTree")}
+                title={t("git.fileViewTree")}
+                onClick={() => setView("tree")}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path
+                    d="M4 6h6M4 12h6M4 18h6M14 6h6M14 12h6"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </button>
+            </div>
           ) : null}
         </div>
         <div className={styles.navToolsActions}>
@@ -1718,10 +1681,10 @@ export function GitChangesSidePanel({
                 detail={commitSelected ? commitDetail : null}
                 repoRoot={status?.root}
                 wipFiles={workingSelected && status?.dirty ? files : undefined}
-                selectedFilePath={commitSelected ? selection.filePath : selection.path}
+                selectedFilePath={commitSelected ? selection.filePath : workingPath}
                 onSelectFile={(path) => {
                   if (commitSelected) toggleCommitFile(selection.hash, path);
-                  else toggleWorkingFile(path);
+                  else openWorkingDiff(path);
                 }}
                 onSelectParent={(hash) => void selectCommit(hash)}
                 onBlameFile={loadWorkingBlame}
@@ -1737,13 +1700,20 @@ export function GitChangesSidePanel({
 
   const stageSlot = blame ? (
     <GitBlameView path={blame.path} text={blame.text} onClose={() => setBlame(null)} />
-  ) : (
-    /* The docked panel keeps its navigator (the tree on the right) with the
-       changed files, so the board drops its own list of them; the full view,
-       which sends the navigator away, is what brings the picker back. */
+  ) : workingPath && status?.root ? (
+    /* A change is read by the editor itself — the same diff the code pane shows,
+       inside the panel, so a file never has to be opened somewhere else. */
+    <EditorDiff
+      sessionId={sessionId}
+      root={status.root}
+      path={workingPath}
+      deleted={workingDeleted}
+      signature={workingSignature}
+    />
+  ) : commitSelected ? (
     <GitDiffStage
       sessionId={sessionId}
-      scope={stageScope}
+      rev={selection.hash}
       files={stageFiles}
       initialPath={stagePath}
       jumpToken={jumpToken}
@@ -1755,7 +1725,7 @@ export function GitChangesSidePanel({
       onToggleExpand={() => onFullscreenChange(!fullscreen)}
       onClose={sheetNavigator && !fullscreen ? onClose : undefined}
     />
-  );
+  ) : null;
 
   const panelClasses = [
     styles.panel,
@@ -1816,8 +1786,8 @@ export function GitChangesSidePanel({
         </>
       ) : (
         <>
-          <div className={styles.stageHost}>{stageSlot}</div>
-          {fullscreen || sheetNavigator ? null : (
+          {stageSlot ? <div className={styles.stageHost}>{stageSlot}</div> : null}
+          {!stageSlot || fullscreen || sheetNavigator ? null : (
             <div
               className={styles.navSplitter}
               onPointerDown={onNavigatorSplitterDown}

@@ -23,8 +23,6 @@ export type GitDiffFile = {
   untracked?: boolean;
 };
 
-export type GitDiffScope = { mode: "working" } | { mode: "commit"; rev: string };
-
 type FileStatus = "idle" | "loading" | "ready" | "error";
 
 type FileEntry = {
@@ -249,7 +247,7 @@ export function GitStageHeader({
  */
 export function GitDiffStage({
   sessionId,
-  scope,
+  rev,
   files,
   initialPath,
   jumpToken = 0,
@@ -262,7 +260,8 @@ export function GitDiffStage({
   onClose,
 }: {
   sessionId: string;
-  scope: GitDiffScope;
+  /** The commit whose diff is read: a working file's diff is a code pane tab. */
+  rev: string;
   files: GitDiffFile[];
   /** File to bring into view: the caller's pick on the first open, a jump after that. */
   initialPath: string | null;
@@ -320,8 +319,6 @@ export function GitDiffStage({
   const anchorPathRef = useRef<string | null>(null);
   const currentIndexRef = useRef(0);
 
-  const mode = scope.mode;
-  const rev = scope.mode === "commit" ? scope.rev : undefined;
   const fileKey = files.map((file) => normalizeGitPath(file.path)).join("\n");
 
   // A new file set (or scope) invalidates every loaded diff.
@@ -351,7 +348,7 @@ export function GitDiffStage({
     alignedHeightRef.current = 0;
     // `fileKey` covers the paths; the rest of `files` is metadata for the same rows.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fileKey, mode, rev, sessionId]);
+  }, [fileKey, rev, sessionId]);
 
   useEffect(() => {
     entriesRef.current = entries;
@@ -375,8 +372,7 @@ export function GitDiffStage({
       const generation = generationRef.current;
       inflightRef.current += 1;
       patchEntry(index, { status: "loading" });
-      const request =
-        mode === "commit" && rev ? api.gitShow(sessionId, rev, entry.path) : api.gitDiff(sessionId, entry.path);
+      const request = api.gitShow(sessionId, rev, entry.path);
       request
         .then((result) => {
           if (generation !== generationRef.current) return;
@@ -391,7 +387,7 @@ export function GitDiffStage({
           pump();
         });
     }
-  }, [mode, patchEntry, rev, sessionId]);
+  }, [patchEntry, rev, sessionId]);
 
   const requestDiff = useCallback(
     (index: number) => {
@@ -647,8 +643,8 @@ export function GitDiffStage({
   }, [filesInHost]);
 
   const contextSource = useMemo<DiffContextSource>(
-    () => (mode === "commit" && rev ? { sessionId, mode: "commit", commitRev: rev } : { sessionId, mode: "working" }),
-    [mode, rev, sessionId],
+    () => ({ sessionId, mode: "commit", commitRev: rev }),
+    [rev, sessionId],
   );
 
   const renderHead = (entry: FileEntry, headClass: string): ReactNode => (
@@ -690,7 +686,7 @@ export function GitDiffStage({
   return (
     <section className={styles.stage} aria-label={t("git.title")}>
       <GitStageHeader
-        title={scope.mode === "commit" ? scope.rev.slice(0, 7) : t("git.tabChanges")}
+        title={rev.slice(0, 7)}
         counter={
           hasEntries
             ? t("git.diffStageCounter", { index: currentIndex + 1, total: entries.length })
