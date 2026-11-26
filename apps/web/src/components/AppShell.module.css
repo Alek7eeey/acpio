@@ -1966,6 +1966,11 @@
   display: flex;
   align-items: center;
   height: var(--session-row-h);
+  /* Centering a line box centers the font's ascent and descent, which are not
+     symmetric: the caps land 1px under the row's middle, next to a badge and a
+     pin that sit there geometrically. Measured on the tree row, so lift the
+     text back onto it. */
+  transform: translateY(-1px);
   /* Figtree is Latin-heavy; system stack keeps EN/RU chat titles the same weight. */
   font-family:
     system-ui,
