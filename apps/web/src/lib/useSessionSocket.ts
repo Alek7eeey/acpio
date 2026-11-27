@@ -63,6 +63,9 @@ const RETRY_MIN_MS = 1_000;
 const RETRY_MAX_MS = 5_000;
 /** Reconnecting faster than this is a blip — resync silently, no toast. */
 const RESTORED_TOAST_AFTER_MS = 8_000;
+/** Away this long and the page ran no JS: a hidden tab has its timers and frames
+ *  suspended, so the thread on screen is a snapshot of the moment it left. */
+const WAKE_RESYNC_AFTER_MS = 10_000;
 
 export function useSessionSocket(sessionId: string | null, enabled = true) {
   const handleWsEvent = useAppStore((s) => s.handleWsEvent);
@@ -91,6 +94,8 @@ export function useSessionSocket(sessionId: string | null, enabled = true) {
     let lastAliveAt = 0;
     let lastPingAt = 0;
     let connectStartedAt = 0;
+    /** When the page was last hidden — the measure of how much a wake missed. */
+    let awaySince = 0;
 
     const clearRetry = () => {
       if (retryTimer !== undefined) {
@@ -255,7 +260,20 @@ export function useSessionSocket(sessionId: string | null, enabled = true) {
     };
 
     const onVisibility = () => {
-      if (document.visibilityState === "visible") poke();
+      if (document.visibilityState !== "visible") {
+        awaySince = Date.now();
+        return;
+      }
+      const away = awaySince ? Date.now() - awaySince : 0;
+      awaySince = 0;
+      poke();
+      // A frozen page received nothing: the socket was never closed, so no
+      // reconnect follows and nothing re-reads the chat. What the reader sees is
+      // the moment the tab left — the answer frozen mid-stream behind a live
+      // Stop, and a prompt the queue drained meanwhile with none of its
+      // reasoning. The reconnect path repairs exactly this; a tab that returns
+      // has to ask for the same repair.
+      if (away >= WAKE_RESYNC_AFTER_MS) void useAppStore.getState().resyncAfterReconnect();
     };
     // The OS losing its network is a hint, not a verdict — same-origin traffic
     // still works. Ask the pipe rather than dropping it, instead of painting

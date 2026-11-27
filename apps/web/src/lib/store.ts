@@ -4109,6 +4109,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     // down is lost. Re-read what the server owns — the tree, every chat on
     // screen (a pane the outage outran is as stale as the focused one) and the
     // board, whose tasks are a partition of their own and reach no tree.
+    // A tab that was frozen rather than disconnected loses the same frames and
+    // keeps its socket, so the return-to-visibility path calls this too.
     void get().refreshSessions().catch(() => {});
     void get().refreshBoards().catch(() => {});
     const boardId = get().openBoardId;

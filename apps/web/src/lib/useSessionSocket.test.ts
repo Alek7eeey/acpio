@@ -125,6 +125,53 @@ describe("useSessionSocket recovery", () => {
     expect(FakeSocket.instances.length).toBe(1);
   });
 
+  it("re-reads the open chats when a frozen page comes back", () => {
+    const resync = vi.fn(async () => {});
+    useAppStore.setState({ resyncAfterReconnect: resync });
+    let state: DocumentVisibilityState = "visible";
+    const visibility = vi
+      .spyOn(document, "visibilityState", "get")
+      .mockImplementation(() => state);
+    renderHook(() => useSessionSocket("s1", true));
+    const socket = lastSocket();
+    socket.answersPings = true;
+    socket.open();
+
+    // Hidden for a minute: no JS ran here, so every frame the agent sent in that
+    // minute is gone and nothing but a re-read brings the answer back.
+    state = "hidden";
+    document.dispatchEvent(new Event("visibilitychange"));
+    vi.advanceTimersByTime(60_000);
+    state = "visible";
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    expect(resync).toHaveBeenCalledTimes(1);
+    expect(FakeSocket.instances.length).toBe(1);
+    visibility.mockRestore();
+  });
+
+  it("leaves a chat alone when the tab was away for a moment", () => {
+    const resync = vi.fn(async () => {});
+    useAppStore.setState({ resyncAfterReconnect: resync });
+    let state: DocumentVisibilityState = "visible";
+    const visibility = vi
+      .spyOn(document, "visibilityState", "get")
+      .mockImplementation(() => state);
+    renderHook(() => useSessionSocket("s1", true));
+    const socket = lastSocket();
+    socket.answersPings = true;
+    socket.open();
+
+    state = "hidden";
+    document.dispatchEvent(new Event("visibilitychange"));
+    vi.advanceTimersByTime(3_000);
+    state = "visible";
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    expect(resync).not.toHaveBeenCalled();
+    visibility.mockRestore();
+  });
+
   it("keeps the live socket when a frozen page comes back with a stale reply clock", () => {
     renderHook(() => useSessionSocket("s1", true));
     const socket = lastSocket();
