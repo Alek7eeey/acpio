@@ -121,6 +121,16 @@
   margin: 0 0 18px;
 }
 
+/* A check that outlived its budget: the rows keep spinning, this line says where
+   they went, and Continue is already usable. */
+.slowNote {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  text-align: center;
+  color: var(--text-secondary);
+}
+
 .row {
   display: flex;
   align-items: center;
@@ -262,6 +272,45 @@
 .secondary:hover {
   color: var(--text);
   border-color: color-mix(in srgb, var(--text) 28%, var(--border));
+}
+
+/* Another account's file: a quiet footer under the rows, not a second window —
+   a first run reads it only if it has a settings file to bring. */
+.transfer {
+  display: grid;
+  gap: 8px;
+  padding-top: 14px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.transferTitle {
+  font-size: 0.82rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.transferHint {
+  margin: 0;
+  font-size: 0.76rem;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.transferOk,
+.transferBad {
+  margin: 0;
+  font-size: 0.76rem;
+  line-height: 1.4;
+  font-weight: 550;
+}
+
+.transferOk {
+  color: color-mix(in srgb, var(--success) 45%, var(--text-secondary));
+}
+
+.transferBad {
+  color: var(--danger, #d64545);
 }
 
 .continue:disabled {

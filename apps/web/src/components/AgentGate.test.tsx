@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, it, expect, afterEach } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { describe, it, expect, afterEach, vi } from "vitest";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import type { AdapterMetaDto } from "@acpio/shared";
 import { I18nProvider } from "../lib/i18n";
 import { useAppStore } from "../lib/store";
@@ -46,6 +46,7 @@ function renderWarning() {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   useAppStore.setState({
     adapters: [],
     agentAvailability: {},
@@ -80,7 +81,7 @@ describe("AgentGate", () => {
     });
     renderGate();
 
-    const continueButton = screen.getByRole("button") as HTMLButtonElement;
+    const continueButton = screen.getByRole("button", { name: "Continue" }) as HTMLButtonElement;
     expect(continueButton.disabled).toBe(false);
   });
 
@@ -90,7 +91,40 @@ describe("AgentGate", () => {
 
     expect(screen.getByText("Built-in")).toBeTruthy();
     expect(screen.getByText("online")).toBeTruthy();
-    expect((screen.getByRole("button") as HTMLButtonElement).disabled).toBe(false);
+    expect(
+      (screen.getByRole("button", { name: "Continue" }) as HTMLButtonElement).disabled,
+    ).toBe(false);
+  });
+
+  it("offers another install's settings file on the first screen", () => {
+    useAppStore.setState({ adapters: [BUILTIN], agentAvailability: {}, agentProbing: {} });
+    renderGate();
+
+    expect(screen.getByText("Move your settings over")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Choose a settings file/ })).toBeTruthy();
+  });
+
+  it("lets the reader go on when the check outlives its budget, and says why", () => {
+    vi.useFakeTimers();
+    useAppStore.setState({
+      adapters: [CURSOR, BUILTIN],
+      agentAvailability: { builtin: null },
+      agentProbing: { cursor: true, builtin: true },
+    });
+    renderGate();
+
+    const continueButton = screen.getByRole("button", { name: "Continue" }) as HTMLButtonElement;
+    expect(continueButton.disabled).toBe(true);
+    expect(screen.queryByRole("status")).toBeNull();
+
+    act(() => {
+      vi.advanceTimersByTime(6000);
+    });
+
+    expect(screen.getByRole("status").textContent).toMatch(/in the background/);
+    expect(
+      (screen.getByRole("button", { name: "Continue" }) as HTMLButtonElement).disabled,
+    ).toBe(false);
   });
 });
 

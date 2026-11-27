@@ -105,6 +105,15 @@ export const ru = {
     agentGateTitle: "Агенты на этом компьютере",
     agentGateLead: "Секунда — смотрим, какие агенты сейчас запущены.",
     agentGateContinue: "Продолжить",
+    agentGateSlowCheck:
+      "Проверка занимает слишком много времени — продолжим в фоне. Статусы появятся, как только агенты ответят.",
+    agentGateTransferTitle: "Перенести настройки",
+    agentGateTransferHint:
+      "Уже настроили Acpio на другом компьютере? Загрузите файл настроек — тема, агенты и провайдеры приедут сюда. Ваши API-ключи и токены останутся на месте.",
+    agentGateTransferAction: "Загрузить файл настроек",
+    agentGateTransferBusy: "Применяю…",
+    agentGateTransferDone: "Настройки применены: {{count}}",
+    agentGateTransferFailed: "Не удалось применить файл настроек: {{error}}",
     pickAgent: "Агент",
     noAgentsOnline: "Сейчас нет доступных агентов",
     thisChatAgentOffline:

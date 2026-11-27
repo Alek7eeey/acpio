@@ -1,9 +1,13 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
+import { mergeClientAppSettings, type AppSettings } from "@acpio/shared";
+import { api } from "../lib/api";
+import { applyAppearance } from "../lib/appearance";
 import { useT } from "../lib/i18n";
 import { harnessLabel, isBuiltinFamilyAdapter, isBuiltinFamilyProvider } from "../lib/harness";
 import { settingsPath } from "../lib/settingsNav";
 import { useAppStore } from "../lib/store";
+import { PickButton } from "./PathPickField";
 import styles from "./AgentGate.module.css";
 
 const agentMark = (
@@ -111,6 +115,15 @@ function AgentRow({
   );
 }
 
+/**
+ * How long the gate holds its own Continue button back. A probe is a process
+ * launch behind an ACP handshake, and one harness on a busy PC can burn the
+ * whole 20s probe timeout — a first run (no stored availability yet) would then
+ * sit in front of a disabled button with every row spinning. Past this budget
+ * the check carries on in the background and the reader goes on with the app.
+ */
+const GATE_SLOW_CHECK_MS = 6000;
+
 export function AgentGate() {
   const t = useT();
   const adapters = useAppStore((s) => s.adapters);
@@ -118,12 +131,54 @@ export function AgentGate() {
   const probing = useAppStore((s) => s.agentProbing);
   const dismissAgentGate = useAppStore((s) => s.dismissAgentGate);
 
+  const [settingsBusy, setSettingsBusy] = useState(false);
+  const [settingsNote, setSettingsNote] = useState<{ ok: boolean; text: string } | null>(null);
+
+  /**
+   * Another install's settings file — the same endpoint Settings → Import
+   * calls. This window is where a first run meets it, so the landing itself
+   * matters: the harness rows above are read again afterwards, since the file
+   * may switch a harness on or off.
+   */
+  const applySettingsFile = async (
+    load: () => Promise<{ settings: AppSettings; applied: string[] }>,
+  ) => {
+    setSettingsBusy(true);
+    setSettingsNote(null);
+    try {
+      const result = await load();
+      const store = useAppStore.getState();
+      // The same landing Settings → Import gives the shell, minus its full
+      // reload: `loadBootstrap` flips `loading`, which unmounts this window —
+      // and the answer to the import would go with it.
+      const settings = mergeClientAppSettings(result.settings);
+      store.applyTheme(settings.theme);
+      store.applyLocale(settings.locale);
+      applyAppearance(settings);
+      useAppStore.setState({ settings });
+      setSettingsNote({
+        ok: true,
+        text: t("common.agentGateTransferDone", { count: result.applied.length }),
+      });
+      await store.loadAdapters();
+      await store.probeAllAgents({ force: true });
+    } catch (err) {
+      setSettingsNote({
+        ok: false,
+        text: t("common.agentGateTransferFailed", {
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      });
+    } finally {
+      setSettingsBusy(false);
+    }
+  };
+
   // Enabled harnesses only, and nothing before /api/adapters answers: guessing
   // here could name an agent the user switched off. Every enabled harness is
   // listed: the built-in agent — and every preset of it — runs inside the
   // server, so its row is green from the first frame and only the external
   // CLIs are checked, with their probes alone holding Continue back.
-  if (!adapters.length) return null;
   const checkedIds: readonly string[] = adapters
     .filter((a) => !isBuiltinFamilyAdapter(a))
     .map((a) => a.id);
@@ -135,6 +190,20 @@ export function AgentGate() {
     checkedIds.length > 0 &&
     (!started || checkedIds.some((id) => probing[id] || availability[id] == null));
 
+  // The rows keep resolving after the budget runs out — the probes belong to
+  // the store, not to this window, so they answer whether it is still here.
+  const [slowCheck, setSlowCheck] = useState(false);
+  useEffect(() => {
+    if (!checking) {
+      setSlowCheck(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setSlowCheck(true), GATE_SLOW_CHECK_MS);
+    return () => window.clearTimeout(timer);
+  }, [checking]);
+
+  if (!adapters.length) return null;
+
   return (
     <GateShell
       titleId="agent-gate-title"
@@ -142,7 +211,7 @@ export function AgentGate() {
       lead={t("common.agentGateLead")}
       progress={checkedIds.length ? settled / checkedIds.length : 1}
       actionLabel={t("common.agentGateContinue")}
-      actionDisabled={checking}
+      actionDisabled={checking && !slowCheck}
       onAction={() => dismissAgentGate()}
     >
       {adapters.map((adapter) => {
@@ -162,6 +231,39 @@ export function AgentGate() {
           />
         );
       })}
+      {slowCheck ? (
+        <p className={styles.slowNote} role="status">
+          {t("common.agentGateSlowCheck")}
+        </p>
+      ) : null}
+      <div className={styles.transfer}>
+        <span className={styles.transferTitle}>{t("common.agentGateTransferTitle")}</span>
+        <p className={styles.transferHint}>{t("common.agentGateTransferHint")}</p>
+        <PickButton
+          kind="file"
+          accept="application/json,.json"
+          className={styles.secondary}
+          caption={
+            settingsBusy
+              ? t("common.agentGateTransferBusy")
+              : t("common.agentGateTransferAction")
+          }
+          disabled={settingsBusy}
+          onPickFile={(file) =>
+            void applySettingsFile(async () =>
+              api.importSettingsFile(JSON.parse(await file.text())),
+            )
+          }
+          onPick={(pathOnServer) =>
+            void applySettingsFile(() => api.importSettingsPath(pathOnServer))
+          }
+        />
+        {settingsNote ? (
+          <p className={settingsNote.ok ? styles.transferOk : styles.transferBad}>
+            {settingsNote.text}
+          </p>
+        ) : null}
+      </div>
     </GateShell>
   );
 }

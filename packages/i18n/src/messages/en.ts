@@ -87,6 +87,15 @@ export const en = {
     agentGateTitle: "Agents on this PC",
     agentGateLead: "A moment while we see which agents are running here.",
     agentGateContinue: "Continue",
+    agentGateSlowCheck:
+      "This check is taking a long time — carrying on in the background. Statuses appear as each agent answers.",
+    agentGateTransferTitle: "Move your settings over",
+    agentGateTransferHint:
+      "Already set Acpio up on another computer? Load its settings file — theme, agents and providers come with it. Your own API keys and tokens stay where they are.",
+    agentGateTransferAction: "Choose a settings file",
+    agentGateTransferBusy: "Applying…",
+    agentGateTransferDone: "Settings applied: {{count}}",
+    agentGateTransferFailed: "Could not apply the settings file: {{error}}",
     pickAgent: "Agent",
     noAgentsOnline: "No agents are available right now",
     thisChatAgentOffline:

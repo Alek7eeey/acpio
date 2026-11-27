@@ -4401,7 +4401,12 @@ async function probeAgentOnce(
       catalogOnly: opts?.catalogOnly,
     });
     const result = await probeResultFromClient(selected, client, logs.join("\n"), false);
-    client.dispose();
+    // A catalog probe is the client the models path would spawn next (see
+    // `warmModelParamsProbe` — it runs right after every probe that filled the
+    // catalog): disposing this one and booting a second CLI made a page load
+    // cost two agent processes per harness for the same answer.
+    if (opts?.catalogOnly) keepProbeClient(selected, client);
+    else client.dispose();
     return result;
   } catch (err) {
     client.dispose();
@@ -4881,6 +4886,18 @@ function disposeParamsProbe() {
     // ignore
   }
   paramsProbe = null;
+}
+
+/**
+ * Hand a finished catalog probe's client to the Effort/Fast warm slot instead of
+ * disposing it: the same boot, one process. It lives exactly as long as a
+ * warmed client does — the chat's own boot on this provider disposes it
+ * (`ensureAcp`), and so does every catalog edit that invalidates it.
+ */
+function keepProbeClient(provider: AgentProvider, client: AcpClient) {
+  if (paramsProbe?.client === client) return;
+  disposeParamsProbe();
+  paramsProbe = { provider, client, boot: Promise.resolve(client) };
 }
 
 async function warmParamsProbeClient(provider: AgentProvider): Promise<AcpClient> {
