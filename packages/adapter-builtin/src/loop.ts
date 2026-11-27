@@ -807,7 +807,7 @@ export async function runTurn(opts: TurnOptions): Promise<TurnOutcome> {
   const maxSteps = opts.maxSteps ?? MAX_TOOL_STEPS;
   const outputCap = opts.maxOutputTokens ?? MAX_OUTPUT_TOKENS;
   const reasoningLimit = opts.reasoningLimitChars ?? 0;
-  const injected: Array<{ at: number; message: ModelMessage }> = [];
+  const injected: Array<{ at: number; batch: number; message: ModelMessage }> = [];
   // The reasoning fuse owns the controller the SDK listens to: a cut kills
   // THIS model call mid-think, not the turn — the caller's cancel signal is
   // forwarded through and still kills everything.
@@ -826,6 +826,21 @@ export async function runTurn(opts: TurnOptions): Promise<TurnOutcome> {
   let stored = 0;
   /** Steers already handed over: `injected` is ordered by `at`. */
   let injectedStored = 0;
+  /**
+   * The batch of steers each `prepareStep` took, and the steps that landed.
+   *
+   * A batch is one pause: everything the host had ready when the loop asked,
+   * and all of it rides out with the call that follows. `at` numbers its
+   * entries from that state (`at`, `at + 1`, …), so of a batch of two only the
+   * first one is where the finished step's message count is — a flush keyed to
+   * that count stored the second note *behind* the step the model read it in
+   * front of. The next turn rebuilds its request from the stored transcript,
+   * moves it one message back, and the provider's cached prefix ends there
+   * (chat 52e86ce0: two background jobs landed together, "совпало 884 из 895",
+   * the last 11 messages billed again).
+   */
+  let takes = 0;
+  let landed = 0;
   // Once the step starts acting (text or a tool call) the fuse stands down:
   // a half-streamed answer or call is never torn apart by a thinking cap.
   let stepActed = false;
@@ -853,12 +868,14 @@ export async function runTurn(opts: TurnOptions): Promise<TurnOutcome> {
     onStepFinish: (step) => {
       finished.push(...step.response.messages);
       if (!opts.storeStep) return;
-      // A steer lands exactly on a step boundary (`at` = messages produced so
-      // far), so it rides out in front of the step that follows it — the same
-      // place `foldInjected` would put it in the finished response.
+      // A steer lands on a step boundary, so it rides out in front of the step
+      // that follows it — the same place `foldInjected` would put it in the
+      // finished response. One batch is one boundary: every entry of it belongs
+      // in front of that step, whatever index it carries within the batch.
+      landed += 1;
       const delta: ModelMessage[] = [];
-      while (injectedStored < injected.length && injected[injectedStored].at <= stepsStored) {
-        delta.push(injected[injectedStored].message);
+      while (injectedStored < injected.length && injected[injectedStored]!.batch <= landed) {
+        delta.push(injected[injectedStored]!.message);
         injectedStored += 1;
       }
       delta.push(...attachToolImages(step.response.messages, opts.toolImages));
@@ -886,8 +903,9 @@ export async function runTurn(opts: TurnOptions): Promise<TurnOutcome> {
     }) => {
       const taken = opts.takeSteer?.() ?? [];
       const at = step.responseMessages.length;
+      const batch = ++takes;
       taken.forEach((entry, i) => {
-        injected.push({ at: at + i, message: entry.message });
+        injected.push({ at: at + i, batch, message: entry.message });
         entry.ack();
       });
       const withSteers = taken.length
@@ -1162,7 +1180,8 @@ export async function runTurn(opts: TurnOptions): Promise<TurnOutcome> {
       ? { truncated: true }
       : {}),
     ...(failure && !opts.abortSignal.aborted ? { failure } : {}),
-    ...(injected.length ? { injected } : {}),
+    // The batch is the loop's own bookkeeping: a host reads `at`.
+    ...(injected.length ? { injected: injected.map(({ at, message }) => ({ at, message })) } : {}),
     // What `storeStep` already took: the caller appends the rest of the turn
     // instead of storing it a second time.
     ...(stored ? { stored } : {}),

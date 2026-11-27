@@ -796,6 +796,99 @@ describe("runTurn failure handling", () => {
     expect(history).toEqual([step0, steer, step1]);
   });
 
+  it("stores a batch of steers in front of the step that read them, all of it", async () => {
+    // Two background jobs finished within a second and both notes rode out with
+    // the very same call, as one batch. `at` numbers them from the step
+    // boundary (`at`, `at + 1`), so only the first one matches the message count
+    // a finished step reports: stored by that count alone, the second note
+    // landed *behind* the step the model had read it in front of. The next turn
+    // rebuilds its request from the stored transcript, moves that note one
+    // message back and the provider's cached prefix ends there (chat 52e86ce0:
+    // "совпало 884 из 895", the last 11 messages billed again).
+    const hi: ModelMessage = { role: "user", content: [{ type: "text", text: "hi" }] };
+    const step0: ModelMessage = { role: "assistant", content: [{ type: "text", text: "step 0" }] };
+    const readStep: ModelMessage[] = [
+      {
+        role: "assistant",
+        content: [{ type: "tool-call", toolCallId: "c1", toolName: "read", input: {} }],
+      },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "c1",
+            toolName: "read",
+            output: { type: "text", value: "picture attached" },
+          },
+        ],
+      },
+    ];
+    const lastStep: ModelMessage[] = [
+      {
+        role: "assistant",
+        content: [{ type: "tool-call", toolCallId: "c2", toolName: "bash", input: {} }],
+      },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "c2",
+            toolName: "bash",
+            output: { type: "text", value: "exit code: 0" },
+          },
+        ],
+      },
+    ];
+    const note = (text: string): ModelMessage => ({ role: "user", content: [{ type: "text", text }] });
+    const first = note("[Фоновая задача] «reports» завершилась с ошибкой");
+    const second = note("[Фоновая задача] «e2e-server» завершилась с ошибкой");
+    const takeSteer = vi
+      .fn()
+      .mockReturnValueOnce([])
+      .mockReturnValueOnce([
+        { message: first, ack: () => {} },
+        { message: second, ack: () => {} },
+      ])
+      .mockReturnValue([]);
+    /** Everything `storeStep` was handed, in the order the transcript gets it. */
+    const stored: ModelMessage[] = [];
+    // The SDK's own order: prepareStep, the step, its onStepFinish — the mock
+    // drives all three so the batch is taken exactly as it was live.
+    vi.mocked(streamText).mockImplementation(((opts: Parameters<typeof runTurn>[0]) => {
+      async function* stream(): AsyncGenerator<unknown> {
+        await opts.prepareStep?.({ messages: [hi], responseMessages: [] } as never);
+        opts.onStepFinish?.({ response: { messages: [step0] } } as never);
+        await opts.prepareStep?.({ messages: [hi, step0], responseMessages: [step0] } as never);
+        opts.onStepFinish?.({ response: { messages: readStep } } as never);
+        await opts.prepareStep?.({
+          messages: [hi, step0, first, second, ...readStep],
+          responseMessages: [step0, ...readStep],
+        } as never);
+        opts.onStepFinish?.({ response: { messages: lastStep } } as never);
+        yield { type: "text-delta", text: "ok" };
+      }
+      return {
+        fullStream: stream(),
+        responseMessages: Promise.resolve([step0, ...readStep, ...lastStep]),
+        finishReason: Promise.resolve("stop"),
+        usage: Promise.resolve({ totalTokens: 0 }),
+        steps: Promise.resolve([]),
+      } as never;
+    }) as never);
+
+    const outcome = await runTurn(
+      turnOpts({ takeSteer, storeStep: (messages) => stored.push(...messages) }),
+    );
+
+    // What the model read: both notes before the step that answered them.
+    expect(outcome.injected?.map((entry) => entry.at)).toEqual([1, 2]);
+    // What the next turn rebuilds its request from — the same order, or its head
+    // no longer matches the request the provider cached.
+    expect(stored).toEqual([step0, first, second, ...readStep, ...lastStep]);
+  });
+
   it("reports a step that stopped on reasoning alone as a broken chain", async () => {
     // The shape the report showed: the last step wrote thinking and nothing
     // else, so the turn ended with no answer at all.
