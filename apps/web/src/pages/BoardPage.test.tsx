@@ -1560,9 +1560,10 @@ describe("BoardPage new task form", () => {
     expect(within(group).getByPlaceholderText("Describe the task…")).toBeTruthy();
   });
 
-  // Shift alone over the description steps the mode the task is written in, the
-  // last one wrapping back to the first: the whole ring without opening a menu.
-  // A Shift that types a capital letter stays that letter's.
+  // Shift alone over the empty description steps the mode the task is written
+  // in, the last one wrapping back to the first: the whole ring without opening
+  // a menu. A Shift that types a capital letter stays that letter's, and Shift
+  // over words already written is a modifier of those words.
   it("steps the mode of a task being written on a Shift press", async () => {
     renderBoard();
     await screen.findByText("Fix the login bug");
@@ -1596,6 +1597,12 @@ describe("BoardPage new task form", () => {
     fireEvent.keyDown(field, { key: "Ж", shiftKey: true });
     fireEvent.keyUp(field, { key: "Ж" });
     fireEvent.keyUp(field, { key: "Shift" });
+    expect(pillMode()).toBeNull();
+
+    // A description already written takes the shortcut away: the press belongs
+    // to the words in the field, not to the task's mode.
+    await userEvent.type(field, "Разбери импорт");
+    shiftTap();
     expect(pillMode()).toBeNull();
   });
 

@@ -283,7 +283,7 @@
     "composerMenu": "Composer commands",
     "modeSection": "Mode",
     "modeChipTitle": "Prompt mode: {{name}}",
-    "modeShiftHint": "Shift — next mode",
+    "modeShiftHint": "Shift in an empty field — next mode",
     "modeExit": "Back to agent",
     "modeAgent": "Agent",
     "modePlan": "Plan",

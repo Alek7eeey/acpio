@@ -329,9 +329,10 @@ describe("right click in the composer", () => {
     ).toBe("true");
   }, 20_000);
 
-  // Shift alone over the field steps the ring of modes and wraps at the end:
-  // the whole switcher without opening it. It is a press the key makes on its
-  // own — a Shift that types a capital letter is that letter's, not a step.
+  // Shift alone over the empty field steps the ring of modes and wraps at the
+  // end: the whole switcher without opening it. It is a press the key makes on
+  // its own — a Shift that types a capital letter is that letter's, not a step,
+  // and a field already written in is the reader's to type in.
   it("steps the mode on a Shift press alone", async () => {
     useAppStore.setState({
       settings: { ...DEFAULT_SETTINGS, locale: "ru", chatMetaChips: ["promptMode"] },
@@ -366,6 +367,14 @@ describe("right click in the composer", () => {
     fireEvent.keyUp(input, { key: "Ж" });
     fireEvent.keyUp(input, { key: "Shift" });
     expect(mode()).toBe("agent");
+
+    // Words in the field take the shortcut away: Shift over a prompt being
+    // written is the reader's modifier (a selection, a chord), and the mode
+    // under the words must not move on a press meant for them.
+    await userEvent.type(input, "переписать парсер");
+    shiftTap();
+    expect(mode()).toBe("agent");
+    expect(input.value).toBe("переписать парсер");
   }, 20_000);
 
   // The pencil in the queue hands a request's text down to the field. The mode

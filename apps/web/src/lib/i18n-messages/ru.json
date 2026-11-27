@@ -303,7 +303,7 @@
     "composerMenu": "Команды поля ввода",
     "modeSection": "Режим",
     "modeChipTitle": "Режим промпта: {{name}}",
-    "modeShiftHint": "Shift — следующий режим",
+    "modeShiftHint": "Shift в пустом поле — следующий режим",
     "modeExit": "Вернуться к агенту",
     "modeAgent": "Агент",
     "modePlan": "План",

@@ -21,7 +21,7 @@ export const COMPOSER_MODE_LABEL_KEY: Record<ComposerMode, string> = {
 };
 
 /** The mode after `mode` in the menu's order, the last one wrapping back to the
- *  first: Shift over the field steps the same ring the menu lists. */
+ *  first: Shift over an empty field steps the same ring the menu lists. */
 export function nextComposerMode(mode: ComposerMode): ComposerMode {
   return COMPOSER_MODES[(COMPOSER_MODES.indexOf(mode) + 1) % COMPOSER_MODES.length];
 }
