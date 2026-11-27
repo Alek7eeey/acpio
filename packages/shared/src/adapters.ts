@@ -134,7 +134,7 @@ export function normalizeCustomAgentId(value: unknown): string {
     .slice(0, 32);
 }
 
-function normalizeEnvRecord(value: unknown): Record<string, string> | undefined {
+export function normalizeEnvRecord(value: unknown): Record<string, string> | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const out: Record<string, string> = {};
   for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
@@ -144,6 +144,24 @@ function normalizeEnvRecord(value: unknown): Record<string, string> | undefined 
     out[key] = raw.slice(0, 2048);
   }
   return Object.keys(out).length ? out : undefined;
+}
+
+/**
+ * The settings-side env of a harness (Settings → Connect → the agent's own
+ * row): one normalized map per adapter id, empty maps dropped, so a cleared
+ * field leaves no key behind.
+ */
+export function normalizeAdapterEnv(
+  value: unknown,
+): Record<string, Record<string, string>> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const out: Record<string, Record<string, string>> = {};
+  for (const [id, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (Object.keys(out).length >= 32) break;
+    const env = normalizeEnvRecord(raw);
+    if (env) out[id.slice(0, 64)] = env;
+  }
+  return out;
 }
 
 /**

@@ -165,7 +165,7 @@ export const ompAdapter: HarnessAdapter = {
   binaryDirs: ["omp"],
   installHint:
     "Команда \"{command}\" не найдена. Убедитесь, что omp в PATH " +
-    "(или поставьте omp-acp и укажите его в «CLI и права»).",
+    "(или поставьте omp-acp и укажите его в строке OMP: Настройки → Агенты → Подключение).",
 
   restoreMode: "resume",
   suppressReplayOnLoad: false,

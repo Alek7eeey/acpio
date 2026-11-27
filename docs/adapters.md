@@ -193,7 +193,7 @@ export const myHarnessAdapter: HarnessAdapter = {
   binaryNames: ["myharness"],
   binaryDirs: ["myharness"],
   installHint:
-    'Command "{command}" not found. Install my-harness and set it in "CLI & permissions".',
+    'Command "{command}" not found. Install my-harness and set its full path on its own row (Settings → Agents → Connect).',
 
   restoreMode: "resume",
   suppressReplayOnLoad: false,
@@ -257,8 +257,8 @@ The settings description is looked up by `descriptionKey` in
 
 ### 6. Verify
 
-- The web picks the adapter up automatically: the provider list in
-  **Settings → Agents → Connect** and the "CLI & permissions" fields (command/args/API key)
+- The web picks the adapter up automatically: the agent's row in
+  **Settings → Agents → Connect** and its **Launch & keys** block (command/args/API key)
   are built from the `GET /api/adapters` metadata.
 - The core validates providers against the registry — nothing else to enable.
 - Write tests modeled on `apps/server/src/adapters/registry.test.ts` (it also covers

@@ -494,19 +494,13 @@ describe("buildAgentEnv", () => {
       expected: { CURSOR_API_KEY: "ck-123" },
     },
     {
-      name: "anthropic API key is exported",
-      settings: settingsWith({ anthropicApiKey: "sk-ant-1" }),
-      expected: { ANTHROPIC_API_KEY: "sk-ant-1" },
-    },
-    {
-      name: "openai API key is exported",
-      settings: settingsWith({ openaiApiKey: "sk-456" }),
-      expected: { OPENAI_API_KEY: "sk-456" },
-    },
-    {
-      name: "all three keys exported together",
-      settings: settingsWith({ cursorApiKey: "ck", anthropicApiKey: "ant", openaiApiKey: "oa" }),
-      expected: { CURSOR_API_KEY: "ck", ANTHROPIC_API_KEY: "ant", OPENAI_API_KEY: "oa" },
+      name: "the agent's own env is exported",
+      settings: settingsWith({
+        adapterEnv: {
+          cursor: { ANTHROPIC_API_KEY: "sk-ant-1", OPENAI_API_KEY: "sk-456" },
+        },
+      }),
+      expected: { ANTHROPIC_API_KEY: "sk-ant-1", OPENAI_API_KEY: "sk-456" },
     },
     {
       name: "no keys set leaves no API key env vars",
@@ -514,8 +508,8 @@ describe("buildAgentEnv", () => {
       expected: {},
     },
     {
-      name: "empty-string keys are not exported",
-      settings: settingsWith({ cursorApiKey: "", anthropicApiKey: "", openaiApiKey: "" }),
+      name: "an empty key field is not exported",
+      settings: settingsWith({ cursorApiKey: "" }),
       expected: {},
     },
   ])("$name", ({ settings, expected }) => {
@@ -529,20 +523,24 @@ describe("buildAgentEnv", () => {
     }
   });
 
-  it("exports each provider's own API key env var", () => {
-    const settings = settingsWith({ cursorApiKey: "ck", anthropicApiKey: "ant", openaiApiKey: "oa" });
+  it("exports a harness's env to that harness only", () => {
+    const settings = settingsWith({
+      cursorApiKey: "ck",
+      adapterEnv: { omp: { ANTHROPIC_API_KEY: "ant" } },
+    });
     const cursorEnv = buildAgentEnv(getAdapter("cursor"), settings);
     const ompEnv = buildAgentEnv(getAdapter("omp"), settings);
-    // Cursor's key is exported only for cursor; anthropic/openai keys are shared.
     expect(cursorEnv.CURSOR_API_KEY).toBe("ck");
+    expect(cursorEnv.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(ompEnv.ANTHROPIC_API_KEY).toBe("ant");
     expect(ompEnv.CURSOR_API_KEY).toBeUndefined();
-    for (const key of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"]) {
-      expect(ompEnv[key]).toBe(cursorEnv[key]);
-    }
   });
 
   it("never contains undefined values", () => {
-    const env = buildAgentEnv(getAdapter("cursor"), settingsWith({ cursorApiKey: "ck", openaiApiKey: "oa" }));
+    const env = buildAgentEnv(
+      getAdapter("cursor"),
+      settingsWith({ cursorApiKey: "ck", adapterEnv: { cursor: { OPENAI_API_KEY: "oa" } } }),
+    );
     for (const value of Object.values(env)) {
       expect(value).not.toBeUndefined();
     }
@@ -562,10 +560,39 @@ describe("buildAgentEnv", () => {
       args: [],
       env: { AGENT_LOG: "info" },
     });
-    const env = buildAgentEnv(custom, settingsWith({ openaiApiKey: "oa" }));
+    const env = buildAgentEnv(custom, settingsWith({ adapterEnv: { "my-agent": { OPENAI_API_KEY: "oa" } } }));
     expect(env.AGENT_LOG).toBe("info");
     expect(env.OPENAI_API_KEY).toBe("oa");
     expect(buildAgentEnv(getAdapter("omp"), settingsWith({})).AGENT_LOG).toBeUndefined();
+  });
+
+  // The agent's own row is the more specific layer: what a reader types there
+  // beats what the adapter ships, and a declared key field beats both, since
+  // that field is the control the screen puts in front of them.
+  it("applies the agent's env from settings over the adapter's own", () => {
+    const custom = customAgentAdapter({
+      id: "my-agent",
+      label: "My Agent",
+      command: "agent.exe",
+      args: [],
+      env: { AGENT_LOG: "info", KEPT: "code" },
+    });
+    const env = buildAgentEnv(
+      custom,
+      settingsWith({ adapterEnv: { "my-agent": { AGENT_LOG: "debug" } } }),
+    );
+    expect(env.AGENT_LOG).toBe("debug");
+    expect(env.KEPT).toBe("code");
+    // Another harness's map is not read for this one.
+    expect(buildAgentEnv(getAdapter("omp"), settingsWith({ adapterEnv: { "my-agent": { X: "1" } } })).X).toBeUndefined();
+  });
+
+  it("lets a declared API key win over the same name in the agent's env", () => {
+    const settings = settingsWith({
+      cursorApiKey: "from-field",
+      adapterEnv: { cursor: { CURSOR_API_KEY: "from-map" } },
+    });
+    expect(buildAgentEnv(getAdapter("cursor"), settings).CURSOR_API_KEY).toBe("from-field");
   });
 });
 

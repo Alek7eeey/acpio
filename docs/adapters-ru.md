@@ -191,7 +191,7 @@ export const myHarnessAdapter: HarnessAdapter = {
   binaryNames: ["myharness"],
   binaryDirs: ["myharness"],
   installHint:
-    'Команда "{command}" не найдена. Установите my-harness и укажите его в «CLI и права».',
+    'Команда "{command}" не найдена. Установите my-harness и укажите полный путь в его строке (Настройки → Агенты → Подключение).',
 
   restoreMode: "resume",
   suppressReplayOnLoad: false,
@@ -256,8 +256,9 @@ npm install
 
 ### 6. Проверка
 
-- Веб сам подхватит адаптер: список провайдеров в **Настройки → Агенты → Подключение**
-  и поля «CLI и права» (команда/аргументы/API-ключ) строятся из меты `GET /api/adapters`.
+- Веб сам подхватит адаптер: строка агента в **Настройки → Агенты → Подключение**
+  и её блок **«Запуск и ключи»** (команда/аргументы/API-ключ) строятся из меты
+  `GET /api/adapters`.
 - Ядро само валидирует провайдера по реестру — отдельно ничего включать не нужно.
 - Напишите тесты по образцу `apps/server/src/adapters/registry.test.ts` (там же проверки
   `cursorAdapter`/`ompAdapter`).

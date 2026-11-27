@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   BUILD_INFO,
@@ -131,7 +131,7 @@ function parseJsonObjectText(text: string): Record<string, unknown> | null {
 }
 
 /** Settings fields that hold an API key (adapter-declared + shared LLM keys). */
-type ApiKeyField = "cursorApiKey" | "anthropicApiKey" | "openaiApiKey";
+type ApiKeyField = "cursorApiKey";
 
 /** Dumps rendered in one go; the wheel down the list asks for the next page. */
 const DIAG_DUMPS_PAGE = 30;
@@ -1617,36 +1617,14 @@ export function SettingsPage() {
   const t = useT();
   const adapters = useAppStore((s) => s.adapters);
   const allAdapters = useAppStore((s) => s.allAdapters);
-  /** API-key rows: enabled harnesses' own keys, then the shared LLM keys. */
-  const apiKeyRows = useMemo(() => {
-    const fromProviders = adapters.flatMap((a) => {
-      const key = a.apiKeyField as ApiKeyField | undefined;
-      if (!key) return [];
-      return [
-        {
-          key,
-          label: `${a.label} ${t("settings.apiKeys")}`,
-          env: a.envApiKeyName ?? "",
-          placeholder: "",
-        },
-      ];
-    });
-    return [
-      ...fromProviders,
-      {
-        key: "anthropicApiKey" as const,
-        label: `Anthropic ${t("settings.apiKeys")}`,
-        env: "ANTHROPIC_API_KEY",
-        placeholder: "sk-ant-...",
-      },
-      {
-        key: "openaiApiKey" as const,
-        label: `OpenAI ${t("settings.apiKeys")}`,
-        env: "OPENAI_API_KEY",
-        placeholder: "",
-      },
-    ];
-  }, [adapters, t]);
+  /**
+   * Text being typed into an agent's env field. Kept as text, not as the parsed
+   * map: `KEY=` mid-line and a blank line between two keys are lost by a
+   * parse-and-reformat round trip while the reader is still typing.
+   */
+  const [envDrafts, setEnvDrafts] = useState<Record<string, string>>({});
+  /** The one agent whose launch fields are unfolded under its row (null = none). */
+  const [openLaunch, setOpenLaunch] = useState<string | null>(null);
   /**
    * Session-restore hint. Lists only the enabled harnesses and their real
    * restore mode, so a switched-off agent is not named here either.
@@ -1673,6 +1651,8 @@ export function SettingsPage() {
       allAdapters.map((a) => ({
         id: a.id as AgentProvider,
         title: a.label,
+        /** The adapter itself: the row renders what this harness is launched with. */
+        adapter: a,
         // A user-defined agent has no i18n key — show what it will launch.
         description:
           a.custom === true
@@ -2623,9 +2603,7 @@ export function SettingsPage() {
                           ? t("settings.mcpTitle")
                           : leaf === "plugins"
                             ? t("settings.pluginsTitle")
-                            : leaf === "cli"
-                              ? t("settings.cliTitle")
-                              : t("settings.agentAdvancedTitle")
+                            : t("settings.agentAdvancedTitle")
               : t("settings.agentConnectTitle");
 
   const subtitle =
@@ -2649,9 +2627,7 @@ export function SettingsPage() {
                 ? t("settings.mcpHint")
                 : section === "agent" && leaf === "plugins"
                   ? t("settings.pluginsHint")
-                  : section === "agent" && leaf === "cli"
-                    ? t("settings.cliDesc")
-                    : section === "agent" && leaf === "advanced"
+                  : section === "agent" && leaf === "advanced"
                       ? t("settings.agentAdvancedDesc")
                     : section === "agent" && leaf === "remote"
                       ? t("settings.remoteAccessDesc")
@@ -2773,15 +2749,37 @@ export function SettingsPage() {
                 const known = agentAvailability[item.id];
                 const checking = item.enabled && known !== true && known !== false;
                 const online = known === true;
+                const adapter = item.adapter;
+                // The built-in agent spawns nothing: its knobs are its own
+                // section, so its row keeps only the switch.
+                const spawn = adapter.commandField !== "";
+                const stored = form as unknown as Record<string, unknown>;
+                const command = String(stored[adapter.commandField] ?? "");
+                const args = stored[adapter.argsField];
+                const keyField = adapter.apiKeyField as ApiKeyField | undefined;
+                const apiKey = keyField ? String(stored[keyField] ?? "") : "";
+                const env = form.adapterEnv?.[item.id] ?? {};
+                const envText = envDrafts[item.id] ?? formatEnvLines(env);
+                const setEnv = (next: string) => {
+                  setEnvDrafts((drafts) => ({ ...drafts, [item.id]: next }));
+                  patch("adapterEnv", {
+                    ...(form.adapterEnv ?? {}),
+                    [item.id]: parseEnvLines(next),
+                  });
+                };
+                const launchOpen = openLaunch === item.id;
                 return (
+                  <Fragment key={item.id}>
                   <SettingRow
-                    key={item.id}
                     layout="row"
                     terms={[
                       item.title,
                       item.description,
                       t("settings.enabled"),
                       t("settings.disabled"),
+                      t("settings.agentLaunch"),
+                      ...(spawn ? [adapter.defaultCommand, ...adapter.defaultArgs] : []),
+                      ...Object.keys(env),
                     ]}
                     label={item.title}
                     hint={highlightText(item.description, settingsQuery)}
@@ -2802,8 +2800,105 @@ export function SettingsPage() {
                         onChange={(next) => setProviderEnabled(item.id, next)}
                         label={t("settings.enabled")}
                       />
+                      {spawn ? (
+                        <button
+                          type="button"
+                          className={styles.agentLaunchBtn}
+                          aria-expanded={launchOpen}
+                          aria-label={`${item.title} · ${t("settings.agentLaunch")}`}
+                          title={`${item.title} · ${t("settings.agentLaunch")}`}
+                          onClick={() => setOpenLaunch(launchOpen ? null : item.id)}
+                        >
+                          {/* Sliders: the launch knobs of this one agent. */}
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                            <path d="M4 7h10M18 7h2M4 17h4M12 17h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                            <circle cx="16" cy="7" r="2" stroke="currentColor" strokeWidth="2" />
+                            <circle cx="10" cy="17" r="2" stroke="currentColor" strokeWidth="2" />
+                          </svg>
+                        </button>
+                      ) : null}
                     </span>
                   </SettingRow>
+                  {spawn && launchOpen ? (
+                    <div className={styles.agentLaunchPanel}>
+                          <div className={styles.cliFields}>
+                            <label className={styles.cliField}>
+                              <span className={styles.cliFieldLabel}>
+                                {t("settings.cliCommand")}
+                              </span>
+                              <input
+                                value={command}
+                                onChange={(e) => patchAny(adapter.commandField, e.target.value)}
+                                placeholder={adapter.defaultCommand}
+                                aria-label={`${item.title} · ${t("settings.cliCommand")}`}
+                              />
+                            </label>
+                            <label className={styles.cliField}>
+                              <span className={styles.cliFieldLabel}>
+                                {t("settings.cliArgs")}
+                              </span>
+                              <input
+                                value={Array.isArray(args) ? args.join(" ") : ""}
+                                onChange={(e) =>
+                                  patchAny(
+                                    adapter.argsField,
+                                    e.target.value.split(/\s+/).filter(Boolean),
+                                  )
+                                }
+                                placeholder={adapter.defaultArgs.join(" ")}
+                                aria-label={`${item.title} · ${t("settings.cliArgs")}`}
+                              />
+                            </label>
+                          </div>
+                          {keyField ? (
+                            <label className={styles.cliField}>
+                              <span className={styles.cliFieldLabel}>{adapter.envApiKeyName}</span>
+                              <div className={styles.secretRow}>
+                                <input
+                                  type="password"
+                                  value={apiKey}
+                                  onChange={(e) => patchAny(keyField, e.target.value)}
+                                  autoComplete="off"
+                                  aria-label={`${item.title} · ${adapter.envApiKeyName}`}
+                                />
+                                <button
+                                  type="button"
+                                  className={styles.clearKeyBtn}
+                                  disabled={!apiKey.trim()}
+                                  title={t("settings.removeKey")}
+                                  onClick={() => void clearApiKey(keyField)}
+                                >
+                                  {t("common.delete")}
+                                </button>
+                              </div>
+                            </label>
+                          ) : null}
+                          {/* The env of this one process: whatever name its CLI
+                              reads its key from, it is typed here and nowhere else. */}
+                          <label className={styles.cliField}>
+                            <span className={styles.cliFieldLabel}>{t("settings.agentEnv")}</span>
+                            <textarea
+                              className={styles.mcpJsonInput}
+                              rows={3}
+                              spellCheck={false}
+                              placeholder={"KEY=VALUE"}
+                              value={envText}
+                              aria-label={`${item.title} · ${t("settings.agentEnv")}`}
+                              onChange={(e) => setEnv(e.target.value)}
+                              onBlur={() =>
+                                setEnvDrafts((drafts) => {
+                                  const { [item.id]: _done, ...rest } = drafts;
+                                  return rest;
+                                })
+                              }
+                            />
+                            <span className={styles.cliFieldLabel}>
+                              {t("settings.agentEnvHint")}
+                            </span>
+                          </label>
+                    </div>
+                  ) : null}
+                  </Fragment>
                 );
               })}
             </SettingTable>
@@ -4804,112 +4899,6 @@ export function SettingsPage() {
               </SearchGate>
             )}
 
-          </>
-        )}
-
-        {/* The launch command of every harness and the keys it calls its
-            provider with: one page of their own, out from under the folders
-            and the permissions of the Advanced leaf. */}
-        {section === "agent" && leaf === "cli" && (
-          <>
-            <SearchGate
-              terms={[
-                t("settings.cliLaunchTitle"),
-                t("settings.cliAndPermissions"),
-                ...adapters.flatMap((a) => [a.label, a.defaultCommand, ...a.defaultArgs]),
-              ]}
-            >
-              <h2 className={styles.sectionHeading}>
-                {highlightText(t("settings.cliLaunchTitle"), settingsQuery)}
-              </h2>
-              <SettingTable>
-                {adapters
-                  .filter((a) => a.custom !== true && a.commandField)
-                  .map((a) => {
-                    const command = String(
-                      (form as unknown as Record<string, unknown>)[a.commandField] ?? "",
-                    );
-                    const args = (form as unknown as Record<string, unknown>)[a.argsField];
-                    return (
-                      <SettingRow
-                        key={a.id}
-                        layout="stack"
-                        label={a.label}
-                        hint={`${t("common.default")}: ${a.defaultCommand}`}
-                        terms={[a.label, a.defaultCommand, ...a.defaultArgs]}
-                      >
-                        <div className={styles.cliFields}>
-                          <label className={styles.cliField}>
-                            <span className={styles.cliFieldLabel}>
-                              {t("settings.cliCommand")}
-                            </span>
-                            <input
-                              value={command}
-                              onChange={(e) => patchAny(a.commandField, e.target.value)}
-                              placeholder={a.defaultCommand}
-                              aria-label={`${a.label} · ${t("settings.cliCommand")}`}
-                            />
-                          </label>
-                          <label className={styles.cliField}>
-                            <span className={styles.cliFieldLabel}>
-                              {t("settings.cliArgs")}
-                            </span>
-                            <input
-                              value={Array.isArray(args) ? args.join(" ") : ""}
-                              onChange={(e) =>
-                                patchAny(a.argsField, e.target.value.split(/\s+/).filter(Boolean))
-                              }
-                              placeholder={a.defaultArgs.join(" ")}
-                              aria-label={`${a.label} · ${t("settings.cliArgs")}`}
-                            />
-                          </label>
-                        </div>
-                      </SettingRow>
-                    );
-                  })}
-              </SettingTable>
-            </SearchGate>
-
-            <SearchGate
-              terms={[
-                t("settings.apiKeys"),
-                "api",
-                ...apiKeyRows.flatMap((row) => [row.label, row.env]),
-              ]}
-            >
-              <h2 className={styles.sectionHeading}>
-                {highlightText(t("settings.apiKeys"), settingsQuery)}
-              </h2>
-              <SettingTable>
-                {apiKeyRows.map((item) => {
-                  const value = form[item.key] ?? "";
-                  const hasValue = value.trim().length > 0;
-                  return (
-                    <SettingRow key={item.key} label={item.label} hint={item.env}>
-                      <div className={styles.secretRow}>
-                        <input
-                          type="password"
-                          value={value}
-                          onChange={(e) => patch(item.key, e.target.value)}
-                          autoComplete="off"
-                          placeholder={item.placeholder || undefined}
-                          aria-label={item.label}
-                        />
-                        <button
-                          type="button"
-                          className={styles.clearKeyBtn}
-                          disabled={!hasValue}
-                          title={t("settings.removeKey")}
-                          onClick={() => void clearApiKey(item.key)}
-                        >
-                          {t("common.delete")}
-                        </button>
-                      </div>
-                    </SettingRow>
-                  );
-                })}
-              </SettingTable>
-            </SearchGate>
           </>
         )}
 

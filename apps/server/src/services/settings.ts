@@ -35,6 +35,7 @@ import {
   normalizeChatTitleMaxLen,
   normalizeChatTreeRecentLimit,
   normalizeChatTreeMenu,
+  normalizeAdapterEnv,
   normalizeCustomAgents,
   canonicalCwd,
   normalizeMcpProjectFiles,
@@ -56,6 +57,8 @@ import { generateRemoteAccessKey } from "../lib/remoteAccess.js";
 import { syncDeepLoggingFromSettings } from "./deepLogging.js";
 
 const SETTINGS_KEY = "app";
+/** Shipped harnesses that spawn a CLI — the ones a shared provider key reached. */
+const CLI_ADAPTER_IDS = ["cursor", "omp", "opencode"] as const;
 /** Total persisted composer-draft payload cap (keys + text + files), in characters. */
 const COMPOSER_DRAFTS_MAX_BYTES = 200_000;
 /** Files one draft may name — the composer stages no more than this either. */
@@ -144,6 +147,25 @@ function mergeSettings(raw: unknown): AppSettings {
     "piArgs",
   ] as const) {
     delete (merged as Record<string, unknown>)[stale];
+  }
+  // Per-harness environment: one normalized map per adapter id, a cleared row
+  // leaves no key behind (Settings → Connect → the agent's own row).
+  merged.adapterEnv = normalizeAdapterEnv(merged.adapterEnv);
+  // Schema 12: the two provider keys every harness used to inherit are each
+  // harness's own env now. They move onto the three shipped CLIs — where the
+  // reader sees them — rather than disappearing with the fields, and a value
+  // already typed on one of the rows wins over the migrated one.
+  const legacy = merged as unknown as Record<string, unknown>;
+  for (const [field, name] of [
+    ["anthropicApiKey", "ANTHROPIC_API_KEY"],
+    ["openaiApiKey", "OPENAI_API_KEY"],
+  ] as const) {
+    const value = legacy[field];
+    delete legacy[field];
+    if (typeof value !== "string" || !value.trim()) continue;
+    for (const id of CLI_ADAPTER_IDS) {
+      merged.adapterEnv[id] = { [name]: value, ...merged.adapterEnv[id] };
+    }
   }
   // Built-in agent presets register as agents of their own, so their provider
   // ids are taken before the user-defined agents are healed — a custom agent
@@ -616,8 +638,6 @@ async function readStoredSettings(): Promise<AppSettings> {
     const seeded = mergeSettings({
       defaultCwd: process.env.DEFAULT_CWD || REPO_ROOT,
       cursorApiKey: process.env.CURSOR_API_KEY ?? "",
-      anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? "",
-      openaiApiKey: process.env.OPENAI_API_KEY ?? "",
       remoteAccessKey: generateRemoteAccessKey(),
     });
     await persistSettings(seeded);
@@ -682,8 +702,6 @@ export type SettingsFile = {
  */
 const SECRET_SETTING_KEYS = [
   "cursorApiKey",
-  "anthropicApiKey",
-  "openaiApiKey",
   "remoteAccessKey",
 ] as const;
 
@@ -709,6 +727,9 @@ function stripMcpSecrets(raw: unknown): unknown {
 function stripSecrets(bag: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = { ...bag };
   for (const key of SECRET_SETTING_KEYS) delete out[key];
+  // A harness's own env carries whatever key that CLI needs, under whatever
+  // name it uses: nothing in it travels either.
+  delete out.adapterEnv;
   // Typed drafts are one user's own text, not a setting anyone inherits.
   delete out.composerDrafts;
   // Providers (the endpoints, their models and the keys they pay with) are the

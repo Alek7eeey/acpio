@@ -580,12 +580,18 @@ export function buildAgentEnv(adapter: HarnessAdapter, settings: AppSettings): N
       if (key) env[key] = value;
     }
   }
+  // What the reader typed on this agent's own row wins over what the adapter
+  // ships — it is the more specific layer of the two.
+  const adapterEnv = settings.adapterEnv?.[adapter.id];
+  if (adapterEnv) {
+    for (const [key, value] of Object.entries(adapterEnv)) {
+      if (key) env[key] = value;
+    }
+  }
   const apiKey = adapter.apiKeyField ? adapterSetting(settings, adapter.apiKeyField) : undefined;
   if (adapter.envApiKeyName && typeof apiKey === "string" && apiKey) {
     env[adapter.envApiKeyName] = apiKey;
   }
-  if (settings.anthropicApiKey) env.ANTHROPIC_API_KEY = settings.anthropicApiKey;
-  if (settings.openaiApiKey) env.OPENAI_API_KEY = settings.openaiApiKey;
   // Intentionally do not rewrite PATH on Windows. Prepending shim dirs (npm,
   // LOCALAPPDATA/omp, …) made OMP `/review` accept elicitation and immediately
   // return empty `end_turn` (native review never started). The harness binary is

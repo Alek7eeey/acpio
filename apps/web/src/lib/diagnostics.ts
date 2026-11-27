@@ -90,8 +90,13 @@ function redactClientSettings(settings: AppSettings) {
   return {
     ...settings,
     cursorApiKey: settings.cursorApiKey ? "[set]" : "",
-    anthropicApiKey: settings.anthropicApiKey ? "[set]" : "",
-    openaiApiKey: settings.openaiApiKey ? "[set]" : "",
+    // Names stay, values never do (a harness's env is where its key lives).
+    adapterEnv: Object.fromEntries(
+      Object.entries(settings.adapterEnv ?? {}).map(([id, env]) => [
+        id,
+        Object.fromEntries(Object.keys(env).map((name) => [name, "[set]"])),
+      ]),
+    ),
   };
 }
 

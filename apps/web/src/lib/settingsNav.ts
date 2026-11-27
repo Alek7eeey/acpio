@@ -8,9 +8,6 @@ export type SettingsAgentLeaf =
   // folders and the same shipped set, so they sit with the agents themselves.
   | "skills"
   | "advanced"
-  // The launch command and the keys of every harness — one page, not a block
-  // folded under the folders and the permissions.
-  | "cli"
   | "remote"
   | "diagnostics"
   | "mcp"
@@ -103,7 +100,6 @@ export function getSettingsTree(t: TranslateFn): TreeBranch[] {
     { id: "model", label: t("settings.modelSection") },
     { id: "skills", label: t("settings.skillsTitle") },
     { id: "advanced", label: t("settings.advanced") },
-    { id: "cli", label: t("settings.cliTitle") },
     { id: "mcp", label: t("settings.mcpTitle") },
     { id: "plugins", label: t("settings.pluginsTitle") },
     { id: "diagnostics", label: t("settings.diagnostics") },
@@ -219,11 +215,14 @@ export function parseSettingsSearch(search: string): SettingsLocation {
   // outlive the sections they named.
   if (rawLeaf === "builtin") return { section: "builtin", leaf: "presets" };
 
+  // The launch command and the keys of a harness are its own row on the
+  // Connect page now: a link to the page they had opens that page.
+  if (rawLeaf === "cli") return { section: "agent", leaf: "connect" };
+
   const leaf: SettingsAgentLeaf =
     rawLeaf === "model" ||
     rawLeaf === "skills" ||
     rawLeaf === "advanced" ||
-    rawLeaf === "cli" ||
     rawLeaf === "connect" ||
     rawLeaf === "remote" ||
     rawLeaf === "diagnostics" ||

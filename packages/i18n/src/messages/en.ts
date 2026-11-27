@@ -951,13 +951,12 @@ export const en = {
     attachmentsDirHint:
       "Where a chat's uploads are stored. Empty keeps .acpio-attachments in the chat's folder (the project root). The button picks any folder, including one inside the project.",
     folderPickSwapHint: "Right-click: pick inside the app",
-    cliTitle: "CLI & keys",
-    cliDesc:
-      "Launch commands of the ACP agents and the keys they call their providers with — in one place.",
-    cliLaunchTitle: "Agent launch",
+    agentLaunch: "Launch & keys",
     cliCommand: "command",
     cliArgs: "args",
-    cliAndPermissions: "CLI & permissions",
+    agentEnv: "Environment variables",
+    agentEnvHint:
+      "One KEY=VALUE per line. They reach this agent's process — and only that one.",
     permissionPolicy: "Permission policy",
     permissionPrompt: "Ask",
     permissionAllowlist: "Allowlist",
@@ -1269,7 +1268,7 @@ export const en = {
     agentEmptyResponse:
       "Agent finished without text (stopReason={{reason}}). Model: {{model}}. In Settings pick a model with API access (not local-ollama if Ollama is not running) and save the API key.",
     commandNotFoundCursor:
-      'Command "{{command}}" not found. Cursor IDE ≠ Cursor CLI. Install CLI (PowerShell): irm \'https://cursor.com/install?win32=true\' | iex then run agent login. Or set the full path in CLI & permissions.',
+      'Command "{{command}}" not found. Cursor IDE ≠ Cursor CLI. Install CLI (PowerShell): irm \'https://cursor.com/install?win32=true\' | iex then run agent login. Or set the full path on the Cursor row: Settings → Agents → Connect.',
     commandNotFoundOmp:
       'Command "{{command}}" not found. Make sure omp is in PATH.',
   },

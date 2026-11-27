@@ -33,7 +33,7 @@ import {
 } from "./index.js";
 
 /** Bumped when persisted settings need a one-time migration on load. */
-export const SETTINGS_SCHEMA_VERSION = 11;
+export const SETTINGS_SCHEMA_VERSION = 12;
 
 const CHAT_META_CHIP_IDS: ChatMetaChipId[] = [
   "promptMode",

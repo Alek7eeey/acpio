@@ -136,7 +136,7 @@ export const opencodeAdapter: HarnessAdapter = {
   binaryDirs: [],
   installHint:
     'Команда "{command}" не найдена. Установите opencode (npm i -g opencode-ai) ' +
-    "и проверьте PATH — или укажите полный путь в «CLI и права».",
+    "и проверьте PATH — или укажите полный путь в строке OpenCode: Настройки → Агенты → Подключение.",
 
   restoreMode: "resume",
   suppressReplayOnLoad: false,

@@ -134,6 +134,18 @@ export function settingsSearchIndex(
       t("settings.agentConnectDesc"),
       t("settings.defaultAgent"),
       t("settings.defaultAgentHint"),
+      // What a harness is launched with is its own row here, so the words that
+      // used to name a page of their own lead to it.
+      t("settings.agentLaunch"),
+      t("settings.cliCommand"),
+      t("settings.cliArgs"),
+      t("settings.agentEnv"),
+      t("settings.apiKeys"),
+      "api",
+      "cli",
+      "ключ",
+      "ключи",
+      "key",
       ...providerTerms,
     ],
     model: [
@@ -300,21 +312,6 @@ export function settingsSearchIndex(
       t("settings.terminalShellCmd"),
       t("settings.terminalShellPowerShell"),
       // Only the harnesses the user keeps enabled are searchable.
-      ...providerTerms,
-    ],
-    cli: [
-      t("settings.cliTitle"),
-      t("settings.cliDesc"),
-      t("settings.cliLaunchTitle"),
-      t("settings.cliCommand"),
-      t("settings.cliArgs"),
-      t("settings.apiKeys"),
-      t("settings.cliAndPermissions"),
-      "api",
-      "cli",
-      "ключ",
-      "ключи",
-      "key",
       ...providerTerms,
     ],
     mcp: [
@@ -518,7 +515,6 @@ function settingsRowHints(t: TranslateFn): Record<SettingsLeaf, string[]> {
       t("settings.terminalShellPowerShell"),
       t("settings.terminalShellHint"),
     ],
-    cli: [t("settings.cliDesc"), t("settings.cliLaunchTitle"), t("settings.cliAndPermissions")],
     mcp: [t("settings.mcpEmptyHint"), t("settings.mcpApplyHint")],
     plugins: [t("settings.pluginsHint"), t("settings.pluginsSourceHint")],
     diagnostics: [

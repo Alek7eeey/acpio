@@ -124,7 +124,8 @@ export const cursorAdapter: HarnessAdapter = {
   installHint:
     "Команда \"{command}\" не найдена. Cursor IDE ≠ Cursor CLI. " +
     "Установите CLI (PowerShell): irm 'https://cursor.com/install?win32=true' | iex " +
-    "затем выполните agent login. Или укажите полный путь в «CLI и права».",
+    "затем выполните agent login. Или укажите полный путь в строке Cursor: " +
+    "Настройки → Агенты → Подключение.",
 
   restoreMode: "load",
   suppressReplayOnLoad: true,

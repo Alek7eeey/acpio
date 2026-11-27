@@ -28,16 +28,21 @@ export async function resolveDiagnosticsDir(settings?: AppSettings): Promise<str
 function redactSettings(settings: AppSettings): Record<string, unknown> {
   const {
     cursorApiKey,
-    anthropicApiKey,
-    openaiApiKey,
+    adapterEnv,
     builtinProviders,
     ...rest
   } = settings;
   return {
     ...rest,
     cursorApiKey: cursorApiKey ? "[set]" : "",
-    anthropicApiKey: anthropicApiKey ? "[set]" : "",
-    openaiApiKey: openaiApiKey ? "[set]" : "",
+    // A harness's env carries its key under whatever name that CLI uses: the
+    // dump keeps the names, never the values.
+    adapterEnv: Object.fromEntries(
+      Object.entries(adapterEnv ?? {}).map(([id, env]) => [
+        id,
+        Object.fromEntries(Object.keys(env).map((name) => [name, "[set]"])),
+      ]),
+    ),
     // Every provider keeps its row (id/name/models matter for support) but
     // never its key; a header value is a credential as often as not.
     builtinProviders: builtinProviders.map((p) => ({

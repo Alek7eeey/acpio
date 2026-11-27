@@ -18,7 +18,6 @@ describe("parseSettingsSearch", () => {
     "model",
     "skills",
     "advanced",
-    "cli",
     "remote",
     "diagnostics",
     "mcp",
@@ -209,6 +208,15 @@ describe("settingsPath", () => {
     expect(settingsPath("builtin")).toBe("/settings?section=builtin&leaf=presets");
   });
 
+  // A harness's command, args and keys are its own row on the Connect page now:
+  // the page they had is gone, and a link to it opens where the rows are.
+  it("maps the retired cli leaf to the connect page", () => {
+    expect(parseSettingsSearch("?section=agent&leaf=cli")).toEqual({
+      section: "agent",
+      leaf: "connect",
+    });
+  });
+
   it("uses the given built-in agent leaf", () => {
     expect(settingsPath("builtin", "generation")).toBe(
       "/settings?section=builtin&leaf=generation",
@@ -220,7 +228,6 @@ describe("settingsPath", () => {
     "model",
     "skills",
     "advanced",
-    "cli",
     "remote",
     "diagnostics",
     "mcp",
@@ -289,7 +296,6 @@ describe("getSettingsTree", () => {
       "model",
       "skills",
       "advanced",
-      "cli",
       "mcp",
       "plugins",
       "diagnostics",
@@ -300,7 +306,6 @@ describe("getSettingsTree", () => {
       "settings.modelSection",
       "settings.skillsTitle",
       "settings.advanced",
-      "settings.cliTitle",
       "settings.mcpTitle",
       "settings.pluginsTitle",
       "settings.diagnostics",

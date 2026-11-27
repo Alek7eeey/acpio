@@ -81,8 +81,10 @@ export {
   CUSTOM_AGENT_MAX,
   customAgentAdapter,
   isShellSession,
+  normalizeAdapterEnv,
   normalizeCustomAgentId,
   normalizeCustomAgents,
+  normalizeEnvRecord,
   SHELL_SESSION_PROVIDER,
 } from "./adapters.js";
 export { childProcessEnv } from "./childEnv.js";
@@ -2302,9 +2304,14 @@ export interface AppSettings {
   ompArgs: string[];
   opencodeCommand: string;
   opencodeArgs: string[];
+  /**
+   * Environment each harness is spawned with (Settings → Connect → the agent's
+   * own row): adapter id → KEY=VALUE. The most specific layer after the
+   * adapter's own `env` and before its declared API key, so what a reader types
+   * on the agent's row wins over what the app ships for it.
+   */
+  adapterEnv: Record<string, Record<string, string>>;
   cursorApiKey: string;
-  anthropicApiKey: string;
-  openaiApiKey: string;
   /**
    * Endpoints the built-in agent may talk to — each with its own URL, key and
    * model list (Settings → Built-in agent). Empty = the agent stays offline.
@@ -2732,9 +2739,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   ompArgs: ["acp"],
   opencodeCommand: "opencode",
   opencodeArgs: ["acp"],
+  adapterEnv: {},
   cursorApiKey: "",
-  anthropicApiKey: "",
-  openaiApiKey: "",
   builtinProviders: [],
   builtinEffortsSeeded: false,
   pluginEntries: [],

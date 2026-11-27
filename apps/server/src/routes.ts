@@ -264,9 +264,10 @@ const settingsSchema = z.object({
   ompArgs: z.array(z.string()).optional(),
   opencodeCommand: z.string().optional(),
   opencodeArgs: z.array(z.string()).optional(),
+  // Per-harness environment (Settings → Connect → the agent's own row). Zod
+  // strips what it does not know, so a field missing here is dropped on save.
+  adapterEnv: z.record(z.string(), z.record(z.string(), z.string())).optional(),
   cursorApiKey: z.string().optional(),
-  anthropicApiKey: z.string().optional(),
-  openaiApiKey: z.string().optional(),
   builtinProviders: z
     .array(
       z.object({

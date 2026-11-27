@@ -968,13 +968,12 @@ export const ru = {
     attachmentsDirHint:
       "Куда складывать вложения из чата. Пусто — .acpio-attachments в папке чата (корень проекта). Кнопка выбирает любую папку, в том числе внутри проекта.",
     folderPickSwapHint: "ПКМ: выбор в приложении",
-    cliTitle: "CLI и ключи",
-    cliDesc:
-      "Команды запуска ACP-агентов и ключи, с которыми они ходят к провайдерам — по одному месту.",
-    cliLaunchTitle: "Запуск агентов",
+    agentLaunch: "Запуск и ключи",
     cliCommand: "команда",
     cliArgs: "аргументы",
-    cliAndPermissions: "CLI и права",
+    agentEnv: "Переменные окружения",
+    agentEnvHint:
+      "По строке: KEY=VALUE. Уходят в процесс этого агента — и только его.",
     permissionPolicy: "Политика разрешений",
     permissionPrompt: "Спрашивать",
     permissionAllowlist: "Белый список",
@@ -1290,7 +1289,7 @@ export const ru = {
     agentEmptyResponse:
       "Агент завершил ход без текста (stopReason={{reason}}). Модель: {{model}}. В Настройках выбери модель с API (не local-ollama, если Ollama не запущена) и сохрани ключ.",
     commandNotFoundCursor:
-      "Команда \"{{command}}\" не найдена. Cursor IDE ≠ Cursor CLI. Установите CLI (PowerShell): irm 'https://cursor.com/install?win32=true' | iex затем выполните agent login. Или укажите полный путь в «CLI и права».",
+      "Команда \"{{command}}\" не найдена. Cursor IDE ≠ Cursor CLI. Установите CLI (PowerShell): irm 'https://cursor.com/install?win32=true' | iex затем выполните agent login. Или укажите полный путь в строке Cursor: Настройки → Агенты → Подключение.",
     commandNotFoundOmp:
       "Команда \"{{command}}\" не найдена. Убедитесь, что omp в PATH",
   },

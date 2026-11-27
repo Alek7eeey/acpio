@@ -7,7 +7,10 @@ import os from "node:os";
 import path from "node:path";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import type { FastifyInstance } from "fastify";
+import { sql } from "drizzle-orm";
 import { buildApp, useResetDb } from "./test-utils.js";
+import { db } from "../src/db/client.js";
+import { settings as settingsTable } from "../src/db/schema.js";
 
 let app: FastifyInstance;
 
@@ -115,5 +118,54 @@ describe("settings file: where the editor's arrows sit", () => {
   it("carries the default until the user moves the arrows", async () => {
     const res = await app.inject({ method: "GET", url: "/api/settings/export" });
     expect(res.json().settings.editorNavPlacement).toBe("tabs");
+  });
+});
+
+describe("settings: a harness's own environment", () => {
+  // The two provider keys every harness used to inherit are each CLI's own env
+  // now — a stored install keeps them, on every shipped CLI, where the row for
+  // that CLI shows them.
+  it("moves the shared provider keys onto the shipped CLIs", async () => {
+    db.run(sql`DELETE FROM settings`);
+    await db.insert(settingsTable).values({
+      key: "app",
+      value: { settingsSchema: 11, anthropicApiKey: "sk-ant-1", openaiApiKey: "sk-oa" },
+    });
+
+    const body = (await app.inject({ method: "GET", url: "/api/settings" })).json();
+    expect(body.anthropicApiKey).toBeUndefined();
+    expect(body.openaiApiKey).toBeUndefined();
+    for (const id of ["cursor", "omp", "opencode"]) {
+      expect(body.adapterEnv[id]).toEqual({
+        ANTHROPIC_API_KEY: "sk-ant-1",
+        OPENAI_API_KEY: "sk-oa",
+      });
+    }
+  });
+
+  it("keeps a value already typed on the agent's row", async () => {
+    db.run(sql`DELETE FROM settings`);
+    await db.insert(settingsTable).values({
+      key: "app",
+      value: {
+        settingsSchema: 11,
+        anthropicApiKey: "sk-ant-1",
+        adapterEnv: { omp: { ANTHROPIC_API_KEY: "mine" } },
+      },
+    });
+
+    const body = (await app.inject({ method: "GET", url: "/api/settings" })).json();
+    expect(body.adapterEnv.omp.ANTHROPIC_API_KEY).toBe("mine");
+    expect(body.adapterEnv.cursor.ANTHROPIC_API_KEY).toBe("sk-ant-1");
+  });
+
+  it("never writes a harness's env into a settings file", async () => {
+    expect((await put({ adapterEnv: { omp: { ANTHROPIC_API_KEY: "sk-ant-1" } } })).statusCode).toBe(200);
+
+    const exported = await app.inject({ method: "GET", url: "/api/settings/export" });
+    expect(exported.json().settings.adapterEnv).toBeUndefined();
+    // The local row keeps it — the file simply does not travel with it.
+    const local = (await app.inject({ method: "GET", url: "/api/settings" })).json();
+    expect(local.adapterEnv.omp.ANTHROPIC_API_KEY).toBe("sk-ant-1");
   });
 });

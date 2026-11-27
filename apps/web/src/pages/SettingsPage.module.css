@@ -679,6 +679,40 @@
   width: 100%;
 }
 
+/* The launch fields of one agent, unfolded under its row: the row keeps the
+   list's shape, its own knobs get a block of their own. */
+.agentLaunchPanel {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--border-soft);
+  background: var(--surface);
+}
+
+/* Two icons' worth of a control: it sits beside the switch, not in the table. */
+.agentLaunchBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--settings-control-radius);
+  background: var(--surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.agentLaunchBtn:hover {
+  color: var(--text);
+}
+
+.agentLaunchBtn[aria-expanded="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
 /* A CLI field names itself: two bare inputs would leave the reader guessing
    which one is the command. */
 .cliField {
