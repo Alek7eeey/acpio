@@ -243,28 +243,11 @@ export async function ensureSchema() {
     if (!isDuplicateColumn(err)) throw err;
   }
 
-  db.run(sql`
-    CREATE TABLE IF NOT EXISTS users (
-      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-      username TEXT NOT NULL UNIQUE,
-      display_name TEXT NOT NULL DEFAULT '',
-      password_hash TEXT NOT NULL,
-      role TEXT NOT NULL DEFAULT 'user',
-      connected_provider TEXT,
-      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
-      updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
-    )
-  `);
-
-  db.run(sql`
-    CREATE TABLE IF NOT EXISTS auth_sessions (
-      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      token_hash TEXT NOT NULL UNIQUE,
-      expires_at INTEGER NOT NULL,
-      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
-    )
-  `);
+  // Accounts were never wired — this is a single-user local install — so the
+  // two tables only gathered dust in every dump. Drop them from databases that
+  // already carry them; auth_sessions goes first, it references users.
+  db.run(sql`DROP TABLE IF EXISTS auth_sessions`);
+  db.run(sql`DROP TABLE IF EXISTS users`);
 
   // Drop legacy seed themes — chats stay, just ungrouped (ON DELETE SET NULL).
   db.run(sql`

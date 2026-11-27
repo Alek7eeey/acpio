@@ -56,32 +56,36 @@ describe("parseAcceptLanguage", () => {
 });
 
 describe("createTranslator — RU pluralization", () => {
-  // ru defines common.userCount_one/_few/_many with distinct texts.
+  // ru defines diagnostics.dumpsSummary_one/_few/_many with distinct texts.
   it.each<[number, string]>([
-    [0, "0 пользователей"],
-    [1, "1 пользователь"],
-    [2, "2 пользователя"],
-    [3, "3 пользователя"],
-    [4, "4 пользователя"],
-    [5, "5 пользователей"],
-    [10, "10 пользователей"],
-    [11, "11 пользователей"],
-    [12, "12 пользователей"],
-    [14, "14 пользователей"],
-    [15, "15 пользователей"],
-    [21, "21 пользователь"],
-    [22, "22 пользователя"],
-    [25, "25 пользователей"],
-    [101, "101 пользователь"],
-    [102, "102 пользователя"],
-    [111, "111 пользователей"],
-    [114, "114 пользователей"],
-  ])("ru common.userCount with count %i -> %s", (count, expected) => {
-    expect(t("ru", "common.userCount", { count })).toBe(expected);
+    [0, "0 дампов"],
+    [1, "1 дамп"],
+    [2, "2 дампа"],
+    [3, "3 дампа"],
+    [4, "4 дампа"],
+    [5, "5 дампов"],
+    [10, "10 дампов"],
+    [11, "11 дампов"],
+    [12, "12 дампов"],
+    [14, "14 дампов"],
+    [15, "15 дампов"],
+    [21, "21 дамп"],
+    [22, "22 дампа"],
+    [25, "25 дампов"],
+    [101, "101 дамп"],
+    [102, "102 дампа"],
+    [111, "111 дампов"],
+    [114, "114 дампов"],
+  ])("ru diagnostics.dumpsSummary with count %i -> %s", (count, expected) => {
+    expect(t("ru", "diagnostics.dumpsSummary", { count, size: "1 KB" })).toBe(
+      `${expected} · 1 KB`,
+    );
   });
 
   it("accepts a numeric string count", () => {
-    expect(t("ru", "common.userCount", { count: "2" })).toBe("2 пользователя");
+    expect(t("ru", "diagnostics.dumpsSummary", { count: "2", size: "1 KB" })).toBe(
+      "2 дампа · 1 KB",
+    );
   });
 
   it.each<[string | number, string]>([
@@ -93,9 +97,6 @@ describe("createTranslator — RU pluralization", () => {
     expect(t("ru", "chat.queueCount", { count })).toBe(expected);
   });
 
-  it("without a count var, plural logic is skipped — base key is missing so the key itself is returned", () => {
-    expect(t("ru", "common.userCount")).toBe("common.userCount");
-  });
 });
 
 describe("createTranslator — EN always uses the base key", () => {
@@ -109,13 +110,6 @@ describe("createTranslator — EN always uses the base key", () => {
   ])("en chat.queueCount with count %s -> %s", (count, expected) => {
     expect(t("en", "chat.queueCount", { count })).toBe(expected);
   });
-
-  it.each<[string | number]>([[1], [5]])(
-    "en ignores _one/_other suffix keys even when they exist (common.userCount, count %s)",
-    (count) => {
-      expect(t("en", "common.userCount", { count })).toBe("common.userCount");
-    },
-  );
 
   it.each<[AppLocale, string]>([
     ["en", "3d"],
@@ -177,34 +171,38 @@ describe("missing keys and locale resolution order", () => {
     expect(t("en", "nosection.key")).toBe("nosection.key");
   });
 
-  it("uses the ru text when both catalogs define the key (real pair: auth.welcome)", () => {
-    expect(t("ru", "auth.welcome")).toBe("Добро пожаловать!");
+  it("uses the ru text when both catalogs define the key (real pair: common.newChat)", () => {
+    expect(t("ru", "common.newChat")).toBe("Новый чат");
   });
 
   it("uses the en text for the en locale on the same key", () => {
-    expect(t("en", "auth.welcome")).toBe("Welcome!");
+    expect(t("en", "common.newChat")).toBe("New chat");
   });
 
   it("maps an unknown locale to the ru catalog", () => {
-    expect(t("fr" as AppLocale, "auth.welcome")).toBe("Добро пожаловать!");
+    expect(t("fr" as AppLocale, "common.newChat")).toBe("Новый чат");
   });
 });
 
 describe("errorMessage", () => {
   it("resolves an error code in en", () => {
-    expect(errorMessage("en", "invalidCredentials")).toBe("Invalid username or password");
+    expect(errorMessage("en", "agentNotConnected")).toBe("Connect an agent in Settings first");
   });
 
   it("resolves an error code in ru", () => {
-    expect(errorMessage("ru", "invalidCredentials")).toBe("Неверный логин или пароль");
+    expect(errorMessage("ru", "agentNotConnected")).toBe("Сначала подключите агента в Настройках");
   });
 
   it("resolves a different code in en", () => {
-    expect(errorMessage("en", "userNotFound")).toBe("User not found");
+    expect(errorMessage("en", "sessionBusy")).toBe(
+      "Session is already running a request. Press Stop and try again.",
+    );
   });
 
   it("resolves a different code in ru", () => {
-    expect(errorMessage("ru", "userNotFound")).toBe("Пользователь не найден");
+    expect(errorMessage("ru", "sessionBusy")).toBe(
+      "Сессия уже выполняет запрос. Нажмите «Стоп» и попробуйте снова.",
+    );
   });
 
   it("interpolates vars into errors.pathOutsideCwd in en", () => {

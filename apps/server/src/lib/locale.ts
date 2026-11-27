@@ -31,20 +31,6 @@ export function localizeError(locale: AppLocale, err: unknown): string {
 
 export function isErrorCode(code: string): code is ErrorCode {
   return [
-    "usernameRequired",
-    "passwordRequired",
-    "credentialsRequired",
-    "userExists",
-    "invalidCredentials",
-    "newPasswordRequired",
-    "wrongCurrentPassword",
-    "displayNameRequired",
-    "displayNameTooLong",
-    "userNotFound",
-    "cannotDeleteSelf",
-    "cannotDeleteLastAdmin",
-    "unauthorized",
-    "forbidden",
     "notFound",
     "agentNotConnected",
     "sessionBusy",

@@ -33,8 +33,6 @@ export async function resetDb() {
   }
   // Children first — FK constraints are ON in SQLite.
   for (const table of [
-    "auth_sessions",
-    "users",
     "message_parts",
     "messages",
     "sessions",

@@ -161,26 +161,3 @@ export const boardColumns = sqliteTable("board_columns", {
   keepOnRun: integer("keep_on_run", { mode: "boolean" }).notNull().default(true),
   createdAt: createdAt(),
 }, (table) => [primaryKey({ columns: [table.boardId, table.id] })]);
-
-export const users = sqliteTable("users", {
-  id: id(),
-  username: text("username").notNull().unique(),
-  displayName: text("display_name").notNull().default(""),
-  passwordHash: text("password_hash").notNull(),
-  role: text("role").notNull().default("user"),
-  connectedProvider: text("connected_provider"),
-  createdAt: createdAt(),
-  updatedAt: integer("updated_at", { mode: "timestamp_ms" })
-    .notNull()
-    .$defaultFn(() => new Date()),
-});
-
-export const authSessions = sqliteTable("auth_sessions", {
-  id: id(),
-  userId: text("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  tokenHash: text("token_hash").notNull().unique(),
-  expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
-  createdAt: createdAt(),
-});

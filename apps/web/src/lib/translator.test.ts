@@ -45,50 +45,45 @@ describe("createTranslator: interpolation", () => {
   });
 
   it("interpolates without a count", () => {
-    expect(ru("common.deleteUserConfirm", { username: "alice" })).toBe("Удалить пользователя @alice?");
-    expect(en("common.deleteUserConfirm", { username: "alice" })).toBe("Delete user @alice?");
+    expect(ru("common.backToBoard", { name: "Roadmap" })).toBe("Назад к доске «Roadmap»");
+    expect(en("common.backToBoard", { name: "Roadmap" })).toBe("Back to board «Roadmap»");
   });
 });
 
 describe("createTranslator: Russian plurals", () => {
   it.each([
-    [1, "1 пользователь"],
-    [21, "21 пользователь"],
-    [101, "101 пользователь"],
+    [1, "1 дамп"],
+    [21, "21 дамп"],
+    [101, "101 дамп"],
   ])("count=%i selects the `one` form", (count, expected) => {
-    expect(ru("common.userCount", { count })).toBe(expected);
+    expect(ru("diagnostics.dumpsSummary", { count, size: "1 KB" })).toBe(`${expected} · 1 KB`);
   });
 
   it.each([
-    [2, "2 пользователя"],
-    [3, "3 пользователя"],
-    [22, "22 пользователя"],
+    [2, "2 дампа"],
+    [3, "3 дампа"],
+    [22, "22 дампа"],
   ])("count=%i selects the `few` form", (count, expected) => {
-    expect(ru("common.userCount", { count })).toBe(expected);
+    expect(ru("diagnostics.dumpsSummary", { count, size: "1 KB" })).toBe(`${expected} · 1 KB`);
   });
 
   it.each([
-    [0, "0 пользователей"],
-    [5, "5 пользователей"],
-    [11, "11 пользователей"],
-    [14, "14 пользователей"],
+    [0, "0 дампов"],
+    [5, "5 дампов"],
+    [11, "11 дампов"],
+    [14, "14 дампов"],
   ])("count=%i selects the `many` form", (count, expected) => {
-    expect(ru("common.userCount", { count })).toBe(expected);
+    expect(ru("diagnostics.dumpsSummary", { count, size: "1 KB" })).toBe(`${expected} · 1 KB`);
   });
 
   it("accepts a numeric string count", () => {
-    expect(ru("common.userCount", { count: "3" })).toBe("3 пользователя");
+    expect(ru("diagnostics.dumpsSummary", { count: "3", size: "1 KB" })).toBe("3 дампа · 1 KB");
   });
 });
 
 describe("createTranslator: English catalog ignores plural suffix logic", () => {
-  it("uses the explicit en plural keys", () => {
-    expect(en("common.userCount_one", { count: 1 })).toBe("1 user");
-    expect(en("common.userCount_other", { count: 5 })).toBe("5 users");
-  });
-
   it("does not select a plural form from a count variable", () => {
-    expect(en("common.userCount", { count: 1 })).toBe("common.userCount");
+    expect(en("diagnostics.dumpsSummary", { count: 1, size: "1 KB" })).toBe("1 dumps · 1 KB");
   });
 
   it("interpolates count in relative-time keys", () => {
