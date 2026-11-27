@@ -5,7 +5,10 @@
   /* Short viewports (a phone in landscape) still have to reach the head, so the
      page itself keeps the vertical scroll as the outer fallback. */
   overflow: auto;
-  padding: 16px;
+  /* Full width like the board: a narrow centred column left a field of empty
+     space on either side, and its back control landed in the middle of the
+     window instead of at its left edge. */
+  padding: 16px 20px 20px;
   min-height: 0;
   min-width: 0;
 }
@@ -23,13 +26,12 @@
 
 .head {
   flex: none;
-  max-width: 980px;
-  margin: 0 auto 14px;
   display: flex;
-  gap: 16px;
+  gap: 16px 24px;
   align-items: flex-start;
   justify-content: space-between;
   flex-wrap: wrap;
+  padding-bottom: 12px;
 }
 
 .headText {
@@ -84,8 +86,9 @@
 
 .title {
   margin: 0 0 4px;
-  font-size: 1.1rem;
+  font-size: 1.3rem;
   font-weight: 700;
+  letter-spacing: -0.01em;
 }
 
 .hint {
@@ -96,24 +99,46 @@
   color: var(--text-secondary);
 }
 
+/* The actions end the toolbar's row, so they stay on the right even when the
+   filters are not there (the editors tab) or the row wraps on a narrow screen. */
 .headActions {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  margin-left: auto;
 }
 
-.filters {
+/* The bar between the head and the rows: the slice left, its actions right. */
+.toolbar {
   flex: none;
-  max-width: 980px;
-  margin: 0 auto 12px;
   display: flex;
-  gap: 6px;
+  align-items: center;
+  gap: 8px;
   flex-wrap: wrap;
+  margin: 0 0 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
 }
 
 /* The tab row and the job filters share the look; only one of them is up. */
-.filters[hidden],
+.tabs,
+.filters {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.tabs {
+  flex: none;
+  padding-top: 2px;
+}
+
+.filters {
+  flex: 1 1 auto;
+}
+
 .scroll[hidden] {
   display: none;
 }
@@ -185,8 +210,6 @@
 }
 
 .empty {
-  max-width: 980px;
-  margin: 0 auto;
   padding: 28px 20px;
   border: 1px dashed var(--border);
   border-radius: var(--radius);
@@ -205,17 +228,15 @@
   color: var(--text-secondary);
 }
 
-/* Section captions inside the scrolled body follow the rows' own column. */
+/* Section captions inside the scrolled body sit above their own rows. */
 .scroll > .hint {
-  max-width: 980px;
-  margin: 0 auto 8px;
+  margin: 0 0 8px;
 }
 
 .list {
   list-style: none;
-  margin: 0 auto;
+  margin: 0;
   padding: 0;
-  max-width: 980px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -359,6 +380,18 @@
 }
 
 @media (max-width: 700px) {
+  .page {
+    padding: 12px 14px 16px;
+  }
+
+  .tabs {
+    width: 100%;
+  }
+
+  .tabs .filter {
+    flex: 1 1 0;
+  }
+
   .row {
     flex-wrap: wrap;
   }

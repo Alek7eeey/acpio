@@ -194,6 +194,48 @@ export function TasksPage({ onBack }: { onBack?: () => void }) {
           <h1 className={styles.title}>{t("bg.title")}</h1>
           <p className={styles.hint}>{t("bg.pageHint")}</p>
         </div>
+        {/* Which list is up belongs to the page, not to its actions. */}
+        <div className={styles.tabs} role="tablist" aria-label={t("bg.tabsLabel")}>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "jobs"}
+            className={`${styles.filter} ${tab === "jobs" ? styles.filterOn : ""}`}
+            onClick={() => setTab("jobs")}
+          >
+            {t("bg.tabJobs", { count: rows.length })}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "editors"}
+            className={`${styles.filter} ${tab === "editors" ? styles.filterOn : ""}`}
+            onClick={() => setTab("editors")}
+          >
+            {t("bg.tabEditors", { count: openEditors.length })}
+          </button>
+        </div>
+      </header>
+
+      {/* One row under the head: the slice on the left, what can be done with it
+          on the right. The actions used to share the title's row, so three rows
+          of chips and buttons landed on top of each other. */}
+      <div className={styles.toolbar}>
+        {tab === "jobs" ? (
+          <div className={styles.filters} role="group" aria-label={t("bg.filterLabel")}>
+            {FILTERS.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                aria-pressed={filter === item.id}
+                className={`${styles.filter} ${filter === item.id ? styles.filterOn : ""}`}
+                onClick={() => setFilter(item.id)}
+              >
+                {t(item.labelKey, { count: counts[item.id] })}
+              </button>
+            ))}
+          </div>
+        ) : null}
         <div className={styles.headActions}>
           {tab === "editors" ? (
             <button
@@ -209,73 +251,33 @@ export function TasksPage({ onBack }: { onBack?: () => void }) {
             </button>
           ) : (
             <>
-          <span className={styles.counter}>{t("bg.runningCount", { count: running })}</span>
-          <button type="button" className={styles.button} onClick={() => void refresh()}>
-            {t("bg.refresh")}
-          </button>
-          <button
-            type="button"
-            className={styles.button}
-            disabled={finished === 0}
-            onClick={() => void clearFinished()}
-          >
-            {t("bg.clearFinished")}
-          </button>
-          <button
-            type="button"
-            className={`${styles.button} ${styles.danger}`}
-            disabled={running === 0 || stopping}
-            onClick={() => void onStopAll()}
-          >
-            {t("bg.stopRunningAll")}
-          </button>
+              <span className={styles.counter}>{t("bg.runningCount", { count: running })}</span>
+              <button type="button" className={styles.button} onClick={() => void refresh()}>
+                {t("bg.refresh")}
+              </button>
+              <button
+                type="button"
+                className={styles.button}
+                disabled={finished === 0}
+                onClick={() => void clearFinished()}
+              >
+                {t("bg.clearFinished")}
+              </button>
+              <button
+                type="button"
+                className={`${styles.button} ${styles.danger}`}
+                disabled={running === 0 || stopping}
+                onClick={() => void onStopAll()}
+              >
+                {t("bg.stopRunningAll")}
+              </button>
             </>
           )}
         </div>
-      </header>
-
-      <div className={styles.filters} role="tablist" aria-label={t("bg.tabsLabel")}>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "jobs"}
-          className={`${styles.filter} ${tab === "jobs" ? styles.filterOn : ""}`}
-          onClick={() => setTab("jobs")}
-        >
-          {t("bg.tabJobs", { count: rows.length })}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "editors"}
-          className={`${styles.filter} ${tab === "editors" ? styles.filterOn : ""}`}
-          onClick={() => setTab("editors")}
-        >
-          {t("bg.tabEditors", { count: openEditors.length })}
-        </button>
-      </div>
-
-      <div
-        className={styles.filters}
-        role="group"
-        aria-label={t("bg.filterLabel")}
-        hidden={tab === "editors"}
-      >
-        {FILTERS.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            aria-pressed={filter === item.id}
-            className={`${styles.filter} ${filter === item.id ? styles.filterOn : ""}`}
-            onClick={() => setFilter(item.id)}
-          >
-            {t(item.labelKey, { count: counts[item.id] })}
-          </button>
-        ))}
       </div>
 
       {/* The rows are the only part that grows: they get the vertical scroll of
-          their own, so the head and the filter row stay in place above them. */}
+          their own, so the head and the toolbar stay in place above them. */}
       {tab === "editors" ? (
         <div className={styles.scroll}>
           <p className={styles.hint}>{t("bg.serversHint")}</p>
