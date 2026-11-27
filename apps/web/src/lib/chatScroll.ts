@@ -22,8 +22,19 @@ export type ThreadScrollMetrics = {
 
 /** Upward movement below this is layout noise, not the reader taking over. */
 const SCROLLED_UP_MIN_PX = 2;
-/** Hidden content that still counts as "at the bottom". */
+/**
+ * Hidden content that still counts as "at the bottom" *while the thread is
+ * following it*: a chunk can outrun the pin's own scroll by a wheel notch and
+ * the pin has to survive that, or a fast stream stops following altogether.
+ */
 const FOLLOW_MAX_HIDDEN_PX = 140;
+/**
+ * Hidden content that still counts as the reader sitting at the end. Two
+ * pixels, the slack the upward rule already gives layout noise: scrollTop is
+ * fractional and the scroll heights are rounded. It is not the follower's
+ * tolerance — a reader one wheel notch up (120px) is reading, not following.
+ */
+const AT_END_MAX_HIDDEN_PX = 2;
 /** Floor for the pill, so a short scrollport does not raise it on a nudge. */
 const JUMP_LATEST_MIN_HIDDEN_PX = 180;
 /** Share of the scrollport that must be out of sight before the pill appears. */
@@ -36,8 +47,22 @@ const JUMP_LATEST_MIN_HIDDEN_RATIO = 1 / 3;
  * thread and the pin pulled the reader back down, so only a hard fling escaped.
  */
 export function followsThreadBottom(metrics: ThreadScrollMetrics) {
-  const hiddenPx = Math.max(0, metrics.scrollHeight - metrics.scrollTop - metrics.clientHeight);
-  return !scrollHandsThreadToReader(metrics) && hiddenPx < FOLLOW_MAX_HIDDEN_PX;
+  return !scrollHandsThreadToReader(metrics) && hiddenBehind(metrics) < FOLLOW_MAX_HIDDEN_PX;
+}
+
+/**
+ * Whether the reader is on the last pixel of the thread. This — not the
+ * follower's 140px tolerance — is where a reader who took the thread over hands
+ * it back: a wheel notch leaves them ~120px up, and the tolerance used to read
+ * that as "at the bottom" and re-arm the pin 500ms later, so a live turn dragged
+ * them back down every time they scrolled up to read.
+ */
+export function atThreadEnd(metrics: ThreadScrollMetrics) {
+  return !scrollHandsThreadToReader(metrics) && hiddenBehind(metrics) <= AT_END_MAX_HIDDEN_PX;
+}
+
+function hiddenBehind(metrics: ThreadScrollMetrics) {
+  return Math.max(0, metrics.scrollHeight - metrics.scrollTop - metrics.clientHeight);
 }
 
 /**
@@ -73,8 +98,13 @@ export function threadScrollRearmsBottom(
   metrics: ThreadScrollMetrics,
   now: number,
   echoUntil: number,
+  /** Whether the reader has taken the thread over since the pin last held it. */
+  readerTookOver = false,
 ) {
   if (now < echoUntil) return false;
+  // A reader who took the thread over gets it back only at the end; the
+  // follower's tolerance belongs to the pin it left, not to them.
+  if (readerTookOver) return atThreadEnd(metrics);
   return followsThreadBottom(metrics);
 }
 

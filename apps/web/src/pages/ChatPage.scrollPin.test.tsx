@@ -1,10 +1,20 @@
 // @vitest-environment jsdom
 //
-// Regression: the follow-the-stream pin has a second half a frame later, and the
-// reader's wheel can land in between. That frame then scrolled back to the end
-// and re-armed the pin over the reader's intent, so with the reasoning block
-// open at the bottom of a live turn — the thing a thinking model keeps writing —
-// every attempt to scroll up was pulled straight back down.
+// Regressions of the follow-the-stream pin, each one a reader who scrolls up and
+// is dragged back down:
+//
+//  - the pin has a second half a frame later, and the reader's wheel can land in
+//    between. That frame then scrolled back to the end and re-armed the pin over
+//    the reader's intent, so with the reasoning block open at the bottom of a
+//    live turn — the thing a thinking model keeps writing — every attempt to
+//    scroll up was pulled straight back down;
+//  - one wheel notch is ~120px, and the pin's "still at the bottom" tolerance is
+//    140px: a reader who nudged the thread up was read as sitting at the end, so
+//    the next scroll event (a layout settle, the browser's own anchoring) re-armed
+//    the pin and the next chunk pulled them down;
+//  - a chat opened while its answer was streaming could not be scrolled at all:
+//    every chunk restarted the 120ms timer that ends the open-the-chat pin, so it
+//    never ended.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
@@ -211,5 +221,74 @@ describe("the pin that follows a streaming turn", () => {
       await new Promise((r) => setTimeout(r, 150));
     });
     expect(thread.scrollTop).toBe(3400);
+  }, 20_000);
+
+  it("keeps the thread of a reader one wheel notch up", async () => {
+    const { container } = mount();
+    const thread = threadOf(container);
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 400));
+    });
+
+    thread.scrollTop = 3300;
+    fireEvent.scroll(thread);
+
+    // One notch up: 120px of the thread left below the fold, which is inside the
+    // 140px the follower treats as "at the bottom".
+    fireEvent.wheel(thread, { deltaY: -120 });
+    thread.scrollTop = 3180;
+    fireEvent.scroll(thread);
+
+    // Past the echo window, something scrolls the thread without moving it — a
+    // layout settle, the browser's scroll anchoring under a streaming answer.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 700));
+    });
+    fireEvent.scroll(thread);
+    grow();
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 150));
+    });
+    expect(thread.scrollTop).toBe(3180);
+  }, 20_000);
+
+  it("lets the reader up in a chat opened while its answer streams", async () => {
+    const { container } = mount();
+    const thread = threadOf(container);
+
+    // The chat opens onto a running turn: a chunk every 50ms, each one a new
+    // digest — and so a new run of the pin that opens the chat.
+    const chunks = async (ms: number) => {
+      let chars = 0;
+      const until = Date.now() + ms;
+      while (Date.now() < until) {
+        chars += 1;
+        const next: SessionDetailDto = {
+          ...detail,
+          messages: [
+            detail.messages[0],
+            { ...detail.messages[1], parts: [part("t1", 0, "думаю" + ".".repeat(chars))] },
+          ],
+        };
+        act(() => {
+          useAppStore.setState({ activeSession: next, sessionDetails: { s1: next } });
+        });
+        await act(async () => {
+          await new Promise((r) => setTimeout(r, 50));
+        });
+      }
+    };
+
+    thread.scrollTop = 3300;
+    fireEvent.scroll(thread);
+    await chunks(250);
+
+    fireEvent.wheel(thread, { deltaY: -400 });
+    thread.scrollTop = 2700;
+    fireEvent.scroll(thread);
+    await chunks(400);
+
+    expect(thread.scrollTop).toBe(2700);
   }, 20_000);
 });

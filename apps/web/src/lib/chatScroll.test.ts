@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   STICK_ECHO_MS,
+  atThreadEnd,
   followsThreadBottom,
   showsJumpToLatest,
   threadScrollRearmsBottom,
@@ -105,8 +106,34 @@ describe("threadScrollRearmsBottom", () => {
     expect(threadScrollRearmsBottom(withHidden(300), echoUntil, echoUntil)).toBe(false);
   });
 
+  it("does not take the thread back from a reader one notch up", () => {
+    // A wheel notch leaves ~120px below the fold — inside the follower's 140px,
+    // but the reader is reading, not following: the pin comes back only at the
+    // end, or the next scroll event (a layout settle) hands them to the stream
+    // again and every chunk drags them down.
+    const echoUntil = 1000 + STICK_ECHO_MS;
+    expect(threadScrollRearmsBottom(withHidden(120), echoUntil, echoUntil, true)).toBe(false);
+    expect(threadScrollRearmsBottom(withHidden(2), echoUntil, echoUntil, true)).toBe(true);
+    expect(threadScrollRearmsBottom(atBottom(), echoUntil, echoUntil, true)).toBe(true);
+  });
+
   it("stays released on scroll events with no window to hold", () => {
     expect(threadScrollRearmsBottom(withHidden(400), 1000, 0)).toBe(false);
+  });
+});
+
+describe("atThreadEnd", () => {
+  it("is the last pixel of the thread, not the follower's tolerance", () => {
+    expect(atThreadEnd(atBottom())).toBe(true);
+    expect(atThreadEnd(withHidden(2))).toBe(true);
+    // One wheel notch: still following for the pin, no longer at the end.
+    expect(atThreadEnd(withHidden(3))).toBe(false);
+    expect(atThreadEnd(withHidden(120))).toBe(false);
+  });
+
+  it("is not an upward step", () => {
+    const bottom = atBottom();
+    expect(atThreadEnd({ ...bottom, prevScrollTop: bottom.scrollTop + 40 })).toBe(false);
   });
 });
 

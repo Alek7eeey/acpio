@@ -7723,6 +7723,15 @@ function ChatThread() {
   const stickEchoUntilRef = useRef(0);
   /** Pin to bottom across skeleton → first paint of an unloaded chat. */
   const pendingBottomPinRef = useRef(false);
+  /**
+   * The timer that ends `pendingBottomPinRef`. It lives in a ref because the
+   * pin's layout effect re-runs on every streamed chunk (the digest is a
+   * dependency), and a timer cancelled by each run never fires at all: the pin
+   * stayed latched for the whole turn and every token yanked the viewport back
+   * down, so a chat opened while its answer was streaming could not be scrolled
+   * up at all.
+   */
+  const pinSettleTimerRef = useRef(0);
   const [scrolledAway, setScrolledAway] = useState(false);
   /** The prompt the rail brackets its column on. While the end of the thread is
    *  on screen (`!scrolledAway`, the same flag that keeps the "jump to latest"
@@ -7747,26 +7756,11 @@ function ChatThread() {
    */
   const readerTakeoversRef = useRef(0);
 
-  const scrollThreadToEnd = () => {
-    const thread = threadRef.current;
-    if (!thread) return;
-    const takeovers = readerTakeoversRef.current;
-    suppressScrollWatchRef.current = true;
+  /** The thread follows again — which also ends the reader's takeover, so the
+   *  follower's growth tolerance belongs to them once more. */
+  const armStick = () => {
+    readerTakeoversRef.current = 0;
     stickToBottomRef.current = true;
-    setScrolledAway(false);
-    thread.scrollTop = thread.scrollHeight;
-    window.requestAnimationFrame(() => {
-      const node = threadRef.current;
-      // The reader took the thread after this pin was made: it is stale, and
-      // neither scrolling nor re-arming it is theirs to lose.
-      if (readerTakeoversRef.current !== takeovers) {
-        suppressScrollWatchRef.current = false;
-        return;
-      }
-      if (node) node.scrollTop = node.scrollHeight;
-      suppressScrollWatchRef.current = false;
-      stickToBottomRef.current = true;
-    });
   };
 
   /**
@@ -7779,6 +7773,33 @@ function ChatThread() {
     readerTakeoversRef.current += 1;
     stickToBottomRef.current = false;
     stickEchoUntilRef.current = Date.now() + STICK_ECHO_MS;
+  };
+
+  const scrollThreadToEnd = () => {
+    const thread = threadRef.current;
+    if (!thread) return;
+    // Putting the thread back at the end ends the reader's takeover: from here
+    // the follower's own tolerance applies again, or a chunk that outran this
+    // scroll would silently stop the thread from following.
+    armStick();
+    // Counted from here, so a wheel that lands in this pin's own frame makes its
+    // second half stale.
+    const takeovers = readerTakeoversRef.current;
+    suppressScrollWatchRef.current = true;
+    setScrolledAway(false);
+    thread.scrollTop = thread.scrollHeight;
+    window.requestAnimationFrame(() => {
+      const node = threadRef.current;
+      // The reader took the thread after this pin was made: it is stale, and
+      // neither scrolling nor re-arming it is theirs to lose.
+      if (readerTakeoversRef.current !== takeovers) {
+        suppressScrollWatchRef.current = false;
+        return;
+      }
+      if (node) node.scrollTop = node.scrollHeight;
+      suppressScrollWatchRef.current = false;
+      armStick();
+    });
   };
 
   // Which prompt's turn the reader is in: the last rail prompt whose message
@@ -7870,11 +7891,18 @@ function ChatThread() {
         // middle of the drag and pulls the reader down with it.
         releaseStickToBottom();
       } else {
-        stickToBottomRef.current = threadScrollRearmsBottom(
-          next,
-          Date.now(),
-          stickEchoUntilRef.current,
-        );
+        if (
+          threadScrollRearmsBottom(
+            next,
+            Date.now(),
+            stickEchoUntilRef.current,
+            readerTakeoversRef.current > 0,
+          )
+        ) {
+          armStick();
+        } else {
+          stickToBottomRef.current = false;
+        }
       }
       setScrolledAway(showsJumpToLatest(next));
     };
@@ -7974,6 +8002,7 @@ function ChatThread() {
   useEffect(() => {
     return () => {
       if (scrollRafRef.current) window.cancelAnimationFrame(scrollRafRef.current);
+      if (pinSettleTimerRef.current) window.clearTimeout(pinSettleTimerRef.current);
     };
   }, []);
 
@@ -7984,6 +8013,9 @@ function ChatThread() {
     stickToBottomRef.current = true;
     userJustSentRef.current = false;
     pendingBottomPinRef.current = Boolean(storeActiveSessionId);
+    // A settle still running belongs to the chat that was just left.
+    if (pinSettleTimerRef.current) window.clearTimeout(pinSettleTimerRef.current);
+    pinSettleTimerRef.current = 0;
     if (!shouldAutoFocusComposer()) {
       pendingEmptyChatFocusRef.current = false;
       textareaRef.current?.blur();
@@ -8041,14 +8073,18 @@ function ChatThread() {
     scrollThreadToEnd();
     const raf = window.requestAnimationFrame(() => scrollThreadToEnd());
     const t1 = window.setTimeout(() => scrollThreadToEnd(), 0);
-    const t2 = window.setTimeout(() => {
-      scrollThreadToEnd();
-      pendingBottomPinRef.current = false;
-    }, 120);
+    // Held across the re-runs this effect gets while the chat is streaming: the
+    // pin has to end 120ms after the chat opened, not 120ms after its last token.
+    if (!pinSettleTimerRef.current) {
+      pinSettleTimerRef.current = window.setTimeout(() => {
+        pinSettleTimerRef.current = 0;
+        scrollThreadToEnd();
+        pendingBottomPinRef.current = false;
+      }, 120);
+    }
     return () => {
       window.cancelAnimationFrame(raf);
       window.clearTimeout(t1);
-      window.clearTimeout(t2);
     };
   }, [
     renderSkeleton,
