@@ -185,6 +185,16 @@
   color: var(--text);
 }
 
+/* A row's first cell is a short label, and an auto-laid-out table hands it only
+   its minimum: the other columns carry unbreakable paths and inline code, so
+   that minimum is one word and the label ends up a sliver (measured: 100px of
+   800, "Критерии, промпт ноды в БД" broken four ways). A floor keeps the label
+   readable and costs the wide columns a few pixels (100 → 168, 412 → 358). */
+.th:first-child,
+.td:first-child {
+  min-width: 10em;
+}
+
 .tr:last-child .td {
   border-bottom: none;
 }
