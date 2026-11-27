@@ -4342,7 +4342,7 @@ button.userSlashCmd:focus-visible {
     font-size: 0.9rem;
   }
 
-  /* Thinking / subagents — keep clearly smaller than the answer (0.86rem). */
+  /* Thinking / subagents — keep clearly smaller than the answer text. */
   .stepsToggle {
     font-size: 0.78rem;
     gap: 6px;

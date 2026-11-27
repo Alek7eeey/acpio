@@ -182,8 +182,9 @@ database.
 
 1. In **Settings → Agents → Connect** press **Test** — the server spawns the ACP process
    and shows its models.
-2. Command, args and API key can be overridden in **Settings → Agents → Advanced → CLI &
-   permissions**; permission policy for local work: `Always allow`.
+2. Command, args, environment variables and API key are on that agent's own row — open
+   **Launch & keys** under it; permission policy for local work: **Settings → Agents →
+   Advanced**, `Always allow`.
 3. Press **Connect**, then create a chat.
 
 A harness you do not use can be switched off with the toggle in **Settings → Agents →
