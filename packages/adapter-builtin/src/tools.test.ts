@@ -853,6 +853,21 @@ describe("the plan tools", () => {
     expect(readPlan(file)?.stage).toBe("draft");
   });
 
+  it("does not turn a closed card into a refusal the reader never gave", async () => {
+    const { tools, file, approve } = setupPlan(false);
+    await exec(tools, "plan", {
+      problem: "The export drops the plan.",
+      entries: [{ content: "Read the code" }],
+    });
+    // The X dismissed the card: no words, and no verdict of the reader's.
+    approve.mockResolvedValueOnce({ accepted: false, dismissed: true });
+    const answer = await exec(tools, "apply_plan", {});
+    expect(answer).toContain("closed the card");
+    expect(answer).not.toContain("did not approve");
+    expect(answer).toContain("End the turn");
+    expect(readPlan(file)?.stage).toBe("draft");
+  });
+
   it("hands the reader's own words back so the same turn reworks the plan", async () => {
     const { tools, file, approve } = setupPlan(false, "Добавь шаг с тестами");
     await exec(tools, "plan", {

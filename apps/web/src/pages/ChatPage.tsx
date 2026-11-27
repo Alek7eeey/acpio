@@ -5453,15 +5453,15 @@ function ChatThread() {
     requestAnimationFrame(() => focusComposer());
   };
 
-  /** Closing the card is not one of its answers, but it has to be one for the
-   *  agent: a parked turn only ends by being answered, and until it does the
-   *  reader's next prompt would sit in the queue. Rejected keeps the plan a
-   *  draft — it is still in the panel, and saying what to change is the point. */
+  /** Closing the card is not one of its answers, but the parked turn still has
+   *  to end: until it does the reader's next prompt would sit in the queue.
+   *  `cancelled` is what ACP calls a dismissed request — no verdict, so the
+   *  agent reports its own result instead of a refusal nobody gave (it used to
+   *  read the X as the reader's no and answer that message). The plan keeps its
+   *  draft stage and stays in the panel. */
   const dismissPlanCard = () => {
     if (!planPending) return;
-    // No words: closing the card ends the turn. The reader's own words are the
-    // card's «Отклонить», which hands them back to the agent as the answer.
-    void answerQuestion({ outcome: { outcome: "rejected" } });
+    void answerQuestion({ outcome: { outcome: "cancelled" } });
   };
 
   /** The plan file itself, verbatim — what the panel's editor opens and saves. */
@@ -6547,6 +6547,12 @@ function ChatThread() {
       if (shouldAutoFocusComposer()) focusComposer();
       return;
     }
+    // A card waiting on the plan is not a turn at work: the prompt is not made
+    // to stand in the queue behind it, and the card is not answered on the
+    // reader's behalf either. Closing it is the step the X takes — that turn
+    // ends with the plan still a draft — and the queue's own drain hands the
+    // prompt over the moment it does.
+    if (planPending) void answerQuestion({ outcome: { outcome: "cancelled" } });
     if (shouldAutoFocusComposer()) {
       keepComposerFocus.current = true;
     } else {

@@ -9,8 +9,9 @@ import { createBuiltinTransport } from "./agent.js";
 /** What the stub model answers one request with: a tool call or plain text. */
 type Reply = { tool?: { name: string; args: unknown }; text?: string };
 
-/** What the reader answers one plan card with: a yes, or a no and their words. */
-type ApprovalAnswer = { outcome: "accepted" | "rejected"; reason?: string };
+/** What the reader answers one plan card with: a yes, a no and their words, or
+ *  a dismissal — the card closed with the X, nothing said either way. */
+type ApprovalAnswer = { outcome: "accepted" | "rejected" | "cancelled"; reason?: string };
 
 type Chunk = (payload: unknown) => string;
 
@@ -344,6 +345,31 @@ it("hands a refusal's own words to the model and asks again in the same turn", a
         { content: "Cover the branch with a test", status: "pending" },
       ],
     });
+  } finally {
+    await close();
+  }
+});
+
+it("ends the turn on a closed card without reporting a refusal", async () => {
+  const { frames, bodies, prompt, close } = await boot(
+    [
+      { tool: { name: "plan", args: { ...DOCUMENT, entries: STEPS } } },
+      { tool: { name: "apply_plan", args: {} } },
+      // The card was dismissed, not answered: the model owes its own result.
+      { text: "План остался черновиком в панели." },
+    ],
+    {},
+    [{ outcome: "cancelled" }],
+  );
+  try {
+    await prompt("составь план");
+    // plan, apply, the dismissal — and nothing asking for the card again.
+    expect(bodies).toHaveLength(3);
+    const told = lastMessageText(bodies[2] ?? {});
+    expect(told).toContain("closed the card");
+    expect(told).not.toContain("did not approve");
+    expect(nudges(bodies)).toHaveLength(0);
+    expect(planUpdates(frames).every((update) => update.stage !== "applying")).toBe(true);
   } finally {
     await close();
   }

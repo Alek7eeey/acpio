@@ -510,11 +510,12 @@ describe("the plan's approval", () => {
 
     fireEvent.click(await screen.findByLabelText("Закрыть карточку и написать новый запрос"));
 
-    // A parked turn only ends by being answered — silence is not consent. The X
-    // carries no words of the reader's: the turn just ends.
+    // The turn parked on the card still has to end, but the X answers nothing on
+    // the reader's behalf: `cancelled` is a dismissal, so the agent reports its
+    // own result instead of a refusal nobody gave.
     await waitFor(() =>
       expect(api.answerQuestion).toHaveBeenCalledWith("s1", "r1", {
-        outcome: { outcome: "rejected" },
+        outcome: { outcome: "cancelled" },
       }),
     );
     expect(api.setSessionPlan).not.toHaveBeenCalled();
@@ -548,6 +549,32 @@ describe("the plan's approval", () => {
     );
     expect(api.setSessionPlan).not.toHaveBeenCalled();
     expect(api.prompt).not.toHaveBeenCalled();
+  });
+
+  it("takes a prompt typed while the card waits: the same close, and the prompt goes next", async () => {
+    park(session(), true);
+    renderChat();
+
+    // Nothing is clicked: the reader just writes and sends. Their words are a
+    // prompt for the agent, not an answer to the plan.
+    const composer = await screen.findByPlaceholderText("Сообщение или /команда…");
+    fireEvent.change(composer, { target: { value: "  Перепиши шаг про тесты  " } });
+    fireEvent.keyDown(composer, { key: "Enter" });
+
+    // Closing the card is exactly what the X does — no answer of the reader's —
+    // and the text becomes the next prompt, which the queue hands over as soon
+    // as the dismissed turn lets go of the session.
+    await waitFor(() =>
+      expect(api.answerQuestion).toHaveBeenCalledWith("s1", "r1", {
+        outcome: { outcome: "cancelled" },
+      }),
+    );
+    await waitFor(() =>
+      expect(
+        useAppStore.getState().promptQueue.some((q) => q.text.includes("Перепиши шаг про тесты")),
+      ).toBe(true),
+    );
+    expect(api.setSessionPlan).not.toHaveBeenCalled();
   });
 
   it("takes a refusal back: the same card approves the plan after all", async () => {

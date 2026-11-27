@@ -44,6 +44,13 @@ export interface PlanApproval {
    * the X, or a turn stopped with Stop, carries none — silence is not feedback.
    */
   feedback?: string;
+  /**
+   * The card was closed without an answer. Distinct from a refusal: no verdict
+   * of the reader's reached the model, so it may not report one back at them
+   * (the model used to answer «план отклонён, что поправить?» to a message
+   * nobody had sent — the X was read as a no).
+   */
+  dismissed?: boolean;
 }
 
 /**
@@ -904,8 +911,8 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
             "carries the answers, so the answer adds nothing about it — no «план готов», no «карточка " +
             "его одобряет». Approved, the stage turns `applying` and " +
             "the work begins. Rejected with the reader's own words, they come back as this tool's " +
-            "answer: rework the plan with `plan` and call this again in the same turn. Rejected in " +
-            "silence, nothing is implemented and the turn ends there. Never call it before the " +
+            "answer: rework the plan with `plan` and call this again in the same turn. Closed " +
+            "without an answer, nothing is implemented and the turn ends there. Never call it before the " +
             "reader has seen the plan, and never again once the stage is `applying`.",
           inputSchema: z.object({
             pacing: z
@@ -955,6 +962,16 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
                   "Rework the plan with `plan` along those words — change what they asked for " +
                   "and keep what they did not — then call `apply_plan` again in this turn and " +
                   "wait for the answer. Implement nothing until the stage is `applying`."
+                );
+              }
+              // Closed, not refused: the reader said nothing at all, so there is
+              // no verdict to report. The model owes its own result and stops.
+              if (answer.dismissed) {
+                return (
+                  "The reader closed the card without approving the plan and without saying what " +
+                  "to change. Nothing is approved and nothing is implemented. End the turn with " +
+                  "the result you have and stop: do not rework the plan on your own, ask nothing, " +
+                  "and do not call `apply_plan` again in this turn."
                 );
               }
               return (

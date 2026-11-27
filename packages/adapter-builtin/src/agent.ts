@@ -1655,7 +1655,7 @@ export class BuiltinAgent implements InProcessAgentTransport {
    * `apply_plan`'s gate: the approval card. The harness draws it from the plan
    * itself (`requestKinds` maps this method to `create_plan`), so the reader
    * approves the very document the panel shows. A turn cut short while it waits
-   * reads as a no — silence is not consent.
+   * reads as a dismissal — silence is neither consent nor a refusal.
    */
   private async approvePlan(state: PlanState): Promise<PlanApproval> {
     const plan = this.planFrame(state);
@@ -1669,12 +1669,17 @@ export class BuiltinAgent implements InProcessAgentTransport {
       if (res?.outcome?.outcome === "accepted") return { accepted: true };
       // The card puts the reader's own words into `reason` when they type them:
       // that is the answer `apply_plan` hands back so the same turn can rework
-      // the plan. Stop (`cancelled`) and the X carry none — silence is not a yes
-      // and not a wish either.
+      // the plan. `cancelled` is ACP's "the request was dismissed", and the X
+      // sends exactly it: no words, no verdict — reporting that as a refusal put
+      // words in the reader's mouth.
       const feedback = typeof res?.outcome?.reason === "string" ? res.outcome.reason.trim() : "";
+      if (!feedback && res?.outcome?.outcome !== "rejected") {
+        return { accepted: false, dismissed: true };
+      }
       return { accepted: false, ...(feedback ? { feedback } : {}) };
     } catch {
-      return { accepted: false };
+      // A turn stopped while the card waited dismissed it too.
+      return { accepted: false, dismissed: true };
     }
   }
 
