@@ -58,7 +58,7 @@ function connectAgent() {
  * death froze in "in_progress" and the agent session it would come back to.
  */
 async function seedInterruptedChat(
-  opts: { cwd?: string; question?: boolean } = {},
+  opts: { cwd?: string; question?: boolean; plan?: boolean } = {},
 ): Promise<string> {
   const cwd = opts.cwd ?? (await fsp.mkdtemp(path.join(os.tmpdir(), "acpio-interrupted-")));
   if (!opts.cwd) tempDirs.push(cwd);
@@ -69,7 +69,7 @@ async function seedInterruptedChat(
       provider: "omp",
       cwd,
       mode: "agent",
-      status: opts.question ? "waiting" : "running",
+      status: opts.question || opts.plan ? "waiting" : "running",
       acpSessionId: "fake-sess-4242",
     })
     .returning();
@@ -90,6 +90,18 @@ async function seedInterruptedChat(
       pending: true,
       title: "Какой цвет?",
       questions: [],
+    });
+  }
+  if (opts.plan) {
+    await appendPart(row.id, assistant.id, "plan", {
+      requestId: `${row.id}:p`,
+      pending: true,
+      name: "Сессии админа",
+      overview: "Таблица сессий и уведомления о входе.",
+      stage: "draft",
+      pacing: "whole",
+      path: ".acpio/plan.md",
+      entries: [{ content: "Написать таблицу", status: "pending" }],
     });
   }
   return row.id;
@@ -223,6 +235,28 @@ describe("interrupted turns, resumed at boot", () => {
     expect(after.status).toBe("waiting");
     expect(partsOf(after).find((p) => p.type === "question")?.payload.pending).toBe(true);
     expect(textParts(after).some((text) => text.includes(CONTINUATION))).toBe(false);
+  });
+
+  it("answers a plan card whose turn died without inventing a message for the reader", async () => {
+    await connectAgent();
+    const sessionId = await seedInterruptedChat({ plan: true });
+
+    // The parked turn died with the previous process, so the answer has no live
+    // request behind it. A plan card used to be re-driven as text — a user
+    // message built from an empty title and a verdict glyph (chat 35566751).
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${sessionId}/answers/${encodeURIComponent(`${sessionId}:p`)}`,
+      payload: { result: { outcome: { outcome: "cancelled" } } },
+    });
+    expect(res.statusCode).toBe(200);
+
+    const after = await readDetail(sessionId);
+    // The card stops claiming it still waits.
+    expect(partsOf(after).find((p) => p.type === "plan")?.payload.pending).toBe(false);
+    // Nothing was said in the reader's name, and no turn was started on it.
+    expect(textParts(after, "user")).toEqual(["отрефактори модуль"]);
+    expect(after.status).not.toBe("running");
   });
 
   it("skips chats whose harness is switched off", async () => {

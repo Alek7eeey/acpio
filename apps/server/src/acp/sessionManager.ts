@@ -5311,7 +5311,7 @@ function findOpenDriftPart(
 function findPendingQuestionPayload(
   detail: SessionDetailDto,
   requestId: string,
-): Record<string, unknown> | null {
+): { type: "question" | "plan" | "context_drift"; payload: Record<string, unknown> } | null {
   for (let mi = detail.messages.length - 1; mi >= 0; mi -= 1) {
     const msg = detail.messages[mi];
     if (!msg) continue;
@@ -5326,7 +5326,10 @@ function findPendingQuestionPayload(
       }
       if (!part.payload.pending) continue;
       if (String(part.payload.requestId ?? "") !== requestId) continue;
-      return part.payload as Record<string, unknown>;
+      return {
+        type: part.type as "question" | "plan" | "context_drift",
+        payload: part.payload as Record<string, unknown>,
+      };
     }
   }
   return null;
@@ -5408,8 +5411,8 @@ export function replayPendingInteractive(sessionId: string) {
         });
         continue;
       }
-      const payload = findPendingQuestionPayload(detail, reqKey);
-      if (!payload) continue;
+      const found = findPendingQuestionPayload(detail, reqKey);
+      if (!found) continue;
       broadcastToSession(sessionId, {
         type: "question.request",
         sessionId,
@@ -5420,7 +5423,7 @@ export function replayPendingInteractive(sessionId: string) {
             : p.kind === "context_drift"
               ? "context_drift"
               : "ask_question",
-        payload,
+        payload: found.payload,
       });
     }
   })();
@@ -5521,10 +5524,18 @@ async function redriveAnsweredQuestion(
 ): Promise<boolean> {
   const detail = await getSessionDetail(sessionId);
   if (!detail) return false;
-  const payload = findPendingQuestionPayload(detail, requestId);
-  if (!payload) return false;
+  const pending = findPendingQuestionPayload(detail, requestId);
+  if (!pending) return false;
 
   await markQuestionPartAnswered(sessionId, requestId, result);
+  // A plan card has nothing to carry over: what the reader decided is the stage
+  // in `.acpio/plan.md`, written by the panel before it answered. Driving a turn
+  // from it invented a message in the reader's name — "Ответ на твой вопрос,
+  // заданный ранее. Вопрос: \nМой ответ: ✗" — and started work on it (chat
+  // 35566751: the plan was dismissed and a whole turn ran on that line).
+  if (pending.type === "plan") return true;
+
+  const payload = pending.payload;
   const settings = await getSettings();
   const locale = settings.locale ?? "en";
   const question = String(payload.title ?? "").trim();
