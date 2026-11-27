@@ -237,6 +237,18 @@
   border-radius: var(--radius);
 }
 
+/* A column's own colour rides its top edge — visible at a glance, while the
+   title keeps the theme's contrast in either theme. */
+.column[data-column-color]::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: var(--column-color);
+  border-radius: var(--radius) var(--radius) 0 0;
+  pointer-events: none;
+}
+
 .columnHead {
   display: flex;
   align-items: center;

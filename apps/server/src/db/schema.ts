@@ -146,6 +146,8 @@ export const boardColumns = sqliteTable("board_columns", {
     .references(() => boards.id, { onDelete: "cascade" }),
   /** Shown title; empty for a home (its name comes from i18n by id). */
   title: text("title").notNull().default(""),
+  /** The column's own colour as `#rrggbb`; empty = the theme's look. */
+  color: text("color").notNull().default(""),
   /** `stage` (the home of a lifecycle stage) | `manual` (a lane of the reader's). */
   kind: text("kind").notNull().default("manual"),
   /** The lifecycle stage a home stands for; null = a lane outside the lifecycle. */

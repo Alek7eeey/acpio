@@ -1413,6 +1413,10 @@ export async function registerRoutes(app: FastifyInstance) {
   const boardColumnPatchSchema = z
     .object({
       title: z.string().max(60).optional(),
+      // `""` clears the colour back to the theme's look.
+      color: z
+        .union([z.literal(""), z.string().regex(/^#[0-9a-fA-F]{6}$/)])
+        .optional(),
       sortMode: z.enum(["manual", "created", "updated", "done"]).optional(),
       acceptsPrompt: z.boolean().optional(),
       keepOnRun: z.boolean().optional(),

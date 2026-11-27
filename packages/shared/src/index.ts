@@ -1298,6 +1298,8 @@ export interface BoardColumnDto {
   id: string;
   /** Shown title; empty for a home (its name comes from i18n, `chat.colTodo`…). */
   title: string;
+  /** The column's own colour as `#rrggbb`; empty = the theme's look. */
+  color: string;
   kind: BoardColumnKind;
   /** The lifecycle stage this home stands for (`null` for a lane of the reader's). */
   anchor: BoardColumn | null;
@@ -1336,6 +1338,7 @@ export function defaultBoardColumns(): BoardColumnDto[] {
     {
       id: "todo",
       title: "",
+      color: "",
       kind: "stage",
       anchor: "todo",
       home: true,
@@ -1347,6 +1350,7 @@ export function defaultBoardColumns(): BoardColumnDto[] {
     {
       id: "progress",
       title: "",
+      color: "",
       kind: "stage",
       anchor: "progress",
       home: true,
@@ -1358,6 +1362,7 @@ export function defaultBoardColumns(): BoardColumnDto[] {
     {
       id: "wait",
       title: "",
+      color: "",
       kind: "stage",
       anchor: "wait",
       home: true,
@@ -1369,6 +1374,7 @@ export function defaultBoardColumns(): BoardColumnDto[] {
     {
       id: "done",
       title: "",
+      color: "",
       kind: "stage",
       anchor: "done",
       home: true,

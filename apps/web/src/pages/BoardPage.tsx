@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type ReactNode,
   type RefObject,
 } from "react";
@@ -3516,6 +3517,12 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                   dragOverColumnId === column.id ? ` ${styles.columnDrop}` : ""
                 }${dragBlockedColumnId === column.id ? ` ${styles.columnDropBlocked}` : ""}`}
                 data-column={column.id}
+                data-column-color={column.color || undefined}
+                style={
+                  column.color
+                    ? ({ "--column-color": column.color } as CSSProperties)
+                    : undefined
+                }
                 data-column-takes={
                   column.kind !== "stage" || column.anchor === "done" || column.anchor === "wait"
                     ? "yes"

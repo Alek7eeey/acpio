@@ -19,6 +19,7 @@ import { useAppStore } from "./store";
 const lane = (id: string, title: string, sortOrder: number): BoardColumnDto => ({
   id,
   title,
+  color: "",
   kind: "manual",
   anchor: null,
   home: false,

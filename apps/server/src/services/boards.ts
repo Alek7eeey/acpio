@@ -17,6 +17,7 @@ function mapColumn(row: BoardColumnRow): BoardColumnDto {
   return {
     id: row.id,
     title: row.title ?? "",
+    color: row.color ?? "",
     kind: home ? "stage" : "manual",
     anchor: home ? ((row.anchor as BoardColumnDto["anchor"]) ?? null) : null,
     home,
@@ -48,6 +49,7 @@ export async function ensureBoardColumns(boardId: string): Promise<void> {
         id: column.id,
         boardId,
         title: column.title,
+        color: column.color,
         kind: column.kind,
         anchor: column.anchor,
         home: column.home,
@@ -347,6 +349,17 @@ function cleanColumnTitle(raw: unknown): string {
   return String(raw ?? "").trim().slice(0, MAX_COLUMN_TITLE);
 }
 
+/**
+ * A column's colour, normalised to `#rrggbb`; `""` clears it back to the
+ * theme's look, and `null` is a colour this board cannot show (the route
+ * refuses those too — the writer may be a script, so the check stands here).
+ */
+function cleanColumnColor(raw: unknown): string | null {
+  const color = String(raw ?? "").trim().toLowerCase();
+  if (!color) return "";
+  return /^#[0-9a-f]{6}$/.test(color) ? color : null;
+}
+
 /** The board's columns in display order (a board with none gets its homes). */
 export async function listBoardColumns(boardId: string): Promise<BoardColumnDto[]> {
   const rows = await db
@@ -423,6 +436,7 @@ export async function addBoardColumn(
     id,
     boardId,
     title,
+    color: "",
     kind: "manual",
     anchor: null,
     home: false,
@@ -450,6 +464,7 @@ export async function updateBoardColumn(
   columnId: string,
   patch: {
     title?: string;
+    color?: string;
     sortMode?: BoardColumnDto["sortMode"];
     acceptsPrompt?: boolean;
     keepOnRun?: boolean;
@@ -468,10 +483,13 @@ export async function updateBoardColumn(
   const current = mapColumn(row);
   const title = patch.title !== undefined ? cleanColumnTitle(patch.title) : current.title;
   if (!current.home && !title) return { ok: false, reason: "invalid" };
+  const color = patch.color !== undefined ? cleanColumnColor(patch.color) : current.color;
+  if (color === null) return { ok: false, reason: "invalid" };
   await db
     .update(boardColumns)
     .set({
       title,
+      color,
       ...(patch.sortMode !== undefined ? { sortMode: patch.sortMode } : {}),
       ...(patch.acceptsPrompt !== undefined ? { acceptsPrompt: patch.acceptsPrompt } : {}),
       ...(patch.keepOnRun !== undefined ? { keepOnRun: patch.keepOnRun } : {}),

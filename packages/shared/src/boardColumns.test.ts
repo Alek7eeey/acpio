@@ -23,6 +23,7 @@ function column(patch: Partial<BoardColumnDto>): BoardColumnDto {
   return {
     id: "col-review",
     title: "На ревью",
+    color: "",
     kind: "manual",
     anchor: null,
     home: false,

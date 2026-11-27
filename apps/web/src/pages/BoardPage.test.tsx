@@ -440,6 +440,7 @@ describe("BoardPage custom columns", () => {
   const review: BoardColumnDto = {
     id: "col-review",
     title: "Review",
+    color: "",
     kind: "manual",
     anchor: null,
     home: false,

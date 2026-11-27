@@ -20,6 +20,7 @@ import { BoardColumnsDialog, forgetBoardColumnPick } from "./BoardColumnsDialog"
 const review: BoardColumnDto = {
   id: "col-review",
   title: "Review",
+  color: "",
   kind: "manual",
   anchor: null,
   home: false,
@@ -169,5 +170,33 @@ describe("BoardColumnsDialog", () => {
     expect(boardId).toBe("b1");
     // A lane is a place: nothing about a stage, a kind or a rule travels with it.
     expect(body).toEqual({ title: "Deferred" });
+  });
+
+  // A colour belongs to the column, so every column has one to set — a home
+  // included, which is what tells the four stages apart on a wide strip.
+  it("colours the picked column, and takes the colour back off", async () => {
+    const { container } = renderDialog();
+    const pickedColor = () =>
+      [...container.querySelectorAll("[data-column-settings] [data-swatch]")].filter(
+        (el) => el.getAttribute("aria-pressed") === "true",
+      );
+    // The editor opens on Todo, a home with no colour of its own.
+    expect(pickedColor()).toEqual([]);
+
+    await userEvent.click(container.querySelector("[data-swatch='#0091ff']") as HTMLElement);
+    expect(apiMock.updateBoardColumn).toHaveBeenCalledWith("b1", "todo", { color: "#0091ff" });
+
+    const clear = container.querySelector("[data-color-clear]") as HTMLButtonElement;
+    expect(clear.disabled).toBe(true);
+
+    // ...and with a colour on it, the same button puts the theme's look back.
+    useAppStore.setState({
+      boards: [{ ...board, columns: [...defaultBoardColumns()].map((c) => ({ ...c, color: "#0091ff" })) }],
+    });
+    const coloured = renderDialog();
+    const picked = coloured.container.querySelector("[data-color-clear]") as HTMLButtonElement;
+    expect(picked.disabled).toBe(false);
+    await userEvent.click(picked);
+    expect(apiMock.updateBoardColumn).toHaveBeenLastCalledWith("b1", "todo", { color: "" });
   });
 });

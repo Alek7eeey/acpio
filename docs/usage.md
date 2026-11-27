@@ -184,8 +184,10 @@ chat tree, and deleting a board deletes its tasks with it.
 
 The board's columns are yours to arrange: **Board columns** in the rail opens the editor. The
 whole strip stands on the left, one line a column and in order; the picked column is highlighted
-and its settings — its name, the order of its cards, its switches — show on the right. The arrows
-between the list and the settings move the picked column, **×** takes a lane of your own away.
+and its settings — its name, its colour, the order of its cards, its switches — show on the right.
+The arrows between the list and the settings move the picked column, **×** takes a lane of your
+own away. A column's colour rides the top edge of its lane on the board: the palette sets one in a
+press, the picker beside it takes any other, and **No color** gives the theme's look back.
 The four stage columns — **Todo**, **In Progress**, **Wait**,
 **Done** — always stay: rename them, reorder them, change how a lane orders its cards or
 whether a card takes the next prompt, but they cannot be deleted — a card of that stage would

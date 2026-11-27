@@ -402,6 +402,7 @@ export const api = {
     columnId: string,
     patch: {
       title?: string;
+      color?: string;
       sortMode?: BoardColumnDto["sortMode"];
       acceptsPrompt?: boolean;
       keepOnRun?: boolean;

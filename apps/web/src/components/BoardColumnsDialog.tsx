@@ -26,6 +26,21 @@ const SORT_TITLE: Record<BoardColumnDto["sortMode"], string> = {
   created: "chat.boardSortCreated",
 };
 
+/** The swatches the editor offers; any other colour comes from the picker. */
+const COLUMN_COLORS = [
+  "#e5484d",
+  "#f76808",
+  "#f5d90a",
+  "#46a758",
+  "#12a594",
+  "#0091ff",
+  "#8e4ec6",
+  "#e93d82",
+];
+
+/** What the picker stands on while the column carries no colour of its own. */
+const NEUTRAL_COLOR = "#6b7280";
+
 /**
  * The column each board's editor is on, outside the component: the board page
  * unmounts when a task's chat takes the screen, and the editor must come back
@@ -153,6 +168,12 @@ export function BoardColumnsDialog({
                 onClick={() => pick(column.id)}
               >
                 <span className={styles.rowIndex}>{index + 1}</span>
+                <span
+                  className={styles.rowDot}
+                  style={{ background: column.color || "transparent" }}
+                  data-column-color-dot={column.color || undefined}
+                  aria-hidden
+                />
                 <span className={styles.rowTitle}>{nameOf(column)}</span>
                 {column.home ? (
                   <span
@@ -267,6 +288,45 @@ export function BoardColumnsDialog({
                 ))}
               </select>
             </label>
+
+            <div className={styles.field} data-color-field="">
+              <span>{t("chat.boardColumnColor")}</span>
+              <div className={styles.colorRow}>
+                {COLUMN_COLORS.map((color) => (
+                  <button
+                    key={color}
+                    type="button"
+                    className={selected.color === color ? styles.swatchOn : styles.swatch}
+                    style={{ background: color }}
+                    data-swatch={color}
+                    aria-pressed={selected.color === color}
+                    aria-label={color}
+                    title={color}
+                    onClick={() => void updateBoardColumn(board.id, selected.id, { color })}
+                  />
+                ))}
+                <input
+                  type="color"
+                  className={styles.colorPicker}
+                  data-color-picker=""
+                  value={selected.color || NEUTRAL_COLOR}
+                  aria-label={t("chat.boardColumnColor")}
+                  title={t("chat.boardColumnColor")}
+                  onChange={(e) =>
+                    void updateBoardColumn(board.id, selected.id, { color: e.target.value })
+                  }
+                />
+                <button
+                  type="button"
+                  className={styles.colorClear}
+                  data-color-clear=""
+                  disabled={!selected.color}
+                  onClick={() => void updateBoardColumn(board.id, selected.id, { color: "" })}
+                >
+                  {t("chat.boardColumnColorNone")}
+                </button>
+              </div>
+            </div>
 
             <div className={styles.rowToggles}>
               <label className={styles.toggle}>

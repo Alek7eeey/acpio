@@ -188,6 +188,42 @@ describe("board columns — the four homes", () => {
   });
 });
 
+describe("board columns — a colour of its own", () => {
+  it("keeps the colour a column was given, and drops it on an empty write", async () => {
+    const coloured = await app.inject({
+      method: "PATCH",
+      url: `/api/boards/${boardId}/columns/wait`,
+      payload: { color: "#0091FF" },
+    });
+    expect(coloured.statusCode).toBe(200);
+    // Stored as written, lower case: the client compares it to its swatches.
+    expect((coloured.json() as BoardDto).columns.find((c) => c.id === "wait")!.color).toBe(
+      "#0091ff",
+    );
+    expect((await board()).columns.find((c) => c.id === "wait")!.color).toBe("#0091ff");
+
+    const cleared = await app.inject({
+      method: "PATCH",
+      url: `/api/boards/${boardId}/columns/wait`,
+      payload: { color: "" },
+    });
+    expect(cleared.statusCode).toBe(200);
+    expect((cleared.json() as BoardDto).columns.find((c) => c.id === "wait")!.color).toBe("");
+  });
+
+  it("refuses anything but a hex colour", async () => {
+    for (const color of ["red", "#abc", "#0091ff00"]) {
+      const res = await app.inject({
+        method: "PATCH",
+        url: `/api/boards/${boardId}/columns/todo`,
+        payload: { color },
+      });
+      expect(res.statusCode).toBe(400);
+    }
+    expect((await board()).columns.find((c) => c.id === "todo")!.color).toBe("");
+  });
+});
+
 describe("board columns — lanes the reader adds", () => {
   it("adds a manual lane after the column it names", async () => {
     const after = await addColumn({ title: "Отложенные", afterId: "todo" });

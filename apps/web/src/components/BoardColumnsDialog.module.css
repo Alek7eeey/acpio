@@ -104,6 +104,19 @@
   color: var(--text-secondary);
 }
 
+/* The strip reads a column's colour where the board shows it: a dot before the name. */
+.rowDot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 80%, transparent);
+}
+
+.rowActive .rowDot {
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
 .rowTitle {
   flex: 1;
   min-width: 0;
@@ -224,6 +237,68 @@
   color: var(--text);
   font: inherit;
   font-weight: 600;
+}
+
+/* A colour is picked, not typed: the palette answers in one press, the picker
+   any other colour, and the last button takes the colour away. */
+.colorRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.swatch,
+.swatchOn {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 80%, transparent);
+  cursor: pointer;
+}
+
+.swatchOn {
+  border-color: var(--text);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--text) 30%, transparent);
+}
+
+.swatch:hover,
+.swatchOn:hover {
+  transform: scale(1.1);
+}
+
+.colorPicker {
+  width: 26px;
+  height: 22px;
+  flex: none;
+  padding: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: var(--bg);
+  cursor: pointer;
+}
+
+.colorClear {
+  padding: 3px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.colorClear:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border-soft));
+  color: var(--accent);
+}
+
+.colorClear:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .rowToggles {

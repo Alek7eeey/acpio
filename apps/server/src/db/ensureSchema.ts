@@ -208,6 +208,7 @@ export async function ensureSchema() {
       id TEXT NOT NULL,
       board_id TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
       title TEXT NOT NULL DEFAULT '',
+      color TEXT NOT NULL DEFAULT '',
       kind TEXT NOT NULL DEFAULT 'manual',
       anchor TEXT,
       home INTEGER NOT NULL DEFAULT 0,
@@ -224,6 +225,14 @@ export async function ensureSchema() {
     CREATE INDEX IF NOT EXISTS board_columns_board_order
     ON board_columns(board_id, sort_order)
   `);
+
+  // A column carries its own colour; a board from before colours existed keeps
+  // the theme's look (the empty default), so nothing is written for it.
+  try {
+    db.run(sql`ALTER TABLE board_columns ADD COLUMN color TEXT NOT NULL DEFAULT ''`);
+  } catch (err) {
+    if (!isDuplicateColumn(err)) throw err;
+  }
 
   // A lane holds what the reader put in it: `keep_on_run` now defaults to 1,
   // because a hand placement is a decision and not a step of the lifecycle.

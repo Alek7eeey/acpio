@@ -310,6 +310,8 @@ export const ru = {
     boardColumnTitle: "Название колонки",
     boardColumnKindStage: "По циклу",
     boardColumnSort: "Порядок",
+    boardColumnColor: "Цвет колонки",
+    boardColumnColorNone: "Без цвета",
     boardSortManual: "Вручную",
     boardSortUpdated: "Сначала недавние",
     boardSortDone: "Сначала закрытые",

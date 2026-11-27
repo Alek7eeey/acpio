@@ -291,6 +291,8 @@ export const en = {
     boardColumnTitle: "Column title",
     boardColumnKindStage: "By the lifecycle",
     boardColumnSort: "Order",
+    boardColumnColor: "Column color",
+    boardColumnColorNone: "No color",
     boardSortManual: "By hand",
     boardSortUpdated: "Newest first",
     boardSortDone: "Newest closed first",
