@@ -447,6 +447,7 @@ describe("BoardPage custom columns", () => {
     sortOrder: 4,
     sortMode: "manual",
     acceptsPrompt: true,
+    instructions: "",
     keepOnRun: false,
   };
 
@@ -557,6 +558,135 @@ describe("BoardPage custom columns", () => {
     expect(document.body.querySelector("[data-drag-preview]")).toBeNull();
     await waitFor(() => expect(apiMock.updateSession).toHaveBeenCalledTimes(1));
     expect(apiMock.updateSession.mock.calls[0][1]).toEqual({ boardColumnId: "col-review" });
+  });
+
+  // The strip is a row wider than the window, so a card carried to its edge
+  // scrolls it — and a hand that stops there releases over a lane no move had
+  // resolved yet. The drop lands on the lane under the pointer now.
+  it("drops on the lane the pointer is over at release, not on the last move's", async () => {
+    useAppStore.setState({
+      boards: [{ ...board, columns: [...defaultBoardColumns(), review] }],
+      boardSessions: [task],
+    });
+    const { container } = renderBoard();
+    await screen.findByText("Fix the login bug");
+
+    const card = container.querySelector('[data-task-id="t1"]') as HTMLElement;
+    const lane = container.querySelector('[data-column="col-review"]') as HTMLElement;
+    // Nothing under the hand on the way, Review under it at the release.
+    let under: HTMLElement[] = [];
+    Object.defineProperty(document, "elementsFromPoint", {
+      configurable: true,
+      writable: true,
+      value: () => under,
+    });
+    try {
+      fireEvent.pointerDown(card, { pointerId: 1, pointerType: "mouse", button: 0, clientY: 10 });
+      fireEvent.pointerMove(window, { pointerId: 1, pointerType: "mouse", clientY: 20 });
+      under = [lane];
+      fireEvent.pointerUp(window, { pointerId: 1, pointerType: "mouse", clientY: 20 });
+    } finally {
+      Reflect.deleteProperty(document, "elementsFromPoint");
+    }
+
+    await waitFor(() => expect(apiMock.updateSession).toHaveBeenCalledTimes(1));
+    expect(apiMock.updateSession.mock.calls[0][1]).toEqual({ boardColumnId: "col-review" });
+  });
+
+  // A card dragged out of Todo into a lane of its own keeps its way into the
+  // first turn: the play button used to live in Todo alone, so a card in Review
+  // that never ran had no door left to its description.
+  it("starts a card that never ran wherever it stands", async () => {
+    useAppStore.setState({
+      boards: [{ ...board, columns: [...defaultBoardColumns(), review] }],
+      boardSessions: [{ ...task, boardColumnId: "col-review" }],
+    });
+    const { container } = renderBoard();
+    await screen.findByText("Fix the login bug");
+
+    const card = container.querySelector(
+      '[data-column="col-review"] [data-task-id="t1"]',
+    ) as HTMLElement;
+    await userEvent.click(within(card).getByRole("button", { name: "Start work" }));
+
+    await waitFor(() => expect(apiMock.prompt).toHaveBeenCalledTimes(1));
+    // The description is the first turn, exactly as it is from Todo.
+    expect(apiMock.prompt.mock.calls[0]![1]).toBe("Fix the login bug");
+  });
+
+  // A prompt typed into a lane is the reader's own words: the lane's
+  // instructions went with the card's first turn there (once, see the prompt
+  // route), so the entry promises nothing extra — no line under it.
+  it("adds no line under the prompt entry, whatever the lane carries", async () => {
+    useAppStore.setState({
+      boards: [
+        {
+          ...board,
+          columns: [...defaultBoardColumns(), { ...review, instructions: "Проведи ревью" }],
+        },
+      ],
+      boardSessions: [{ ...finishedTask, boardColumnId: "col-review" }],
+    });
+    const { container } = renderBoard();
+    const card = await screen.findByText("Finished task");
+
+    fireEvent.contextMenu(card);
+    await userEvent.click(
+      within(screen.getByRole("menu")).getByRole("menuitem", { name: "Next prompt" }),
+    );
+
+    expect(container.querySelector("[data-column-note-line]")).toBeNull();
+  });
+
+  // The instructions are the column's, so the settings field follows the column
+  // the editor is on: a lane with words shows them, a home without shows none.
+  it("keeps each column's instructions with that column in the editor", async () => {
+    useAppStore.setState({
+      boards: [
+        {
+          ...board,
+          columns: [...defaultBoardColumns(), { ...review, instructions: "Проведи ревью" }],
+        },
+      ],
+    });
+    const { container } = renderBoard();
+    const rail = container.querySelector("aside") as HTMLElement;
+    await userEvent.click(within(rail).getByRole("button", { name: "Board columns" }));
+    const dialog = await screen.findByRole("dialog");
+    const field = () => dialog.querySelector("[data-column-instructions]") as HTMLTextAreaElement;
+
+    // The editor opens on Todo, which adds nothing.
+    expect(field().value).toBe("");
+    await userEvent.click(dialog.querySelector('[data-column-id="col-review"]') as HTMLElement);
+    expect(field().value).toBe("Проведи ревью");
+  });
+
+  // The column's own instructions are invisible on the board unless the lane
+  // says it has them: the mark carries the text on a rest of the pointer.
+  it("marks the lane that adds instructions to its cards' turns", async () => {
+    useAppStore.setState({
+      boards: [
+        {
+          ...board,
+          columns: [
+            ...defaultBoardColumns(),
+            { ...review, instructions: "Проведи ревью изменений" },
+          ],
+        },
+      ],
+      boardSessions: [{ ...finishedTask, boardColumnId: "col-review" }],
+    });
+    const { container } = renderBoard();
+    await screen.findByText("Finished task");
+
+    const mark = container.querySelector(
+      '[data-column="col-review"] [data-column-instructions-mark]',
+    ) as HTMLElement;
+    expect(mark.getAttribute("title")).toBe("Проведи ревью изменений");
+    // A lane with nothing to add wears no mark.
+    expect(
+      container.querySelector('[data-column="wait"] [data-column-instructions-mark]'),
+    ).toBeNull();
   });
 
   // A drag is a gesture, not a selection: the pointer travels over the card's

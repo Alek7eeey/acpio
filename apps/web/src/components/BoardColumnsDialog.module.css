@@ -239,6 +239,35 @@
   font-weight: 600;
 }
 
+/* A column's instructions are sentences, not a title: the field grows down and
+   keeps the reader's line breaks, which the note keeps too. */
+.instructionsInput {
+  width: 100%;
+  min-width: 0;
+  min-height: 76px;
+  max-height: 200px;
+  padding: 7px 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-weight: 500;
+  line-height: 1.4;
+  resize: vertical;
+}
+
+.instructionsInput:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.instructionsHint {
+  font-size: 0.7rem;
+  line-height: 1.35;
+  color: var(--text-secondary);
+}
+
 /* A colour is picked, not typed: the palette answers in one press, the picker
    any other colour, and the last button takes the colour away. */
 .colorRow {

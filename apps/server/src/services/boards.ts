@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
-import type { BoardColumnDto, BoardDto } from "@acpio/shared";
+import type { AppLocale, BoardColumn, BoardColumnDto, BoardDto, BoardTaskPlacement } from "@acpio/shared";
+import { t } from "@acpio/i18n";
 import { db } from "../db/client.js";
 import { boardColumns, boardFolders, boards, sessions } from "../db/schema.js";
 import { listFolders } from "./folders.js";
-import { canonicalCwd, defaultBoardColumns } from "@acpio/shared";
+import { BOARD_COLUMN_INSTRUCTIONS_MAX, boardColumnOf, canonicalCwd, defaultBoardColumns } from "@acpio/shared";
 
 type BoardColumnRow = typeof boardColumns.$inferSelect;
 
@@ -24,6 +25,7 @@ function mapColumn(row: BoardColumnRow): BoardColumnDto {
     sortOrder: row.sortOrder ?? 0,
     sortMode: row.sortMode as BoardColumnDto["sortMode"],
     acceptsPrompt: row.acceptsPrompt,
+    instructions: row.instructions ?? "",
     keepOnRun: row.keepOnRun,
   };
 }
@@ -56,6 +58,7 @@ export async function ensureBoardColumns(boardId: string): Promise<void> {
         sortOrder: column.sortOrder,
         sortMode: column.sortMode,
         acceptsPrompt: column.acceptsPrompt,
+        instructions: column.instructions,
         keepOnRun: column.keepOnRun,
       })),
     )
@@ -349,6 +352,11 @@ function cleanColumnTitle(raw: unknown): string {
   return String(raw ?? "").trim().slice(0, MAX_COLUMN_TITLE);
 }
 
+/** A column's instructions; `""` is a column that adds nothing to its cards. */
+function cleanColumnInstructions(raw: unknown): string {
+  return String(raw ?? "").trim().slice(0, BOARD_COLUMN_INSTRUCTIONS_MAX);
+}
+
 /**
  * A column's colour, normalised to `#rrggbb`; `""` clears it back to the
  * theme's look, and `null` is a colour this board cannot show (the route
@@ -443,6 +451,7 @@ export async function addBoardColumn(
     sortOrder: board.columns.length,
     sortMode: "manual",
     acceptsPrompt: true,
+    instructions: "",
     // A lane holds the cards the reader drops in it: a begun turn must not take
     // them back to Wait — the switch in the editor can hand them over instead.
     keepOnRun: true,
@@ -467,6 +476,7 @@ export async function updateBoardColumn(
     color?: string;
     sortMode?: BoardColumnDto["sortMode"];
     acceptsPrompt?: boolean;
+    instructions?: string;
     keepOnRun?: boolean;
   },
 ): Promise<BoardColumnWrite> {
@@ -492,6 +502,9 @@ export async function updateBoardColumn(
       color,
       ...(patch.sortMode !== undefined ? { sortMode: patch.sortMode } : {}),
       ...(patch.acceptsPrompt !== undefined ? { acceptsPrompt: patch.acceptsPrompt } : {}),
+      ...(patch.instructions !== undefined
+        ? { instructions: cleanColumnInstructions(patch.instructions) }
+        : {}),
       ...(patch.keepOnRun !== undefined ? { keepOnRun: patch.keepOnRun } : {}),
     })
     .where(and(eq(boardColumns.boardId, boardId), eq(boardColumns.id, columnId)));
@@ -544,4 +557,83 @@ export async function reorderBoardColumns(
   if (!board) return { ok: false, reason: "notFound" };
   await writeColumnOrder(boardId, ids);
   return { ok: true, board: (await getBoard(boardId))! };
+}
+
+/** A home's own name, for a column whose title the reader left empty. */
+const STAGE_TITLE_KEY: Record<BoardColumn, string> = {
+  todo: "chat.colTodo",
+  progress: "chat.colProgress",
+  wait: "chat.colWait",
+  done: "chat.colDone",
+};
+
+/**
+ * The note a board card's chat takes from the column it stands in: that
+ * column's own instructions, framed so the model reads them as the phase's
+ * standing order and not as a continuation of the reader's words.
+ *
+ * A note in the turn's tail, never a system message: the head is the bytes the
+ * provider caches (see AGENTS.md), and a column's instructions are written in
+ * the middle of a board's life — merging them into the head would bill the whole
+ * history again. The transcript keeps the reader's own text (the note rides in
+ * `TurnOpts.columnNote`), because the instructions are the column's, not
+ * something typed in this very message.
+ *
+ * It rides **one** turn of the card in the column — the first one — because the
+ * instructions are a phase the chat has already been told about: repeating them
+ * on every follow-up would only re-bill the same words. The text that went out
+ * is remembered on the session (`boardNoteSent`), so a column the reader
+ * rewrote is handed over again, once, and a card moved back into a column it
+ * already knows adds nothing.
+ *
+ * `null` when the card stands on no board, its column is gone, the column
+ * carries no instructions, or this chat already read exactly these words — the
+ * overwhelmingly common cases, and ones that must cost nothing.
+ */
+export async function boardColumnNoteForTurn(
+  boardId: string,
+  task: BoardTaskPlacement,
+  locale: AppLocale,
+): Promise<string | null> {
+  // A board seeded on its first read carries the four homes, whose instructions
+  // are empty; a board with no rows at all carries nothing either way.
+  const columns = await listBoardColumns(boardId);
+  if (!columns.length) return null;
+  const column = columns.find((c) => c.id === boardColumnOf(task, columns));
+  const instructions = column?.instructions.trim();
+  if (!column || !instructions) return null;
+  const name =
+    column.title.trim() ||
+    (column.anchor ? t(locale, STAGE_TITLE_KEY[column.anchor]) : column.id);
+  return `${t(locale, "chat.boardColumnNote", { name })}\n${instructions}`;
+}
+
+/**
+ * The note this very turn should carry, claimed once per distinct text.
+ *
+ * `boardColumnNoteForTurn` composes it; this decides whether the chat has
+ * already been told, and records the claim (`boardNoteSent`) so the promise
+ * holds across a restart, a second tab and a follow-up typed in the chat page.
+ * The claim is written before the turn starts: a prompt that dies before it
+ * reaches the agent loses its note (the reader's next words still carry it —
+ * the column is unchanged), while a claim written after would let two quick
+ * prompts repeat it. The first is the cheaper of the two mistakes.
+ */
+export async function boardColumnNoteOnce(
+  boardId: string,
+  sessionId: string,
+  task: BoardTaskPlacement,
+  locale: AppLocale,
+): Promise<string | null> {
+  const note = await boardColumnNoteForTurn(boardId, task, locale);
+  if (!note) return null;
+  const rows = await db
+    .select({ sent: sessions.boardNoteSent })
+    .from(sessions)
+    .where(eq(sessions.id, sessionId))
+    .limit(1);
+  if (!rows[0]) return null;
+  if (rows[0].sent === note) return null;
+  await db.update(sessions).set({ boardNoteSent: note }).where(eq(sessions.id, sessionId));
+  return note;
 }

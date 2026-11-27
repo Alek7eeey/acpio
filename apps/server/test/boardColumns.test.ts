@@ -7,7 +7,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import type { FastifyInstance } from "fastify";
-import type { BoardDto, SessionDto } from "@acpio/shared";
+import { BOARD_COLUMN_INSTRUCTIONS_MAX, type BoardDto, type SessionDto } from "@acpio/shared";
 import { buildApp, useResetDb } from "./test-utils.js";
 import { db } from "../src/db/client.js";
 import { boards, sessions as sessionsTable } from "../src/db/schema.js";
@@ -370,6 +370,59 @@ describe("board columns — deleting a lane", () => {
       payload: { title: "Ревью" },
     });
     expect(again.statusCode).toBe(404);
+  });
+});
+
+describe("board columns — instructions of their own", () => {
+  it("keeps the instructions a column was given, on a lane and on a home", async () => {
+    const lane = (await addColumn({ title: "Review" })).columns.find(
+      (c) => c.title === "Review",
+    )!;
+    const written = await app.inject({
+      method: "PATCH",
+      url: `/api/boards/${boardId}/columns/${lane.id}`,
+      payload: { instructions: "  Проведи ревью изменений  " },
+    });
+    expect(written.statusCode).toBe(200);
+    // Stored trimmed: the note the agent reads is the text the reader wrote.
+    expect(
+      (written.json() as BoardDto).columns.find((c) => c.id === lane.id)!.instructions,
+    ).toBe("Проведи ревью изменений");
+    expect((await board()).columns.find((c) => c.id === lane.id)!.instructions).toBe(
+      "Проведи ревью изменений",
+    );
+
+    // A stage home is a column too, and a chat that is no task of any board
+    // never looks at it.
+    const home = await app.inject({
+      method: "PATCH",
+      url: `/api/boards/${boardId}/columns/todo`,
+      payload: { instructions: "Сначала пойми задачу." },
+    });
+    expect(home.statusCode).toBe(200);
+    expect(
+      (home.json() as BoardDto).columns.find((c) => c.id === "todo")!.instructions,
+    ).toBe("Сначала пойми задачу.");
+
+    const cleared = await app.inject({
+      method: "PATCH",
+      url: `/api/boards/${boardId}/columns/todo`,
+      payload: { instructions: "" },
+    });
+    expect(cleared.statusCode).toBe(200);
+    expect(
+      (cleared.json() as BoardDto).columns.find((c) => c.id === "todo")!.instructions,
+    ).toBe("");
+  });
+
+  it("refuses more instructions than a column can carry", async () => {
+    const res = await app.inject({
+      method: "PATCH",
+      url: `/api/boards/${boardId}/columns/wait`,
+      payload: { instructions: "x".repeat(BOARD_COLUMN_INSTRUCTIONS_MAX + 1) },
+    });
+    expect(res.statusCode).toBe(400);
+    expect((await board()).columns.find((c) => c.id === "wait")!.instructions).toBe("");
   });
 });
 

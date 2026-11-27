@@ -493,6 +493,16 @@ type TurnOpts = {
    */
   backgroundJobNote?: boolean;
   /**
+   * Instructions the board column a card stands in adds to this turn («проведи
+   * ревью…») — the card's first turn in that column, once per text. They ride
+   * in the turn's tail, after the reader's own words: the head is the bytes the
+   * provider caches (AGENTS.md), and a column's instructions are written in the
+   * middle of a board's life — merged into the head they would bill the whole
+   * history again. The transcript keeps the reader's text alone: the
+   * instructions are the column's, not typed here.
+   */
+  columnNote?: string;
+  /**
    * The harness's own prompt, not the reader's: it drives a turn exactly like
    * any other, but no user message is written for it, so the transcript shows
    * only the answer. The plan's approval is what uses it — the reader clicked
@@ -2949,7 +2959,15 @@ export async function runPrompt(
   // Persist the busy state too (not just in memory): a reload reads the list and
   // the detail row, and both must already say "running".
   await updateSession(sessionId, { status: "running" }).catch(() => {});
-  let promptUserText = text;
+  /** The reader's words as the agent reads them: a column's instructions trail
+   *  them, so the text is still the first thing the model sees. */
+  const noted = (value: string) =>
+    opts.columnNote
+      ? value.trim()
+        ? `${value}\n\n${opts.columnNote}`
+        : opts.columnNote
+      : value;
+  let promptUserText = noted(text);
   /** Images that ride with this prompt (built-in agent only). */
   const promptImages: PromptImageBlock[] = [];
   let priorTranscript = "";
@@ -2992,7 +3010,7 @@ export async function runPrompt(
     // An agent that can cut its own transcript resumes it here, and a note
     // summarising that transcript would be a second, poorer copy of it.
     priorTranscript = rewinds ? "" : buildPriorTranscript(detailAfter?.messages ?? [], opts.editMessageId);
-    promptUserText = text;
+    promptUserText = noted(text);
 
     // The halt above is this prompt's own doing — it must not read as a Stop
     // that came before it. The mark is cleared, not merely out-timed: a stop

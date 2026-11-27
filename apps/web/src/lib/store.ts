@@ -296,6 +296,7 @@ type AppState = {
       color?: string;
       sortMode?: BoardColumnDto["sortMode"];
       acceptsPrompt?: boolean;
+      instructions?: string;
       keepOnRun?: boolean;
     },
   ) => Promise<void>;

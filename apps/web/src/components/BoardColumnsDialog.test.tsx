@@ -27,6 +27,7 @@ const review: BoardColumnDto = {
   sortOrder: 4,
   sortMode: "manual",
   acceptsPrompt: true,
+  instructions: "",
   keepOnRun: false,
 };
 
@@ -156,6 +157,43 @@ describe("BoardColumnsDialog", () => {
     fireEvent.blur(input);
     expect(apiMock.updateBoardColumn).toHaveBeenCalledWith("b1", "col-review", {
       title: "Deferred",
+    });
+  });
+
+  // The instructions a column adds to its cards' turns are written here, next
+  // to the column's other behavior — a home may carry them as well as a lane.
+  it("writes the column's instructions, and takes them away", async () => {
+    useAppStore.setState({
+      boards: [
+        {
+          ...board,
+          columns: [
+            ...defaultBoardColumns(),
+            { ...review, instructions: "Проведи ревью изменений" },
+          ],
+        },
+      ],
+    });
+    const { container } = renderDialog();
+    const field = () =>
+      container.querySelector("[data-column-instructions]") as HTMLTextAreaElement;
+    // The editor opens on Todo, a home whose instructions are empty.
+    expect(field().value).toBe("");
+
+    await userEvent.click(container.querySelector('[data-column-id="col-review"]') as HTMLElement);
+    expect(field().value).toBe("Проведи ревью изменений");
+
+    fireEvent.change(field(), { target: { value: "  Проверь тесты  " } });
+    fireEvent.blur(field());
+    expect(apiMock.updateBoardColumn).toHaveBeenCalledWith("b1", "col-review", {
+      instructions: "Проверь тесты",
+    });
+
+    // An emptied field is a column that adds nothing: the same write, `""`.
+    fireEvent.change(field(), { target: { value: "" } });
+    fireEvent.blur(field());
+    expect(apiMock.updateBoardColumn).toHaveBeenLastCalledWith("b1", "col-review", {
+      instructions: "",
     });
   });
 

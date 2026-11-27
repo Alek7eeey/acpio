@@ -30,6 +30,7 @@ function column(patch: Partial<BoardColumnDto>): BoardColumnDto {
     sortOrder: 10,
     sortMode: "manual",
     acceptsPrompt: true,
+    instructions: "",
     keepOnRun: false,
     ...patch,
   };
@@ -49,6 +50,12 @@ describe("boardColumnsInOrder", () => {
       "wait",
       "done",
     ]);
+  });
+
+  // A column adds nothing to its cards until the reader writes it something:
+  // the four homes start silent.
+  it("starts every home without instructions of its own", () => {
+    expect(defaultBoardColumns().map((c) => c.instructions)).toEqual(["", "", "", ""]);
   });
 
   it("orders by sortOrder, whatever order the rows arrive in", () => {

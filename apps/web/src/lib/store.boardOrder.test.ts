@@ -26,6 +26,7 @@ const lane = (id: string, title: string, sortOrder: number): BoardColumnDto => (
   sortOrder,
   sortMode: "manual",
   acceptsPrompt: true,
+  instructions: "",
   keepOnRun: false,
 });
 

@@ -277,6 +277,16 @@
   padding: 1px 7px;
 }
 
+/* A lane that adds instructions to its cards' turns: a small note mark, dim
+   next to the title, with the instructions themselves on the pointer's rest. */
+.columnInstructionsMark {
+  display: inline-flex;
+  flex: none;
+  color: var(--text-secondary);
+  opacity: 0.75;
+  cursor: help;
+}
+
 /* The lane a dragged card would land in. */
 .columnDrop {
   border-color: var(--accent);
@@ -1203,6 +1213,7 @@
   flex-direction: column;
   gap: 6px;
 }
+
 
 /* The card's own rewrite is the new-task form, word for word, which paints its
    text through a mirror of its own: it must not take the plain field's colours

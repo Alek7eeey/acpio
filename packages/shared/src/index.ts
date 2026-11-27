@@ -1310,6 +1310,13 @@ export interface BoardColumnDto {
   /** Whether a card here offers the inline "next prompt" entry. */
   acceptsPrompt: boolean;
   /**
+   * The column's own instructions («проведи ревью, найди замечания, отчёт в
+   * чат»): added to the **first** turn of a card standing in the column, as a
+   * note the agent reads after the reader's own words — once, not on every
+   * follow-up. Empty = the column adds nothing.
+   */
+  instructions: string;
+  /**
    * Whether the column holds the cards the reader put in it: a begun turn does
    * not take them back to the lifecycle. `true` for a lane the reader adds — a
    * hand placement is a decision, not a step of the lifecycle («Блок»,
@@ -1326,6 +1333,9 @@ export const BOARD_STAGE_COLUMNS: readonly BoardColumn[] = [
   "wait",
   "done",
 ];
+
+/** Ceiling on a column's own instructions — a lane's note, not an essay. */
+export const BOARD_COLUMN_INSTRUCTIONS_MAX = 2000;
 
 /**
  * The four stage homes every board starts with — exactly the columns a board
@@ -1345,6 +1355,7 @@ export function defaultBoardColumns(): BoardColumnDto[] {
       sortOrder: 0,
       sortMode: "manual",
       acceptsPrompt: false,
+      instructions: "",
       keepOnRun: false,
     },
     {
@@ -1357,6 +1368,7 @@ export function defaultBoardColumns(): BoardColumnDto[] {
       sortOrder: 1,
       sortMode: "manual",
       acceptsPrompt: false,
+      instructions: "",
       keepOnRun: false,
     },
     {
@@ -1369,6 +1381,7 @@ export function defaultBoardColumns(): BoardColumnDto[] {
       sortOrder: 2,
       sortMode: "updated",
       acceptsPrompt: true,
+      instructions: "",
       keepOnRun: false,
     },
     {
@@ -1381,6 +1394,7 @@ export function defaultBoardColumns(): BoardColumnDto[] {
       sortOrder: 3,
       sortMode: "done",
       acceptsPrompt: true,
+      instructions: "",
       keepOnRun: false,
     },
   ];

@@ -60,6 +60,10 @@ export const sessions = sqliteTable("sessions", {
   /** Board column the reader put this card in by hand (null = follow the
    *  lifecycle). Cleared by a claimed turn unless the column keeps its cards. */
   boardColumnId: text("board_column_id"),
+  /** The column's instructions this card's chat has already been handed: the
+   *  note goes with the first turn of the card in the column and never again,
+   *  so the same text is not re-sent on every follow-up. `""` = none yet. */
+  boardNoteSent: text("board_note_sent").notNull().default(""),
   /** Pictures attached when the task was created: staged in acpio's own data
    *  folder and carried along by the task's first turn. */
   taskAttachments: text("task_attachments", { mode: "json" })
@@ -158,6 +162,8 @@ export const boardColumns = sqliteTable("board_columns", {
   /** manual | created | updated | done — the order the lane shows its cards in. */
   sortMode: text("sort_mode").notNull().default("manual"),
   acceptsPrompt: integer("accepts_prompt", { mode: "boolean" }).notNull().default(true),
+  /** The column's own instructions, added to the turn of every card in it. */
+  instructions: text("instructions").notNull().default(""),
   /** 1 — a begun turn leaves the card here (a lane holds what the reader put
    *  in it); 0 — the turn takes it back to the lifecycle. */
   keepOnRun: integer("keep_on_run", { mode: "boolean" }).notNull().default(true),

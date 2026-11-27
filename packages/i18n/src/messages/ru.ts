@@ -317,6 +317,13 @@ export const ru = {
     boardSortDone: "Сначала закрытые",
     boardSortCreated: "Сначала новые",
     boardColumnPrompt: "Следующий промпт на карточке",
+    boardColumnInstructions: "Инструкции колонки",
+    boardColumnInstructionsPlaceholder:
+      "Например: проведи ревью изменений, перечисли замечания, отчёт напиши в чат",
+    boardColumnInstructionsHint:
+      "Добавляются к первому промпту карточки в этой колонке — модель читает их после ваших слов, один раз, а не к каждому ответу. Пусто — колонка ничего не добавляет.",
+    boardColumnInstructionsMark: "Колонка добавляет инструкции к промптам своих карточек",
+    boardColumnNote: "[Инструкции колонки «{{name}}»]",
     boardColumnKeepOnRun: "Остаётся на месте, когда агент работает",
     boardColumnDelete: "Удалить колонку",
     boardColumnHomeHint: "Колонку стадии удалить нельзя",

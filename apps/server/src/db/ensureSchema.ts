@@ -215,6 +215,7 @@ export async function ensureSchema() {
       sort_order INTEGER NOT NULL DEFAULT 0,
       sort_mode TEXT NOT NULL DEFAULT 'manual',
       accepts_prompt INTEGER NOT NULL DEFAULT 1,
+      instructions TEXT NOT NULL DEFAULT '',
       keep_on_run INTEGER NOT NULL DEFAULT 1,
       created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
       PRIMARY KEY (board_id, id)
@@ -234,6 +235,14 @@ export async function ensureSchema() {
     if (!isDuplicateColumn(err)) throw err;
   }
 
+  // A column may carry instructions of its own; every column written before
+  // them carries none, which is exactly what the empty default means.
+  try {
+    db.run(sql`ALTER TABLE board_columns ADD COLUMN instructions TEXT NOT NULL DEFAULT ''`);
+  } catch (err) {
+    if (!isDuplicateColumn(err)) throw err;
+  }
+
   // A lane holds what the reader put in it: `keep_on_run` now defaults to 1,
   // because a hand placement is a decision and not a step of the lifecycle.
   // Rows written under the old default carry 0, which reads as “a begun turn
@@ -248,6 +257,15 @@ export async function ensureSchema() {
   // The column a card was placed in by hand; NULL = follow the lifecycle.
   try {
     db.run(sql`ALTER TABLE sessions ADD COLUMN board_column_id TEXT`);
+  } catch (err) {
+    if (!isDuplicateColumn(err)) throw err;
+  }
+
+  // The column's instructions a card's chat has already been handed: the note
+  // rides the first turn in the column and never repeats, so every row written
+  // before it carries "" — nothing sent yet.
+  try {
+    db.run(sql`ALTER TABLE sessions ADD COLUMN board_note_sent TEXT NOT NULL DEFAULT ''`);
   } catch (err) {
     if (!isDuplicateColumn(err)) throw err;
   }

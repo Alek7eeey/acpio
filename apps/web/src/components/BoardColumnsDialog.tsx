@@ -1,5 +1,6 @@
 import { useState } from "react";
 import {
+  BOARD_COLUMN_INSTRUCTIONS_MAX,
   boardColumnsInOrder,
   type BoardColumn,
   type BoardColumnDto,
@@ -130,6 +131,13 @@ export function BoardColumnsDialog({
     // A lane needs a name; a home may fall back to its built-in one.
     if (!title && !column.home) return;
     void updateBoardColumn(board.id, column.id, { title });
+  };
+
+  /** A column's instructions: any column may carry them, and `""` takes them away. */
+  const commitInstructions = (column: BoardColumnDto, raw: string) => {
+    const instructions = raw.trim().slice(0, BOARD_COLUMN_INSTRUCTIONS_MAX);
+    if (instructions === column.instructions) return;
+    void updateBoardColumn(board.id, column.id, { instructions });
   };
 
   const submitNew = () => {
@@ -287,6 +295,29 @@ export function BoardColumnsDialog({
                   </option>
                 ))}
               </select>
+            </label>
+
+            <label className={styles.field} data-instructions-field="">
+              <span>{t("chat.boardColumnInstructions")}</span>
+              <textarea
+                key={`${selected.id}:prompt`}
+                className={styles.instructionsInput}
+                data-column-instructions=""
+                defaultValue={selected.instructions}
+                placeholder={t("chat.boardColumnInstructionsPlaceholder")}
+                aria-label={t("chat.boardColumnInstructions")}
+                maxLength={BOARD_COLUMN_INSTRUCTIONS_MAX}
+                rows={4}
+                onBlur={(e) => commitInstructions(selected, e.target.value)}
+                onKeyDown={(e) => {
+                  // Enter writes a line of the instructions; the commit is the
+                  // same one leaving the field makes.
+                  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) e.currentTarget.blur();
+                }}
+              />
+              <span className={styles.instructionsHint}>
+                {t("chat.boardColumnInstructionsHint")}
+              </span>
             </label>
 
             <div className={styles.field} data-color-field="">

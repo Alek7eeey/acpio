@@ -8,7 +8,7 @@ import { db } from "./db/client.js";
 import { messages, messageParts, sessions } from "./db/schema.js";
 import { defaultSessionTitle, errorMessage } from "@acpio/i18n";
 import type { BuiltinKeyMode, BuiltinProviderKind } from "@acpio/shared";
-import { BUILD_INFO, EDITOR_NAV_PLACEMENTS, EDITOR_SPLITS, EDITOR_THEMES, EDITOR_TOOL_SOURCES, FILE_OPEN_TARGETS, CONSOLE_TERMINAL_LIMITS, CUSTOM_AGENT_MAX, BUILTIN_EXTRA_INSTRUCTIONS_MAX, BUILTIN_MAX_OUTPUT_TOKENS_MAX, BUILTIN_TURN_RETRY_ATTEMPTS_MIN, BUILTIN_TURN_RETRY_ATTEMPTS_MAX, BUILTIN_THINKING_LIMIT_MAX, BUILTIN_BASH_TIMEOUT_SEC_MIN, BUILTIN_BASH_TIMEOUT_SEC_MAX, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MIN, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MAX, BUILTIN_KEEP_RECENT_PERCENT_MIN, BUILTIN_KEEP_RECENT_PERCENT_MAX, BUILTIN_MAX_SUMMARY_TOKENS_MAX, BUILTIN_PRUNE_TOOL_RESULTS_KEEP_LAST_MAX, CHAT_TITLE_MAX_LEN_MIN, CHAT_TITLE_MAX_LEN_MAX, isShellSession, canonicalCwd, normalizeBuiltinSubagents, normalizeSkillModes, BUILTIN_PRESET_MAX, normalizeBuiltinPresets, SHELL_SESSION_PROVIDER, titleFromTaskDescription, titleFromUserText, titleFromSlashCommand, BUILTIN_MAX_PROVIDER_KEYS, BUILTIN_MAX_KEY_LENGTH, BUILTIN_PROVIDER_KINDS, BUILTIN_KEY_MODES } from "@acpio/shared";
+import { BOARD_COLUMN_INSTRUCTIONS_MAX, BUILD_INFO, EDITOR_NAV_PLACEMENTS, EDITOR_SPLITS, EDITOR_THEMES, EDITOR_TOOL_SOURCES, FILE_OPEN_TARGETS, CONSOLE_TERMINAL_LIMITS, CUSTOM_AGENT_MAX, BUILTIN_EXTRA_INSTRUCTIONS_MAX, BUILTIN_MAX_OUTPUT_TOKENS_MAX, BUILTIN_TURN_RETRY_ATTEMPTS_MIN, BUILTIN_TURN_RETRY_ATTEMPTS_MAX, BUILTIN_THINKING_LIMIT_MAX, BUILTIN_BASH_TIMEOUT_SEC_MIN, BUILTIN_BASH_TIMEOUT_SEC_MAX, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MIN, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MAX, BUILTIN_KEEP_RECENT_PERCENT_MIN, BUILTIN_KEEP_RECENT_PERCENT_MAX, BUILTIN_MAX_SUMMARY_TOKENS_MAX, BUILTIN_PRUNE_TOOL_RESULTS_KEEP_LAST_MAX, CHAT_TITLE_MAX_LEN_MIN, CHAT_TITLE_MAX_LEN_MAX, isShellSession, canonicalCwd, normalizeBuiltinSubagents, normalizeSkillModes, BUILTIN_PRESET_MAX, normalizeBuiltinPresets, SHELL_SESSION_PROVIDER, titleFromTaskDescription, titleFromUserText, titleFromSlashCommand, BUILTIN_MAX_PROVIDER_KEYS, BUILTIN_MAX_KEY_LENGTH, BUILTIN_PROVIDER_KINDS, BUILTIN_KEY_MODES } from "@acpio/shared";
 import { nextProviderKey } from "@acpio/adapter-builtin";
 import {
   buildSettingsFile,
@@ -107,6 +107,7 @@ import {
 import {
   addBoardColumn,
   boardAcceptsCwd,
+  boardColumnNoteOnce,
   boardHasColumn,
   createBoard,
   deleteBoard,
@@ -1419,6 +1420,8 @@ export async function registerRoutes(app: FastifyInstance) {
         .optional(),
       sortMode: z.enum(["manual", "created", "updated", "done"]).optional(),
       acceptsPrompt: z.boolean().optional(),
+      // The column's own instructions; `""` is a column that adds nothing.
+      instructions: z.string().max(BOARD_COLUMN_INSTRUCTIONS_MAX).optional(),
       keepOnRun: z.boolean().optional(),
     })
     .strict();
@@ -2411,6 +2414,16 @@ export async function registerRoutes(app: FastifyInstance) {
       ...(body.attachments ?? []),
       ...taskAttachments.filter((a) => !alreadySent.has(a.path)),
     ];
+    // The column the card stands in may carry instructions of its own («проведи
+    // ревью»): they ride in this turn's tail, after the reader's words — once
+    // per column, on the card's first turn there, because the instructions are
+    // a phase the chat has already been told about (`boardColumnNoteOnce`).
+    // The harness's own prompts (the plan's approval) take none — those are the
+    // app talking, not a step of the workflow the reader arranged.
+    const columnNote =
+      detail.boardId && !body.internal
+        ? await boardColumnNoteOnce(detail.boardId, id, detail, settings.locale)
+        : null;
     void runPrompt(id, body.text, {
       provider: detail.provider,
       cwd: detail.cwd,
@@ -2418,6 +2431,7 @@ export async function registerRoutes(app: FastifyInstance) {
       editMessageId: body.editMessageId,
       delivery: body.delivery,
       internal: body.internal,
+      ...(columnNote ? { columnNote } : {}),
       attachments: attachments.length ? attachments : undefined,
       // A note the reader never typed must not name the chat either.
       titleHint: titleIsDefault && !body.internal ? body.text : undefined,

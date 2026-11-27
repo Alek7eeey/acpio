@@ -2445,6 +2445,12 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
       const text = task.taskDescription?.trim() || task.title;
       const fromColumnId = columnOf(task).id;
       let moved = false;
+      /** True while the hand carries the card: what the edge scroll follows. */
+      let carrying = false;
+      /** Where the pointer stands, as the last move left it. */
+      let lastX = startX;
+      /** The pending frame of the edge scroll, if any. */
+      let edgeFrame: number | null = null;
       /** The finger has held long enough: the card is the gesture's, waiting
        *  for a travel to make it a drag — or for the lift that opens its menu. */
       let held = false;
@@ -2458,9 +2464,29 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
         if (moved || held) ev.preventDefault();
       };
       if (isTouch) window.addEventListener("touchmove", blockPan, { passive: false });
+      /**
+       * A card carried to the strip's edge scrolls it. The lanes are one row
+       * wider than the window, so without this a card from Todo could reach only
+       * the lanes already on screen — «Review» stayed a place it could not be
+       * put in. The loop reads the pointer as it stands, so a hand that rests at
+       * the edge keeps the strip moving instead of needing another move.
+       */
+      const EDGE_ZONE = 72;
+      const EDGE_STEP = 16;
+      const edgeScroll = () => {
+        const strip = columnsRef.current;
+        if (strip) {
+          const rect = strip.getBoundingClientRect();
+          if (lastX > rect.right - EDGE_ZONE) strip.scrollLeft += EDGE_STEP;
+          else if (lastX < rect.left + EDGE_ZONE) strip.scrollLeft -= EDGE_STEP;
+        }
+        if (carrying) edgeFrame = window.requestAnimationFrame(edgeScroll);
+      };
       /** The gesture became a drag: the card leaves its slot and follows the pointer. */
       const begin = (x: number, y: number) => {
         moved = true;
+        carrying = true;
+        edgeFrame = window.requestAnimationFrame(edgeScroll);
         dragActiveRef.current = true;
         setDraggingTaskId(task.id);
         setDragPreview({ x, y, text });
@@ -2555,6 +2581,11 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
         window.removeEventListener("pointerup", onUp);
         window.removeEventListener("pointercancel", onCancel);
         window.removeEventListener("touchmove", blockPan);
+        carrying = false;
+        if (edgeFrame !== null) {
+          window.cancelAnimationFrame(edgeFrame);
+          edgeFrame = null;
+        }
         dragActiveRef.current = false;
         document.body.style.cursor = "";
         document.body.style.removeProperty("user-select");
@@ -2566,6 +2597,54 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
         setDragBlockedColumnId(null);
         setDragActionMark(null);
         if (moved) suppressCardClickRef.current = true;
+      };
+
+      /**
+       * What the pointer is over: a lane (and what it would do with the card),
+       * or a slot inside the group being reordered. `onMove` calls it on every
+       * move, and the drop calls it once more — the strip may have scrolled
+       * under a resting hand (the edge scroll), so the lane there now is not
+       * the lane the last move resolved.
+       */
+      const track = (x: number, y: number) => {
+        const laneId = columnAtPoint(x, y);
+        if (laneId && laneId !== fromColumnId) {
+          // Another lane is the target: a slot inside a group means nothing
+          // there, and the lane itself says what it would do with the card —
+          // take it, act on it, or refuse it with a cross.
+          const target = resolveTarget(laneId);
+          overColumnId = target === "placement" ? laneId : null;
+          blockedColumnId = target === "blocked" ? laneId : null;
+          homeAction =
+            target === "done" || target === "reopen" ? (target as "done" | "reopen") : null;
+          overId = null;
+          overPosition = null;
+          setTaskDropHint(null);
+          setDragOverColumnId(target === "blocked" ? null : laneId);
+          setDragBlockedColumnId(target === "blocked" ? laneId : null);
+          setDragActionMark(homeAction ? { columnId: laneId, kind: homeAction } : null);
+          return;
+        }
+        overColumnId = null;
+        blockedColumnId = null;
+        homeAction = null;
+        setDragOverColumnId(null);
+        setDragBlockedColumnId(null);
+        setDragActionMark(null);
+
+        const hit = cardAtPoint(x, y);
+        // The dragged card itself means "no target": it already holds its slot.
+        if (group && hit && hit.id !== task.id && hit.cwd === group.cwd) {
+          const rect = hit.card.getBoundingClientRect();
+          const position = y < rect.top + rect.height / 2 ? "above" : "below";
+          overId = hit.id;
+          overPosition = position;
+          setTaskDropHint({ id: hit.id, position });
+        } else {
+          overId = null;
+          overPosition = null;
+          setTaskDropHint(null);
+        }
       };
 
       const onMove = (ev: PointerEvent) => {
@@ -2586,50 +2665,11 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
           if (distance < 8) return;
           begin(ev.clientX, ev.clientY);
         }
+        lastX = ev.clientX;
         setDragPreview((current) =>
           current ? { ...current, x: ev.clientX, y: ev.clientY } : current,
         );
-
-        const laneId = columnAtPoint(ev.clientX, ev.clientY);
-        if (laneId && laneId !== fromColumnId) {
-          // Another lane is the target: a slot inside a group means nothing
-          // there, and the lane itself says what it would do with the card —
-          // take it, act on it, or refuse it with a cross.
-          const target = resolveTarget(laneId);
-          overColumnId = target === "placement" ? laneId : null;
-          blockedColumnId = target === "blocked" ? laneId : null;
-          homeAction =
-            target === "done" || target === "reopen" ? (target as "done" | "reopen") : null;
-          overId = null;
-          overPosition = null;
-          setTaskDropHint(null);
-          setDragOverColumnId(target === "blocked" ? null : laneId);
-          setDragBlockedColumnId(target === "blocked" ? laneId : null);
-          setDragActionMark(
-            homeAction ? { columnId: laneId, kind: homeAction } : null,
-          );
-          return;
-        }
-        overColumnId = null;
-        blockedColumnId = null;
-        homeAction = null;
-        setDragOverColumnId(null);
-        setDragBlockedColumnId(null);
-        setDragActionMark(null);
-
-        const hit = cardAtPoint(ev.clientX, ev.clientY);
-        // The dragged card itself means "no target": it already holds its slot.
-        if (group && hit && hit.id !== task.id && hit.cwd === group.cwd) {
-          const rect = hit.card.getBoundingClientRect();
-          const position = ev.clientY < rect.top + rect.height / 2 ? "above" : "below";
-          overId = hit.id;
-          overPosition = position;
-          setTaskDropHint({ id: hit.id, position });
-        } else {
-          overId = null;
-          overPosition = null;
-          setTaskDropHint(null);
-        }
+        track(ev.clientX, ev.clientY);
       };
 
       /** A cancelled gesture (the browser took the pointer over) drops the drag. */
@@ -2640,6 +2680,10 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
 
       const onUp = (ev: PointerEvent) => {
         if (ev.pointerId !== pointerId) return;
+        // The strip may have scrolled under a hand that stopped at its edge:
+        // the drop lands on the lane the pointer is over now, not on the one
+        // the last move happened to resolve.
+        if (moved) track(ev.clientX, ev.clientY);
         const over = overId;
         const position = overPosition;
         const lane = overColumnId;
@@ -3087,7 +3131,11 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
           </span>
           <span className={styles.cardSpacer} />
           <span className={styles.cardActions}>
-            {inTodo ? (
+            {/* A card that never ran can be started from wherever it stands: a
+                card dragged out of Todo into a lane of the reader's own (the
+                «Review» one) would otherwise have no door to its first turn,
+                and the lane's own instructions along with it. */}
+            {inTodo || !task.startedAt ? (
               <>
                 <button
                   type="button"
@@ -3552,6 +3600,26 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                 ) : null}
                 <div className={styles.columnHead}>
                   <span className={styles.columnTitle}>{columnTitle(column)}</span>
+                  {/* A column that adds instructions to its cards' turns says
+                      so, with the instructions themselves on the pointer's rest. */}
+                  {column.instructions ? (
+                    <span
+                      className={styles.columnInstructionsMark}
+                      data-column-instructions-mark=""
+                      role="img"
+                      aria-label={t("chat.boardColumnInstructionsMark")}
+                      title={column.instructions}
+                    >
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" aria-hidden>
+                        <path
+                          d="M5 7h14M5 12h14M5 17h9"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    </span>
+                  ) : null}
                   <span className={styles.columnCount}>{cards.length}</span>
                 </div>
                 <div
