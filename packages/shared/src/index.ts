@@ -94,9 +94,11 @@ export {
   pluginSourceKind,
   resolvePluginSource,
   type LoadedPluginDto,
+  type PluginCheckEntryDto,
   type PluginEntryConfig,
   type PluginMcpServerDto,
   type PluginSkillFolder,
+  type PluginsCheckDto,
   type PluginsStateDto,
   type ResolvedPluginSource,
 } from "./pluginSource.js";

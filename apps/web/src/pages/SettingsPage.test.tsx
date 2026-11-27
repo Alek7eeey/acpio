@@ -28,6 +28,14 @@ const apiMock = vi.hoisted(() => ({
     plugins: [],
     mcpServers: [],
   })),
+  // "Check" in the Plugins leaf reads the source again (loads nothing).
+  pluginsCheck: vi.fn(async () => ({
+    checkedAt: "2026-11-07T10:00:00.000Z",
+    source: null,
+    sourceLabel: "",
+    entries: [],
+    warnings: [],
+  })),
   // Each provider's models editor fetches its endpoint's /models list.
   builtinModels: vi.fn(async () => ({ ok: true, models: [] })),
   // The spend row of a provider of a known kind asks for its limits.
@@ -341,6 +349,44 @@ describe("SettingsPage form state", () => {
       { id: "hand", server: "/tmp/hand/dist/next.js", config: { token: "t1" } },
       { id: "", server: "" },
     ]);
+  });
+
+  // The list below the button is the boot snapshot, which never changes under a
+  // running server — the press is the only way to see the source as it stands.
+  it("reads the plugin source on press and lists what it found", async () => {
+    const user = userEvent.setup();
+    useAppStore.setState({
+      settings: { ...DEFAULT_SETTINGS, pluginsConfig: "E:/cfg/plugins.json" },
+      bootstrapped: true,
+    });
+    apiMock.pluginsCheck.mockResolvedValueOnce({
+      checkedAt: "2026-11-07T10:00:00.000Z",
+      source: { kind: "path", path: "E:/cfg/plugins.json" },
+      sourceLabel: "E:/cfg/plugins.json",
+      entries: [
+        { id: "kept", version: "1.0.0", enabled: true, status: "loaded" },
+        { id: "fresh", version: "2.0.0", enabled: true, status: "pending" },
+      ],
+      warnings: ['plugins[2]: duplicate id "kept"'],
+    });
+    render(
+      <MemoryRouter initialEntries={["/settings?section=agent&leaf=plugins"]}>
+        <I18nProvider>
+          <SettingsPage />
+        </I18nProvider>
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Check" }));
+
+    await waitFor(() => expect(apiMock.pluginsCheck).toHaveBeenCalledWith("E:/cfg/plugins.json"));
+    expect(await screen.findByText(/Checked at/)).toBeTruthy();
+    expect(screen.getByText(/E:\/cfg\/plugins\.json/)).toBeTruthy();
+    expect(screen.getByText("fresh")).toBeTruthy();
+    // Read from the source, never loaded by this process: the answer is "not
+    // applied yet", not a green row.
+    expect(screen.getByText(/not loaded yet/)).toBeTruthy();
+    expect(screen.getByText(/duplicate id/)).toBeTruthy();
   });
 
   it("lists acpio's own MCP server and saves its switch", async () => {

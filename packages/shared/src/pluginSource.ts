@@ -89,6 +89,31 @@ export interface PluginsStateDto {
   mcpServers: PluginMcpServerDto[];
 }
 
+/** One row a source read found, with what this boot made of it. */
+export interface PluginCheckEntryDto {
+  id: string;
+  version: string;
+  enabled: boolean;
+  /** `pending` = the source holds it, this boot did not load it. */
+  status: "loaded" | "skipped" | "failed" | "pending";
+  error?: string;
+}
+
+/**
+ * What one press of "Проверить" found: the source read fresh from where it
+ * points now, its rows, and why it could not be read when it could not.
+ */
+export interface PluginsCheckDto {
+  checkedAt: string;
+  /** The source the press read, as the server resolved it. */
+  source: ResolvedPluginSource | null;
+  sourceLabel: string;
+  /** No rows and this says why: the source is unreadable or not a manifest. */
+  error?: string;
+  entries: PluginCheckEntryDto[];
+  warnings: string[];
+}
+
 /** `url` only for the schemes we can fetch or read; everything else is a path. */
 export function pluginSourceKind(value: string): "url" | "path" {
   return /^(https?|file):\/\//i.test(value.trim()) ? "url" : "path";

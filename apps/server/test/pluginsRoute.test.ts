@@ -65,6 +65,30 @@ afterAll(async () => {
   await fs.rm(dir, { recursive: true, force: true });
 });
 
+describe("POST /api/plugins/check", () => {
+  const check = (payload: Record<string, unknown>) =>
+    app.inject({ method: "POST", url: "/api/plugins/check", payload });
+
+  it("reads the saved source and says what boot made of its rows", async () => {
+    const res = await check({});
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as {
+      sourceLabel: string;
+      entries: Array<{ id: string; status: string }>;
+      error?: string;
+    };
+    expect(body.error).toBeUndefined();
+    expect(body.sourceLabel).toContain("config.json");
+    expect(body.entries.map((e) => [e.id, e.status])).toEqual([["e2e", "loaded"]]);
+  });
+
+  it("answers the unreadable source with its reason", async () => {
+    const res = await check({ source: path.join(dir, "gone.json") });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().error).toContain("gone.json");
+  });
+});
+
 describe("POST /api/mcp/plugin/:pluginId/:serverId", () => {
   const url = (extra = `?token=${""}`) => `/api/mcp/plugin/e2e/s${extra}`;
 

@@ -47,6 +47,7 @@ import {
   type ModelParamDto,
   type PluginProviderOverride,
   type PluginEntryConfig,
+  type PluginsCheckDto,
   type PluginsStateDto,
   DEFAULT_MCP_PROJECT_FILES,
   DEFAULT_BUILTIN_SKILL_PATHS,
@@ -1819,6 +1820,11 @@ export function SettingsPage() {
   const [mcpStatus, setMcpStatus] = useState<Record<string, boolean>>({});
   /** Boot snapshot of the plugin host: the config source and what it loaded. */
   const [pluginsState, setPluginsState] = useState<PluginsStateDto | null>(null);
+  // What the last press of "Проверить" found, and why it could not read the
+  // source — the boot snapshot beside it stays what the server loaded.
+  const [pluginsCheck, setPluginsCheck] = useState<PluginsCheckDto | null>(null);
+  const [pluginsCheckError, setPluginsCheckError] = useState<string | null>(null);
+  const [pluginsChecking, setPluginsChecking] = useState(false);
   /** Config JSON of a hand-added plugin, as typed — kept until it parses. */
   const [pluginConfigTexts, setPluginConfigTexts] = useState<Record<number, string>>({});
   const [ttsHasNatural, setTtsHasNatural] = useState(false);
@@ -2472,11 +2478,26 @@ export function SettingsPage() {
     };
   }, [leaf]);
 
-  const reloadPluginsState = () => {
+  /**
+   * "Проверить": the server re-reads the source the field holds right now and
+   * answers with its rows. Nothing loads — the plugins of this process are the
+   * ones boot loaded, so a changed file shows here as not applied yet.
+   */
+  const runPluginsCheck = () => {
+    setPluginsChecking(true);
+    setPluginsCheckError(null);
+    // The boot snapshot beside the answer is refreshed too: `pendingRestart` is
+    // read from the settings on every call. A failed refresh keeps the shown one
+    // — the check's own error is the one worth reading.
+    api.pluginsState().then(setPluginsState).catch(() => {});
     api
-      .pluginsState()
-      .then(setPluginsState)
-      .catch(() => setPluginsState(null));
+      .pluginsCheck(form.pluginsConfig ?? "")
+      .then(setPluginsCheck)
+      .catch((err) => {
+        setPluginsCheck(null);
+        setPluginsCheckError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => setPluginsChecking(false));
   };
 
   const onSubmit = async (e: FormEvent) => {
@@ -4907,8 +4928,68 @@ export function SettingsPage() {
                   placeholder={pluginsState?.dir ? `${pluginsState.dir}/config.json` : ""}
                   spellCheck={false}
                   aria-label={t("settings.pluginsSourceTitle")}
-                  onChange={(e) => patch("pluginsConfig", e.target.value)}
+                  onChange={(e) => {
+                    // The answer on screen is about the old text — drop it rather
+                    // than let it read as the check of what is typed now.
+                    setPluginsCheck(null);
+                    setPluginsCheckError(null);
+                    patch("pluginsConfig", e.target.value);
+                  }}
                 />
+                {/* The press belongs to the field it reads: what is typed here is
+                    what gets checked, saved or not. */}
+                <div>
+                  <button
+                    type="button"
+                    className={styles.secondaryBtn}
+                    disabled={pluginsChecking}
+                    onClick={runPluginsCheck}
+                  >
+                    {pluginsChecking ? t("common.checking") : t("settings.pluginsCheck")}
+                  </button>
+                </div>
+                {pluginsCheckError ? (
+                  <div className={styles.pluginEntryError} role="alert">
+                    {t("settings.pluginsCheckFailed", { error: pluginsCheckError })}
+                  </div>
+                ) : null}
+                {pluginsCheck ? (
+                  <div role="status">
+                    <div className={styles.mcpRowDetail}>
+                      {t("settings.pluginsCheckedAt", {
+                        time: new Date(pluginsCheck.checkedAt).toLocaleTimeString(),
+                      })}{" · "}
+                      {pluginsCheck.sourceLabel}
+                    </div>
+                    {pluginsCheck.error ? (
+                      <div className={styles.pluginEntryError}>{pluginsCheck.error}</div>
+                    ) : pluginsCheck.entries.length === 0 ? (
+                      <div className={styles.mcpRowDetail}>{t("settings.pluginsCheckEmpty")}</div>
+                    ) : (
+                      pluginsCheck.entries.map((entry) => (
+                        <div key={entry.id} className={styles.mcpRowDetail}>
+                          <strong>{entry.id}</strong> {entry.version} ·{" "}
+                          {t(
+                            entry.status === "loaded"
+                              ? "settings.pluginsStatusLoaded"
+                              : entry.status === "pending"
+                                ? "settings.pluginsEntryPending"
+                                : entry.status === "skipped"
+                                  ? "settings.pluginsStatusSkipped"
+                                  : "settings.pluginsStatusFailed",
+                          )}
+                          {entry.enabled ? "" : ` · ${t("settings.disabled")}`}
+                          {entry.error ? ` · ${entry.error}` : ""}
+                        </div>
+                      ))
+                    )}
+                    {pluginsCheck.warnings.map((w) => (
+                      <div key={w} className={styles.pluginEntryError}>
+                        {w}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
               </SettingRow>
             </SettingTable>
             {/* One plugin, added right here: a bundle to point at, its id and its
@@ -5023,15 +5104,6 @@ export function SettingsPage() {
                     {t("settings.pluginsRestartNote")}
                   </div>
                 ) : null}
-                <div>
-                  <button
-                    type="button"
-                    className={styles.secondaryBtn}
-                    onClick={reloadPluginsState}
-                  >
-                    {t("settings.pluginsCheck")}
-                  </button>
-                </div>
                 {(pluginsState?.plugins ?? []).length === 0 ? (
                   <div className={styles.mcpRowDetail}>{t("settings.pluginsEmpty")}</div>
                 ) : (

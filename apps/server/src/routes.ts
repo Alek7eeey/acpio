@@ -43,6 +43,7 @@ import {
 import { handleBackgroundMcpRequest } from "./services/bgMcp.js";
 import { IMAGE_MIME } from "./services/imageTypes.js";
 import {
+  checkPluginSource,
   findPluginMcpServer,
   handlePluginMcpRequest,
   pluginsState,
@@ -991,6 +992,16 @@ export async function registerRoutes(app: FastifyInstance) {
   // Plugin host state: what the config source holds, what loaded at boot, and
   // whether the setting changed since — that one applies on the next restart.
   app.get("/api/plugins", async () => pluginsState());
+
+  // "Проверить": the source is read again from where it points right now, so an
+  // edited file — or a source typed into the field and not saved yet — answers
+  // with what is there. Nothing is loaded; a running registry stays as it is.
+  app.post("/api/plugins/check", async (req) => {
+    const body = z
+      .object({ source: z.string().max(2_000).optional() })
+      .parse(req.body ?? {});
+    return checkPluginSource(body.source);
+  });
 
   // MCP endpoint of one plugin server: the same JSON-RPC a harness speaks to
   // `acpio_bg`, with the tools the plugin returned from `create()`. The token

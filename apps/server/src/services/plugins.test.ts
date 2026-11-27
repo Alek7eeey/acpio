@@ -402,3 +402,75 @@ describe("loadPluginBundle", () => {
     expect(loaded.error).toContain("default export");
   });
 });
+
+describe("checkPluginSource", () => {
+  const row = (id: string, version: string) => ({ id, version, server: "./server.js" });
+  /** The resolver hands paths back slashed, on every platform. */
+  const slashed = (value: string) => value.replace(/\\/g, "/");
+
+  it("reads the source again and says what boot made of each row", async () => {
+    const { ensureSchema } = await import("../db/ensureSchema.js");
+    const { updateSettings } = await import("./settings.js");
+    await ensureSchema();
+    const folder = path.join(dir, "check");
+    await fs.mkdir(folder, { recursive: true });
+    await fs.writeFile(path.join(folder, "server.js"), `export default () => ({ id: "kept" });\n`);
+    const config = path.join(folder, "config.json");
+    await fs.writeFile(config, JSON.stringify({ plugins: [row("kept", "1.0.0")] }));
+    await updateSettings({ pluginsConfig: config, pluginEntries: [] });
+    await plugins.loadPlugins();
+
+    // A row appears in the file after boot: the check finds it and says it is
+    // not applied, while the boot state does not know it at all.
+    await fs.writeFile(
+      config,
+      JSON.stringify({ plugins: [row("kept", "1.0.0"), row("fresh", "2.0.0")] }),
+    );
+
+    const check = await plugins.checkPluginSource(config);
+    expect(check.error).toBeUndefined();
+    expect(check.source).toEqual({ kind: "path", path: slashed(config) });
+    expect(check.entries).toEqual([
+      { id: "kept", version: "1.0.0", enabled: true, status: "loaded" },
+      { id: "fresh", version: "2.0.0", enabled: true, status: "pending" },
+    ]);
+    expect((await own()).map((p) => p.id)).toEqual(["kept"]);
+  });
+
+  it("checks the text it is handed, saved or not", async () => {
+    const { updateSettings } = await import("./settings.js");
+    const folder = path.join(dir, "check-field");
+    await fs.mkdir(folder, { recursive: true });
+    const config = path.join(folder, "config.json");
+    await fs.writeFile(config, JSON.stringify({ plugins: [row("typed", "3.0.0")] }));
+    await updateSettings({ pluginsConfig: path.join(dir, "never-existed.json") });
+
+    // The field's text wins over the saved setting: a source is checked before
+    // it is saved, which is the whole point of the press.
+    const check = await plugins.checkPluginSource(config);
+    expect(check.entries.map((e) => [e.id, e.status])).toEqual([["typed", "pending"]]);
+  });
+
+  it("answers with the reason a source cannot be read, not an empty list", async () => {
+    const missing = path.join(dir, "no-such-config.json");
+    const check = await plugins.checkPluginSource(missing);
+    expect(check.sourceLabel).toBe(slashed(missing));
+    expect(check.error).toMatch(/no-such-config\.json/);
+    expect(check.entries).toEqual([]);
+  });
+
+  it("treats an empty field with no default file as no source, not a failure", async () => {
+    const { updateSettings } = await import("./settings.js");
+    await updateSettings({ pluginsConfig: "" });
+    // The default file sits in the plugins folder, and an earlier test wrote one.
+    const defaultFile = path.join(dir, "config.json");
+    await fs.rm(defaultFile, { force: true });
+
+    const check = await plugins.checkPluginSource("");
+    expect(check.error).toBeUndefined();
+    expect(check.entries).toEqual([]);
+    // The default is a server constant, not a resolved string — it keeps the
+    // platform's separators, exactly as the boot state labels it.
+    expect(check.sourceLabel).toBe(defaultFile);
+  });
+});

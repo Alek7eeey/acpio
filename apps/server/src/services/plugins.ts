@@ -24,6 +24,8 @@ import {
   resolvePluginSource,
   resolveServerPort,
   type AppSettings,
+  type PluginCheckEntryDto,
+  type PluginsCheckDto,
   type PluginSkillFolder,
   type BuiltinModelConfig,
   type BuiltinProviderConfig,
@@ -361,6 +363,70 @@ export async function pluginsState(): Promise<PluginsState> {
       ...(s.error ? { error: s.error } : {}),
     })),
   };
+}
+
+/**
+ * One press of "Проверить": read the source as it stands now — the field's text,
+ * which may not be saved yet — and say what this boot made of every row.
+ *
+ * Reads only. The registry of a live process stays the one built at boot: what
+ * loaded here is the answer to "is it applied yet", not a reload.
+ */
+export async function checkPluginSource(value?: string): Promise<PluginsCheckDto> {
+  const settings = await getSettings();
+  const checkedAt = new Date().toISOString();
+  const text = (value ?? settings.pluginsConfig).trim();
+  let source: ResolvedPluginSource;
+  try {
+    source = resolvePluginSource(text, { cwd: process.cwd(), home: os.homedir() }) ?? {
+      kind: "path",
+      path: DEFAULT_CONFIG_FILE,
+    };
+  } catch (err) {
+    return {
+      checkedAt,
+      source: null,
+      sourceLabel: text,
+      error: err instanceof Error ? err.message : String(err),
+      entries: [],
+      warnings: [],
+    };
+  }
+  const label = sourceLabel(source);
+  // An empty field points at the default file, and boot treats a missing one as
+  // "no source": a check must not call that an error.
+  if (source.kind === "path" && !text && !existsSync(source.path)) {
+    return { checkedAt, source, sourceLabel: label, entries: [], warnings: [] };
+  }
+  try {
+    const read = await readManifest(source);
+    const loaded = new Map(registry.plugins.map((p) => [p.id, p]));
+    return {
+      checkedAt,
+      source,
+      sourceLabel: label,
+      entries: read.entries.map((entry): PluginCheckEntryDto => {
+        const now = loaded.get(entry.id);
+        return {
+          id: entry.id,
+          version: entry.version,
+          enabled: entry.enabled,
+          status: now ? now.status : "pending",
+          ...(now?.error ? { error: now.error } : {}),
+        };
+      }),
+      warnings: read.warnings,
+    };
+  } catch (err) {
+    return {
+      checkedAt,
+      source,
+      sourceLabel: label,
+      error: err instanceof Error ? err.message : String(err),
+      entries: [],
+      warnings: [],
+    };
+  }
 }
 
 function stripBom(text: string): string {
