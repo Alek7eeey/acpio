@@ -390,6 +390,14 @@ type AppState = {
   boardFoldersOpen: boolean;
   setBoardFoldersOpen: (open: boolean) => void;
   /**
+   * The board's project rail is on screen. Its toggle sits in the shell header
+   * (the open board's title row, where the chat tree's own toggle lives) while
+   * the rail belongs to the board page — the same split as the folders dialog.
+   * Starts expanded: the board opens with its projects in sight.
+   */
+  boardRailOpen: boolean;
+  setBoardRailOpen: (open: boolean) => void;
+  /**
    * The board page on screen (`null` on any other route). Board tasks live in
    * their own partition — they are not in the chat tree — so the reconnect
    * resync needs the id to re-read the list the reader is looking at.
@@ -2474,6 +2482,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   adaptersLoaded: false,
   sidebarOpen: readStoredSidebarOpen("tree"),
   boardFoldersOpen: false,
+  boardRailOpen: true,
   openBoardId: null,
   boardFilterCwd: {},
   boardFavoritesOnly: {},
@@ -4084,6 +4093,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setBoardFoldersOpen(open) {
     set({ boardFoldersOpen: open });
+  },
+
+  setBoardRailOpen(open) {
+    set({ boardRailOpen: open });
   },
 
   setOpenBoardId(id) {

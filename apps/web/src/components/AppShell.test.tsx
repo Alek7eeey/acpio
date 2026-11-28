@@ -207,6 +207,31 @@ describe("the brand chip's way home", () => {
   });
 });
 
+describe("the board's project rail toggle", () => {
+  // The board's left tree is the project rail the page draws, and the header is
+  // the only place its toggle can stand — the rail itself is gone when
+  // collapsed. It is a two-state toggle, not a splitter.
+  it("stands in the header and flips the rail on the board", async () => {
+    renderShell("/board/b1");
+    expect(await screen.findByTestId("board-page")).toBeTruthy();
+
+    const toggle = screen.getByRole("button", { name: "Проекты" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+
+    await userEvent.click(toggle);
+
+    expect(useAppStore.getState().boardRailOpen).toBe(false);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  // The chat's tree button is not the board's: only one of them is on screen.
+  it("is not the chat tree's button", async () => {
+    seed(chat);
+    renderShell("/chat");
+    expect(screen.queryByRole("button", { name: "Проекты" })).toBeNull();
+  });
+});
+
 /** jsdom measures every element as 0px: the column the panes share is faked. */
 function stubRoom(px: number) {
   Object.defineProperty(HTMLElement.prototype, "clientWidth", {

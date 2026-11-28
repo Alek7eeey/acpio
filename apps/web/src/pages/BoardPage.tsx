@@ -1659,6 +1659,9 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   // opens this page's folders dialog.
   const foldersOpen = useAppStore((s) => s.boardFoldersOpen);
   const setFoldersOpen = useAppStore((s) => s.setBoardFoldersOpen);
+  // The same split again: the rail's collapse toggle lives in the shell header
+  // beside the board's name, the rail itself is this page's.
+  const boardRailOpen = useAppStore((s) => s.boardRailOpen);
   const boardFilterCwd = useAppStore((s) => s.boardFilterCwd);
   /** The toolbar's heart: the board narrowed to its starred cards. */
   const boardFavoritesOnly = useAppStore((s) => s.boardFavoritesOnly);
@@ -3441,7 +3444,9 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
         ) : null}
         <aside
           ref={railRef}
-          className={`${styles.rail} ${railOpen ? styles.railOpen : ""}`}
+          className={`${styles.rail} ${railOpen ? styles.railOpen : ""} ${
+            boardRailOpen ? "" : styles.railHidden
+          }`}
           onScroll={saveScroll}
         >
           {/* Mobile sheet handle: the rail is pulled up from the bottom there,

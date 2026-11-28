@@ -147,6 +147,8 @@ beforeEach(() => {
     sessionLoading: false,
     // A rail narrowing outlives the page on purpose; each test starts wide.
     boardFilterCwd: {},
+    // So does the header's collapse of the project rail.
+    boardRailOpen: true,
     boardFavoritesOnly: {},
     // A mode picked on a card would outlive the test that picked it.
     composerModes: {},
@@ -1320,6 +1322,29 @@ describe("Board rail folder filter", () => {
     await screen.findByText("Fix the login bug");
 
     await waitFor(() => expect(railRow().className).toContain(styles.railRowOn));
+  });
+});
+
+describe("Board project rail collapse", () => {
+  // The header's toggle is the rail's only handle: collapsed, the whole column
+  // leaves the layout and the lanes take the width back. jsdom resolves no
+  // media query, so the class the desktop rule hangs on is what is asserted.
+  it("hides the rail while the shell's toggle says collapsed", async () => {
+    useAppStore.setState({ boardRailOpen: false });
+    const { container } = renderBoard();
+
+    await screen.findByText("Fix the login bug");
+    const rail = container.querySelector("aside") as HTMLElement;
+    expect(rail.className).toContain(styles.railHidden);
+  });
+
+  // Default: the board opens with its projects in sight.
+  it("keeps the rail when the board opens", async () => {
+    const { container } = renderBoard();
+
+    await screen.findByText("Fix the login bug");
+    const rail = container.querySelector("aside") as HTMLElement;
+    expect(rail.className).not.toContain(styles.railHidden);
   });
 });
 

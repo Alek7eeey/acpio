@@ -93,6 +93,15 @@
   min-height: 0;
 }
 
+/* Collapsed from the header's toggle. Desktop only: on a phone the rail is the
+   bottom sheet, which is already on demand and the only way to switch projects
+   there — hiding it would leave the board with no switcher at all. */
+@media (min-width: 900px) {
+  .railHidden {
+    display: none;
+  }
+}
+
 .railRowOn {
   background: var(--accent-soft);
 }
