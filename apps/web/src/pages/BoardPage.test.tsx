@@ -1143,6 +1143,49 @@ describe("Board Wait lane order", () => {
   });
 });
 
+describe("BoardPage card menu on a Wait card", () => {
+  const finished = (id: string, text: string): SessionDto => ({
+    ...task,
+    id,
+    title: id,
+    taskDescription: text,
+    status: "idle",
+    startedAt: "2026-09-20T11:00:00.000Z",
+  });
+
+  // Wait is a log, and a day of finished turns leaves a lane of cards each
+  // closed by its own button. From any card standing there the menu closes the
+  // whole lane at once — the same door the card's own button goes through.
+  it("closes every card in the lane from a card's menu", async () => {
+    useAppStore.setState({
+      boardSessions: [finished("t-a", "First finished"), finished("t-b", "Second finished")],
+    });
+    renderBoard();
+    fireEvent.contextMenu(await screen.findByText("First finished"));
+
+    await userEvent.click(
+      within(screen.getByRole("menu")).getByRole("menuitem", { name: "Mark all done" }),
+    );
+
+    await waitFor(() => expect(apiMock.updateSession).toHaveBeenCalledTimes(2));
+    for (const call of apiMock.updateSession.mock.calls) {
+      expect(call[1]).toEqual({ doneAt: expect.any(String), boardColumnId: null });
+    }
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  // A card outside Wait has no log to close in one press: Todo's list is work
+  // not yet done, so the row belongs to the Wait lane alone.
+  it("offers no such command on a card outside the Wait lane", async () => {
+    renderBoard();
+    fireEvent.contextMenu(await screen.findByText("Fix the login bug"));
+
+    expect(
+      within(screen.getByRole("menu")).queryByRole("menuitem", { name: "Mark all done" }),
+    ).toBeNull();
+  });
+});
+
 /** The chat a board task opened, with a way back like the browser's. */
 function ChatStub() {
   const navigate = useNavigate();

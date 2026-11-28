@@ -328,6 +328,7 @@ export const en = {
     boardTaskAgent: "Agent",
     boardTaskModel: "Model",
     boardMarkDone: "Mark done",
+    boardMarkAllDone: "Mark all done",
     boardReopen: "Reopen",
     boardFoldersTitle: "Board folders",
     boardAddFolder: "Add folder",

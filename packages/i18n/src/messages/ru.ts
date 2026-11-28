@@ -347,6 +347,7 @@ export const ru = {
     boardTaskAgent: "Агент",
     boardTaskModel: "Модель",
     boardMarkDone: "Завершить",
+    boardMarkAllDone: "Завершить всё",
     boardReopen: "Вернуть в работу",
     boardFoldersTitle: "Папки доски",
     boardAddFolder: "Добавить папку",

@@ -3067,6 +3067,22 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
     setFolderMenuPos((prev) => (prev && prev.x === x && prev.y === y ? prev : { x, y }));
   });
 
+  /**
+   * The Wait lane closed in one press: the card's menu carries it, so the whole
+   * log of finished turns goes without a press per card. Only the cards on
+   * screen are closed, so with a folder filter the command means what the
+   * reader sees — and the card the menu was opened on goes along with them.
+   */
+  const finishWaitLane = () => {
+    const card = taskMenu?.task;
+    setTaskMenu(null);
+    if (!card) return;
+    for (const lane of columns[columnOf(card).id] ?? EMPTY_TASKS) {
+      if (lane.doneAt || (filterCwd && lane.cwd !== filterCwd)) continue;
+      void setTaskDone(lane.id, true);
+    }
+  };
+
   /** The folder menu's first command: start the inline new-task form on the folder. */
   const addTaskToFolder = (cwd: string) => {
     setFolderMenu(null);
@@ -4265,6 +4281,28 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                   />
                 </svg>
                 {t("chat.boardNextPrompt")}
+              </button>
+            ) : null}
+            {/* Wait is a log of finished turns, and closing it card by card is
+                a press per card: from any card standing there the menu closes
+                the whole lane at once. */}
+            {columnOf(taskMenu.task).anchor === "wait" ? (
+              <button
+                type="button"
+                role="menuitem"
+                className={styles.menuItem}
+                onClick={finishWaitLane}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path
+                    d="m5 12.5 4.5 4.5L19 7.5"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                {t("chat.boardMarkAllDone")}
               </button>
             ) : null}
             {/* A card the reader parked on a lane of its own comes back to the
