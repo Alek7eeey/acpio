@@ -122,6 +122,36 @@ export function isContextDriftStop(err: unknown): boolean {
   return false;
 }
 
+/**
+ * The head as a chat put it on the wire: the system text and the declarations,
+ * verbatim — not the settings they were written from.
+ *
+ * `promptHead` and `promptTools` freeze the inputs, but the text itself is
+ * rendered by code, so a build that rewords one tool description or one prompt
+ * line rewrites the head of every chat open at the restart — and the provider
+ * answers only the bytes it has already seen. Chat 46523284 sent 151 104 input
+ * tokens with 0 from cache on the first request after a restart, and the one
+ * thing that had changed was the wording of `apply_plan`; chat 709ea934,
+ * resumed after eight days, paid 59 614 the same way. The bytes a chat has sent
+ * are the bytes it keeps.
+ */
+export interface PinnedHead {
+  /** The system text: `body.system`, or the `messages[0]` that carries it. */
+  system?: string;
+  /** The declarations as the wire took them. */
+  tools?: unknown;
+}
+
+/**
+ * Where a chat's pinned head lives — the session store, which outlives the
+ * process. `read` answers what the chat has already sent; `write` keeps the head
+ * of a chat that has sent nothing yet.
+ */
+export interface PinnedHeadSource {
+  read(): PinnedHead | undefined;
+  write(head: PinnedHead): void;
+}
+
 /** The wrapper's own knobs: whether to look at the head, and who to tell. */
 export interface WireLogOptions {
   /** Told when a request's head no longer matches the one before it. */
@@ -148,6 +178,12 @@ export interface WireLogOptions {
    * somebody is listening”.
    */
   watch?: () => boolean;
+  /**
+   * The head this chat already sent, and where a fresh one is kept (see
+   * `PinnedHead`). Absent on a lane of its own: a subagent's prompt is not the
+   * chat's head, and pinning it would hand the child the parent's prompt.
+   */
+  pin?: PinnedHeadSource;
 }
 
 /**
@@ -407,6 +443,57 @@ function parseBody(text: string): Record<string, unknown> | null {
   }
 }
 
+/**
+ * The head as the chat first put it on the wire, and the body to send now.
+ *
+ * A chat that has sent nothing yet keeps this request's head; every later one
+ * gets those very bytes back, whatever the code renders today. Only the two
+ * things ahead of every message are touched — the system text and the
+ * declarations — and a request that declares no tools says nothing about them,
+ * so it neither becomes the keeper nor erases what the chat kept.
+ */
+function applyPin(
+  pin: PinnedHeadSource | undefined,
+  body: Record<string, unknown>,
+  text: string,
+): string {
+  if (!pin) return text;
+  const first = bodyMessages(body)[0] as { role?: unknown; content?: unknown } | undefined;
+  const carriesSystem = first?.role === "system";
+  const stored = pin.read();
+  if (!stored) {
+    if (!Array.isArray(body.tools)) return text;
+    pin.write({
+      system:
+        typeof body.system === "string"
+          ? body.system
+          : carriesSystem && typeof first?.content === "string"
+            ? first.content
+            : "",
+      tools: body.tools,
+    });
+    return text;
+  }
+  let moved = false;
+  // An empty stored system is a chat whose first request carried none: it may
+  // not erase the one a later request does carry.
+  if (stored.system) {
+    if (typeof body.system === "string" && body.system !== stored.system) {
+      body.system = stored.system;
+      moved = true;
+    }
+    if (carriesSystem && first && first.content !== stored.system) {
+      (first as { content?: unknown }).content = stored.system;
+      moved = true;
+    }
+  }
+  if (stored.tools !== undefined && JSON.stringify(body.tools) !== JSON.stringify(stored.tools)) {
+    body.tools = stored.tools;
+    moved = true;
+  }
+  return moved ? JSON.stringify(body) : text;
+}
+
 /** The two things ahead of every message, as they went out — the same rule as the hashes. */
 function headTexts(body: Record<string, unknown>): { system: unknown; tools: unknown } {
   const first = bodyMessages(body)[0] as { role?: unknown } | undefined;
@@ -544,16 +631,24 @@ export function withWireLog(
     // business: the chat's own endpoint asks for it on every call so the tokens
     // panel can say how much of the bill was the provider's cold cache. The
     // switch still gates the warning card alone.
-    if (!watching && !options.onHead && !options.onAnswer) return base(input, init);
+    if (!watching && !options.onHead && !options.onAnswer && !options.pin) return base(input, init);
     const started = Date.now();
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : String(input?.url ?? "");
-    const rawBody = typeof init?.body === "string" ? init.body : "";
+    let rawBody = typeof init?.body === "string" ? init.body : "";
     let body: Record<string, unknown> = {};
     try {
       body = rawBody ? (JSON.parse(rawBody) as Record<string, unknown>) : {};
     } catch {
       body = {};
     }
+    // Pinned before the hashes are taken: a head this wrapper put back is a head
+    // that did not move, and the drift verdict has to price what actually
+    // crossed the wire (see `applyPin`). The log records the pinned body — the
+    // one the provider was sent — not the one this build rendered.
+    const pinnedBody = applyPin(options.pin, body, rawBody);
+    const sendInit =
+      pinnedBody === rawBody ? init : ({ ...(init ?? {}), body: pinnedBody } as RequestInit);
+    rawBody = pinnedBody;
     const messages = bodyMessages(body);
     const chain = chainOf(messages);
     // An OpenAI `/chat/completions` body has no `system` field: the system prompt
@@ -747,7 +842,7 @@ export function withWireLog(
         throw new ContextDriftStop();
       }
     }
-    const response = await base(input, init);
+    const response = await base(input, sendInit);
     // Reported whether or not anything is written: the agent's echo decision
     // turns on it, and the log is a diagnostic switch nobody has to flip for a
     // bill to be right.

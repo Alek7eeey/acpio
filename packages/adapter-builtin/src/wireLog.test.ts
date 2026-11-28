@@ -159,6 +159,96 @@ describe("wire log", () => {
     expect(requests[2].toolsChanged).toBe(false);
   });
 
+  it("puts the head a chat already sent back on the wire, whatever the build renders now", async () => {
+    // The settings are frozen, the text is not: it is rendered by code, so an
+    // update that rewords one tool description rewrites the head of every chat
+    // open at the restart and the provider bills each of them whole (46523284:
+    // 151 104 input tokens, 0 from the cache, for the wording of `apply_plan`;
+    // 709ea934: 59 614). The first request keeps the head, the rest get it.
+    const sent: Array<Record<string, any>> = [];
+    const base = (async (_input: unknown, init?: RequestInit) => {
+      sent.push(JSON.parse(String(init?.body ?? "{}")));
+      return jsonResponse({});
+    }) as unknown as typeof globalThis.fetch;
+    let pinned: { system?: string; tools?: unknown } | undefined;
+    const drifts: ContextDrift[] = [];
+    const fetch = withWireLog(
+      { sessionId: "sess-1", providerId: "builtin" },
+      base,
+      {
+        onDrift: (drift) => {
+          drifts.push(drift);
+        },
+        watch: () => true,
+        pin: {
+          read: () => pinned,
+          write: (head) => {
+            pinned = head;
+          },
+        },
+      },
+    );
+    const send = (system: string, description: string) =>
+      fetch("https://relay.test/v1/chat/completions", {
+        method: "POST",
+        body: JSON.stringify({
+          model: "m",
+          tools: [{ type: "function", function: { name: "apply_plan", description } }],
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: "x" },
+          ],
+        }),
+      });
+
+    await send("head one", "Rejected in silence");
+    // A newer build: another wording and another prompt line, same chat.
+    await send("head two", "Closed without an answer");
+
+    expect(sent[0].messages[0].content).toBe("head one");
+    expect(sent[1].messages[0].content).toBe("head one");
+    expect(sent[1].tools[0].function.description).toBe("Rejected in silence");
+    // Kept, so nothing moved and nobody is asked to pay for a rewrite.
+    expect(drifts).toHaveLength(0);
+    const requests = lines().filter((line) => line.kind === "request");
+    expect(requests[1].systemChanged).toBe(false);
+    expect(requests[1].toolsChanged).toBe(false);
+    expect(requests[1].prefixSame).toBe(2);
+  });
+
+  it("keeps no head for a request that declares no tools", async () => {
+    // A pass without declarations says nothing about the ones the chat keeps:
+    // taking its head would strip every tool from the next turn.
+    const sent: Array<Record<string, any>> = [];
+    const base = (async (_input: unknown, init?: RequestInit) => {
+      sent.push(JSON.parse(String(init?.body ?? "{}")));
+      return jsonResponse({});
+    }) as unknown as typeof globalThis.fetch;
+    let pinned: { system?: string; tools?: unknown } | undefined;
+    const fetch = withWireLog({ sessionId: "sess-1", providerId: "builtin" }, base, {
+      onHead: () => {},
+      pin: {
+        read: () => pinned,
+        write: (head) => {
+          pinned = head;
+        },
+      },
+    });
+    const send = (body: Record<string, unknown>) =>
+      fetch("https://relay.test/v1/chat/completions", { method: "POST", body: JSON.stringify(body) });
+
+    await send({ model: "m", messages: [{ role: "system", content: "bare" }] });
+    expect(pinned).toBeUndefined();
+    await send({
+      model: "m",
+      tools: [{ type: "function", function: { name: "bash" } }],
+      messages: [{ role: "system", content: "with tools" }],
+    });
+    expect(pinned?.system).toBe("with tools");
+    await send({ model: "m", messages: [{ role: "system", content: "bare" }] });
+    expect(sent[2].messages[0].content).toBe("with tools");
+  });
+
   it("records the key the pool put on the request, and names the swap when it moves", async () => {
     // The log must sit under `providerFetch`, not above it: the pool is what
     // writes the authorization header, so a wrapper outside it would fingerprint

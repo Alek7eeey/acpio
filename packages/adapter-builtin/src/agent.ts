@@ -35,6 +35,7 @@ import {
   withWireLog,
   wireLogState,
   type ContextDrift,
+  type PinnedHead,
   type WireLogOptions,
 } from "./wireLog.js";
 import {
@@ -1018,6 +1019,31 @@ export class BuiltinAgent implements InProcessAgentTransport {
    */
   private frozenTools: McpToolDecl[] | null = null;
   /**
+   * The head as this chat put it on the wire the first time it sent one — the
+   * system text and the declarations, not the settings they were written from.
+   *
+   * `frozenHead`/`frozenTools` fix the inputs, but both texts are still rendered
+   * by code: a build that rewords one tool description moved the head of every
+   * chat open at the restart, and the provider answered only the bytes it had
+   * seen (chat 46523284: 151 104 input tokens at 0 % on the first request after
+   * a restart, for the wording of `apply_plan`; chat 709ea934, stored eight days
+   * earlier, 59 614). Kept in the session store and put back on every request
+   * by `applyPin`, so an update costs a chat nothing until its next one.
+   */
+  private sentHead: PinnedHead | undefined = undefined;
+  /**
+   * Where that head is kept — read on every request, written once, when the
+   * chat has sent nothing yet. Persisted where it is taken, so a restart
+   * between the request and the turn's end does not lose it.
+   */
+  private readonly headPin = {
+    read: () => this.sentHead,
+    write: (head: PinnedHead) => {
+      this.sentHead = head;
+      this.persist();
+    },
+  };
+  /**
    * The plan as this session last read it out of `.acpio/plan.md` — title,
    * overview, the Markdown, the steps and the stage. The file is the source of
    * truth (the tools write it, the reader may edit it by hand, the watcher
@@ -1425,6 +1451,9 @@ export class BuiltinAgent implements InProcessAgentTransport {
     // answer differently on this boot, and the provider's cache holds the ones
     // the chat already sent.
     this.frozenTools = stored?.promptTools ? [...stored.promptTools] : null;
+    // …and the head itself as it went out: the two texts above are rendered by
+    // code, so a newer build would render other bytes from the same settings.
+    this.sentHead = stored?.promptSent ? { ...stored.promptSent } : undefined;
     // …and whether the history that head wrote went out with the reasoning echo:
     // the field is added to every assistant message that has none, so a
     // transport built again mid-chat may not take that decision again either.
@@ -1529,6 +1558,7 @@ export class BuiltinAgent implements InProcessAgentTransport {
         : {}),
       ...(this.frozenHead ? { promptHead: { ...this.frozenHead, servers: [...this.frozenHead.servers] } } : {}),
       ...(this.frozenTools ? { promptTools: this.frozenTools } : {}),
+      ...(this.sentHead ? { promptSent: this.sentHead } : {}),
       // The echo decision rides with the same bytes: a restart that retook it
       // would add the field to messages the provider has already cached.
       ...(this.echoThinking !== undefined ? { echoReasoning: this.echoThinking } : {}),
@@ -1915,6 +1945,9 @@ export class BuiltinAgent implements InProcessAgentTransport {
           // the first break that comes after it.
           if (head.intact) this.passRewroteView = false;
         },
+        // The head as the wire took it: the system text and the declarations a
+        // chat has already sent are the ones it keeps (see `PinnedHead`).
+        pin: this.headPin,
         // Settings → Diagnostics: off means the head is not even hashed. Read
         // per request, so the switch reaches the very next call.
         watch: () => this.watching === true,
@@ -1944,6 +1977,9 @@ export class BuiltinAgent implements InProcessAgentTransport {
         onAnswer: (status) => {
           this.answerStatus = status;
         },
+        // The digest sends the chat's own head (see `digestEndpoint`), so it
+        // keeps the same bytes: a pass that ran first must not pin its own.
+        pin: this.headPin,
       },
       COMPACTION_LANE,
     );

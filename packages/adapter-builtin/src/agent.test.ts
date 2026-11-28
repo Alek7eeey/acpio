@@ -285,6 +285,90 @@ describe("BuiltinAgent ACP surface", () => {
     ).rejects.toThrow(/не найдена/);
   });
 
+  // The settings are frozen with the chat; the text they are written into is
+  // not — it is rendered by code, so a build that rewords one tool description
+  // rewrites the head of every open chat and the provider bills each of them
+  // whole (chats 46523284 and 709ea934: 151 104 and 59 614 input tokens at 0 %,
+  // paid on the first request after a restart). The bytes a chat has sent are
+  // the bytes it sends, whatever this build renders.
+  it("sends the head a chat already sent, not the one this build renders", async () => {
+    const bodies: Array<Record<string, any>> = [];
+    const server = createServer((req, res) => {
+      let body = "";
+      req.on("data", (chunk) => {
+        body += chunk;
+      });
+      req.on("end", () => {
+        bodies.push(JSON.parse(body) as Record<string, any>);
+        res.setHeader("content-type", "text/event-stream");
+        const chunk = (payload: Record<string, unknown>) => `data: ${JSON.stringify(payload)}\n\n`;
+        res.write(
+          chunk({
+            id: "c1",
+            object: "chat.completion.chunk",
+            created: 0,
+            model: "stub",
+            choices: [
+              { index: 0, delta: { role: "assistant", content: "готово" }, finish_reason: null },
+            ],
+          }),
+        );
+        res.write(
+          chunk({
+            id: "c1",
+            object: "chat.completion.chunk",
+            created: 0,
+            model: "stub",
+            choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          }),
+        );
+        res.write("data: [DONE]\n\n");
+        res.end();
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("stub did not bind a port");
+    const dir = tempDir();
+    const sentTools = [
+      { type: "function", function: { name: "apply_plan", description: "Closed, not refused" } },
+    ];
+    saveBuiltinSession(dir, "sent-1", {
+      version: 1,
+      cwd: "/w",
+      modelId: "p1::m1",
+      messages: [{ role: "user", content: "привет" }],
+      promptSent: { system: "голова, которую чат уже отправил", tools: sentTools },
+    });
+    try {
+      const { call } = boot(
+        {
+          builtinProviders: [
+            {
+              id: "p1",
+              name: "Stub",
+              url: `http://127.0.0.1:${address.port}/v1`,
+              apiKey: "",
+              models: [{ id: "m1", label: "M1", contextWindow: 64_000 }],
+            },
+          ],
+        },
+        dir,
+      );
+      await call("session/load", { sessionId: "sent-1", cwd: "/w" });
+      await call("session/prompt", { prompt: [{ type: "text", text: "дальше" }] });
+      expect(bodies).toHaveLength(1);
+      expect(bodies[0].messages[0]).toMatchObject({
+        role: "system",
+        content: "голова, которую чат уже отправил",
+      });
+      expect(bodies[0].tools).toEqual(sentTools);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it("normalizes a bare model id restored from a pre-provider conversation", async () => {
     const dir = tempDir();
     saveBuiltinSession(dir, "old-1", {

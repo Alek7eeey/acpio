@@ -10,6 +10,7 @@ import {
 } from "@acpio/shared";
 import type { ModelMessage } from "ai";
 import type { McpToolDecl } from "./mcp.js";
+import type { PinnedHead } from "./wireLog.js";
 
 /**
  * The prompt mode the composer's ⋯ menu picks (`prompt_style`, once `thinking`).
@@ -159,6 +160,17 @@ export interface BuiltinStoredSession {
    * restart, while its own neighbours read 99 %).
    */
   promptTools?: McpToolDecl[];
+  /**
+   * The head exactly as this chat last put it on the wire — the system text and
+   * the declarations, verbatim. `promptHead` and `promptTools` freeze the
+   * settings it is written from, but the text is rendered by code: an update
+   * that rewords one tool description or one prompt line rewrote the head of
+   * every chat open at the restart, and the provider billed each of them whole
+   * (chat 46523284: 151 104 input tokens, 0 from cache, for the wording of
+   * `apply_plan`). Stored so a restart — or an update — resumes on the very
+   * bytes the provider has cached. See `PinnedHead`.
+   */
+  promptSent?: PinnedHead;
 }
 
 /** Session ids become file names, so never trust one blindly. */
@@ -256,6 +268,16 @@ export function loadBuiltinSession(stateDir: string, sessionId: string): Builtin
       )
         ? (toolsRaw as McpToolDecl[])
         : undefined;
+    // A half-written head reads as none: the chat keeps the next one it sends
+    // and pays that request once, instead of resuming on half a prompt.
+    const sentRaw = parsed.promptSent;
+    const promptSent =
+      sentRaw &&
+      typeof sentRaw === "object" &&
+      typeof sentRaw.system === "string" &&
+      Array.isArray(sentRaw.tools)
+        ? { system: sentRaw.system, tools: sentRaw.tools as unknown[] }
+        : undefined;
     const stored = parsed.usage;
     // A head with one broken field reads as "no frozen head": the first turn
     // writes it again from the settings instead of resuming on half a prompt.
@@ -341,6 +363,7 @@ export function loadBuiltinSession(stateDir: string, sessionId: string): Builtin
       ...(promptRules ? { promptRules } : {}),
       ...(promptHead ? { promptHead } : {}),
       ...(promptTools ? { promptTools } : {}),
+      ...(promptSent ? { promptSent } : {}),
     };
   } catch {
     // Missing or corrupt file: start fresh instead of bricking the session.
