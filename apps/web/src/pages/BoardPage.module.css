@@ -336,20 +336,44 @@
   background: var(--accent-soft);
 }
 
+/*
+ * The lane stacks its cards as plain blocks rather than as flex items: a flex
+ * item with `content-visibility: auto` is sized from its (skipped) content in
+ * preference to `contain-intrinsic-size`, so the card collapsed to its own
+ * padding. As blocks they keep their height and the engine can still skip the
+ * ones scrolled out of the lane.
+ */
 .columnBody {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   padding: 0 8px 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
 }
 
+.columnBody > * + * {
+  margin-top: 8px;
+}
+
+/*
+ * A lane long enough to mount a page at a time also lets the engine skip what
+ * is scrolled out of it: only the cards on screen are laid out and painted.
+ * `auto` in the intrinsic size remembers each card's own measured height, so a
+ * card that was drawn once does not change the lane's scroll as it comes back.
+ * The card a drop is aimed at is left out: its slot line is drawn outside the
+ * card's box, and the paint containment this brings would clip it away.
+ */
+.laneLong [data-task-id]:not([data-drop]) {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 150px;
+}
+
+/* A folder's block: a head, its form and its cards, spaced like the lane. */
 .group {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+  display: block;
+}
+
+.group > * + * {
+  margin-top: 6px;
 }
 
 .groupHead {
@@ -453,6 +477,9 @@
  * the group's "+" opens the same form.
  */
 .addCard {
+  /* A button keeps its shrink-to-fit width even as a block: the lane is a
+     plain block stack now, so the row says it wants the whole lane. */
+  width: 100%;
   display: flex;
   align-items: center;
   justify-content: center;

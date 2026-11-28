@@ -1408,6 +1408,45 @@ function renderBoard() {
   );
 }
 
+describe("Board lane paging", () => {
+  // A lane of 25+ cards is mounted a page at a time: the reader gets twenty,
+  // and the lane asks for the next page only once its end comes on screen.
+  const many: SessionDto[] = Array.from({ length: 26 }, (_, i) => ({
+    ...task,
+    id: `p${i}`,
+    title: `Task ${i}`,
+    taskDescription: `Fix the bug ${i}`,
+    sortOrder: i,
+  }));
+
+  /** The lane's own scroller: the group head is the lane's first child. */
+  const laneOf = (container: HTMLElement) =>
+    (container.querySelector('[data-column="todo"]') as HTMLElement).children[1] as HTMLElement;
+
+  it("mounts a page of a long lane and the rest as it is scrolled", async () => {
+    useAppStore.setState({ boardSessions: many });
+    const { container } = renderBoard();
+    await screen.findByText("Fix the bug 0");
+
+    const lane = laneOf(container);
+    expect(lane.querySelectorAll("[data-task-id]")).toHaveLength(20);
+    // jsdom measures nothing, so the lane's own height is stated for the test.
+    Object.defineProperty(lane, "scrollHeight", { value: 2600, configurable: true });
+    Object.defineProperty(lane, "clientHeight", { value: 600, configurable: true });
+
+    // Halfway down the mounted page there is nothing more to ask for.
+    lane.scrollTop = 900;
+    fireEvent.scroll(lane);
+    expect(lane.querySelectorAll("[data-task-id]")).toHaveLength(20);
+
+    // At the mounted end the next page joins, and the last card is in it.
+    lane.scrollTop = 1900;
+    fireEvent.scroll(lane);
+    await waitFor(() => expect(lane.querySelectorAll("[data-task-id]")).toHaveLength(26));
+    expect(screen.getByText("Fix the bug 25")).toBeTruthy();
+  });
+});
+
 describe("BoardPage new task form slash menu", () => {
   // A task's skill is the `/name` its first message opens with, and every
   // harness this app drives speaks ACP — so the form offers the menu of the

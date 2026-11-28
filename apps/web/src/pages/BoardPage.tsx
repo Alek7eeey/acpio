@@ -109,6 +109,19 @@ const boardOriginByBoard: Record<string, string> = {};
 const RESTORE_FRAMES = 10;
 
 /**
+ * A lane of this many cards mounts them a page at a time: a column that holds
+ * hundreds hands the reader the first page instead of every card, and the rest
+ * join as it scrolls. A shorter lane renders exactly as the board always did.
+ */
+const LANE_WINDOW_MIN = 25;
+/** Cards one page of a paged lane holds. */
+const LANE_PAGE = 20;
+/** How close to the mounted end of a lane the next page joins it, in px. */
+const LANE_LOAD_AHEAD = 240;
+/** A card's height, near enough to guess which page a saved offset reaches. */
+const LANE_CARD_HEIGHT = 96;
+
+/**
  * The folder whose new-task form a board was left with. The form itself dies
  * with the page, so without this a trip to a task's chat and back shows an
  * empty lane with the half-written task nowhere in sight. In-memory like the
@@ -1852,6 +1865,38 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const restoredBoardRef = useRef<string | null>(null);
   /** The trip's card has been brought on screen — asked for once per visit. */
   const originScrolledRef = useRef(false);
+  /**
+   * Cards mounted per lane, by board and lane id. Only a lane of
+   * LANE_WINDOW_MIN or more reads this: a short lane mounts all of its cards
+   * and never asks for another page.
+   */
+  const [laneMounted, setLaneMounted] = useState<Record<string, number>>({});
+  /** Each lane's full card count, read by `revealLane` where it runs. */
+  const laneTotalsRef = useRef<Record<string, number>>({});
+
+  /**
+   * Mount enough of a lane to reach `top` in it. The reading position is the
+   * reader's, so a lane that mounts a page at a time has to hold that offset
+   * before it can be written at all — otherwise the scroller clamps to the
+   * mounted end and the board opens somewhere else.
+   */
+  const revealLane = useCallback(
+    (columnId: string, top: number) => {
+      const total = laneTotalsRef.current[columnId] ?? 0;
+      if (total <= LANE_WINDOW_MIN || top <= 0) return;
+      // Card heights are an estimate: enough pages to cover the offset, never
+      // the whole lane — a page past the guess is cheap, a lane mounted whole
+      // is the cost this feature exists to remove.
+      const guessed = Math.ceil((top + LANE_LOAD_AHEAD) / LANE_CARD_HEIGHT);
+      const pages = Math.ceil(guessed / LANE_PAGE) * LANE_PAGE;
+      const needed = Math.min(total, Math.max(LANE_PAGE, pages));
+      const key = `${boardId ?? ""}:${columnId}`;
+      setLaneMounted((current) =>
+        (current[key] ?? LANE_PAGE) >= needed ? current : { ...current, [key]: needed },
+      );
+    },
+    [boardId],
+  );
 
   /**
    * Close the new-task form. The form owns what it held and releases the
@@ -1951,17 +1996,23 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
     for (const [id, top] of Object.entries(saved.columns)) {
       const el = columnRefs.current.get(id);
       if (!el) continue;
+      // A long lane mounts a page at a time: it must grow to hold the offset
+      // before the offset can be written into it.
+      revealLane(id, top);
       el.scrollTop = top;
-      if (top <= 0) continue;
-      const maxTop = el.scrollHeight - el.clientHeight;
-      if (el.scrollTop < top - 1 && el.scrollTop < maxTop - 1) tooShort = true;
+      if (top <= 0 || el.scrollTop >= top - 1) continue;
+      // A lane that mounts a page at a time has not arrived just because it
+      // stands at its mounted end: it is short of the offset, gets more frames,
+      // and `revealLane` grows it until the offset fits.
+      const paged = (laneTotalsRef.current[id] ?? 0) > LANE_WINDOW_MIN;
+      if (paged || el.scrollTop < el.scrollHeight - el.clientHeight - 1) tooShort = true;
     }
     if (tooShort) return false;
     restoredBoardRef.current = boardId;
     restoringRef.current = false;
     scrollToOrigin();
     return true;
-  }, [boardId, scrollToOrigin]);
+  }, [boardId, revealLane, scrollToOrigin]);
 
   useLayoutEffect(() => {
     if (!boardId) return;
@@ -2199,6 +2250,64 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   }, [board, todoTasks]);
 
   const visibleGroups = filterCwd ? groups.filter((group) => group.cwd === filterCwd) : groups;
+
+  /** Every lane's card count, for a lane that mounts a page at a time. */
+  const laneTotals = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const column of boardColumns) out[column.id] = (columns[column.id] ?? EMPTY_TASKS).length;
+    return out;
+  }, [boardColumns, columns]);
+  // Read from the restore, which runs before this render's memos are in hand.
+  useLayoutEffect(() => {
+    laneTotalsRef.current = laneTotals;
+  }, [laneTotals]);
+
+  /** How many of a lane's cards are mounted: all of them in a short lane. */
+  const mountedCards = (columnId: string, total: number) => {
+    if (total <= LANE_WINDOW_MIN) return total;
+    return Math.min(total, laneMounted[`${boardId ?? ""}:${columnId}`] ?? LANE_PAGE);
+  };
+
+  /** One more page for a paged lane whose mounted end has come on screen. */
+  const growLane = (columnId: string, el: HTMLElement, total: number) => {
+    if (total <= LANE_WINDOW_MIN) return;
+    if (el.scrollTop + el.clientHeight < el.scrollHeight - LANE_LOAD_AHEAD) return;
+    const key = `${boardId ?? ""}:${columnId}`;
+    setLaneMounted((current) => {
+      const shown = current[key] ?? LANE_PAGE;
+      if (shown >= total) return current;
+      return { ...current, [key]: Math.min(total, shown + LANE_PAGE) };
+    });
+  };
+
+  /**
+   * The Todo lane's mounted cards, spread over the groups in the order the lane
+   * shows them. A group whose page has not come yet keeps its head and its
+   * count and nothing else, so a folder is never lost behind the paging.
+   */
+  const todoMounted = useMemo(() => {
+    const out = new Map<string, SessionDto[]>();
+    let left = mountedCards(
+      todoColumnId,
+      visibleGroups.reduce((sum, group) => sum + group.tasks.length, 0),
+    );
+    for (const group of visibleGroups) {
+      if (left <= 0) break;
+      const taken = group.tasks.slice(0, left);
+      out.set(group.cwd, taken);
+      left -= taken.length;
+    }
+    return out;
+  }, [boardId, laneMounted, todoColumnId, visibleGroups]);
+
+  // A lane whose mounted page does not fill its body has no scroll to ask for
+  // the next one: on a tall screen the board would sit at its first page.
+  useLayoutEffect(() => {
+    for (const [id, el] of columnRefs.current) {
+      const total = laneTotals[id] ?? 0;
+      if (el.clientHeight > 0 && el.scrollHeight <= el.clientHeight) growLane(id, el, total);
+    }
+  }, [laneMounted, laneTotals]);
 
   /**
    * Open a task in the normal chat. A task that never started seeds its
@@ -3076,6 +3185,9 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
       <article
         key={task.id}
         data-task-id={task.id}
+        // The slot a drop would take is drawn just outside the card's box, so
+        // it is a fact of the card the lane's containment has to know about.
+        data-drop={dropHint ?? undefined}
         // The mode a card sends in, worn as a coloured border: it says the
         // state without ever taking a row of the card's width.
         data-composer-mode={mode === "agent" ? undefined : mode}
@@ -3563,6 +3675,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
             const lane = columns[column.id] ?? EMPTY_TASKS;
             const cards = filterCwd ? lane.filter((task) => task.cwd === filterCwd) : lane;
             const isTodo = column.id === todoColumnId;
+            const mounted = mountedCards(column.id, cards.length);
             return (
               <section
                 key={column.id}
@@ -3632,8 +3745,14 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                     if (el) columnRefs.current.set(column.id, el);
                     else columnRefs.current.delete(column.id);
                   }}
-                  className={styles.columnBody}
-                  onScroll={saveScroll}
+                  className={`${styles.columnBody}${
+                    cards.length > LANE_WINDOW_MIN ? ` ${styles.laneLong}` : ""
+                  }`}
+                  onScroll={(e) => {
+                    saveScroll();
+                    // The mounted end reached: this lane's next page joins it.
+                    growLane(column.id, e.currentTarget, cards.length);
+                  }}
                 >
                   {isTodo
                     ? visibleGroups.map((group, groupIndex) => (
@@ -3826,10 +3945,12 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                               {t("chat.boardAddTaskCard")}
                             </button>
                           ) : null}
-                          {group.tasks.map((task) => renderCard(task, group))}
+                          {(todoMounted.get(group.cwd) ?? EMPTY_TASKS).map((task) =>
+                            renderCard(task, group),
+                          )}
                         </div>
                       ))
-                    : cards.map((task) => renderCard(task, null))}
+                    : cards.slice(0, mounted).map((task) => renderCard(task, null))}
                   {/* A lane narrowed to nothing says which narrowing left it
                       empty: no cards at all, or none of them starred. */}
                   {isTodo && !visibleGroups.length ? (
