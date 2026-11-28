@@ -2,7 +2,6 @@ import type { ServerResponse } from "node:http";
 import dotenv from "dotenv";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import cookie from "@fastify/cookie";
@@ -20,8 +19,8 @@ import { loadPlugins } from "./services/plugins.js";
 import { ensureSchema } from "./db/ensureSchema.js";
 import { DATA_DIR, DB_PATH } from "./db/client.js";
 import { acquireInstanceLock } from "./db/instanceLock.js";
-const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
-dotenv.config({ path: path.join(rootDir, ".env") });
+import { ROOT } from "./root.js";
+dotenv.config({ path: path.join(ROOT, ".env") });
 dotenv.config();
 
 // Install state lives next to the database, never next to the folder npm
@@ -103,7 +102,7 @@ async function main() {
   // Single-port prod: serve the built web UI (API + WS + static on DEFAULT_SERVER_PORT).
   // Dev layout: apps/web/dist; packaged layout: web/dist.
   const webDist =
-    [path.join(rootDir, "apps", "web", "dist"), path.join(rootDir, "web", "dist")].find((p) =>
+    [path.join(ROOT, "apps", "web", "dist"), path.join(ROOT, "web", "dist")].find((p) =>
       fs.existsSync(p),
     ) ?? null;
   if (webDist) {

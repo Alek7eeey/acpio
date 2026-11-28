@@ -1,7 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   BUILD_INFO,
   isNewerVersion,
@@ -9,6 +8,7 @@ import {
   type AppUpdateStateDto,
   type AppUpdateStatus,
 } from "@acpio/shared";
+import { ROOT } from "../root.js";
 
 /**
  * Acpio updates itself the way it was installed. There are three ways, and each
@@ -24,11 +24,8 @@ const PACKAGE_NAME = "acpio";
 /** Where the portable bundle is published: `<repo>/releases/download/v<version>/<asset>`. */
 const REPO_SLUG = "Alek7eeey/acpio";
 const BUNDLE_ASSET = "acpio-win-x64.zip";
-/**
- * Where this build sits: `apps/server/{src,dist}/services/appUpdate.ts` is four
- * directories above the package root, the same hops `index.ts` takes for the UI.
- */
-const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
+/** Where this build sits: the package root every install kind is read through. */
+const APP_ROOT = ROOT;
 const DEFAULT_REGISTRY_URL = `https://registry.npmjs.org/${PACKAGE_NAME}/latest`;
 /** Give up on a slow registry so the header's check cannot hang. */
 const CHECK_TIMEOUT_MS = 10_000;
