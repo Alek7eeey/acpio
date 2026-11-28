@@ -3858,9 +3858,9 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
           aria-expanded={boardRailOpen}
           onClick={() => setBoardRailOpen(!boardRailOpen)}
         >
-          {/* A box the arrow fills: the board's 12px strip has no room for a
-              glyph swimming in a 24-unit square. */}
-          <svg width="9" height="15" viewBox="0 0 9 15" fill="none" aria-hidden>
+          {/* A box the arrow fills: the board's gutter has no room for a glyph
+              swimming in a 24-unit square. */}
+          <svg width="7" height="12" viewBox="0 0 9 15" fill="none" aria-hidden>
             <path
               d={boardRailOpen ? "M6.6 1.6 2 7.5l4.6 5.9" : "M2.4 1.6 7 7.5l-4.6 5.9"}
               stroke="currentColor"

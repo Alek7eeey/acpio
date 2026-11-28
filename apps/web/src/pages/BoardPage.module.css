@@ -105,8 +105,10 @@
    back, and the chevron says which way it goes. It carries the divider the rail
    used to draw itself, so the line does not double. */
 .railSplitter {
-  flex: 0 0 12px;
-  width: 12px;
+  /* A gutter, not a column: it is the rail's hairline and a chevron in it, so
+     the lanes keep the width a wider handle would eat. */
+  flex: 0 0 6px;
+  width: 6px;
   align-self: stretch;
   display: flex;
   align-items: center;
@@ -114,16 +116,13 @@
   padding: 0;
   border: 0;
   border-right: 1px solid var(--border);
-  /* Not the rail's own `--surface`: the strip is a handle, and it has to be
-     seen as one while the rail stands beside it — in both themes, which is why
-     it takes the one colour that differs from the rail in both. */
-  background: var(--bg-tertiary);
+  background: none;
   color: var(--text-secondary);
   cursor: pointer;
 }
 
 .railSplitter:hover {
-  background: color-mix(in srgb, var(--text) 12%, var(--bg-tertiary));
+  background: color-mix(in srgb, var(--text) 8%, transparent);
   color: var(--text);
 }
 
