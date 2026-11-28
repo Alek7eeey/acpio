@@ -1326,16 +1326,30 @@ describe("Board rail folder filter", () => {
 });
 
 describe("Board project rail collapse", () => {
-  // The header's toggle is the rail's only handle: collapsed, the whole column
-  // leaves the layout and the lanes take the width back. jsdom resolves no
-  // media query, so the class the desktop rule hangs on is what is asserted.
-  it("hides the rail while the shell's toggle says collapsed", async () => {
-    useAppStore.setState({ boardRailOpen: false });
-    const { container } = renderBoard();
+  const railOf = (container: HTMLElement) => container.querySelector("aside") as HTMLElement;
+  // Not by name: the phone's action bar carries a "Проекты" button too, and
+  // jsdom applies no stylesheet, so its `display: none` cannot tell them apart.
+  const strip = (container: HTMLElement) =>
+    container.querySelector("[data-board-rail]") as HTMLElement;
 
+  // The strip is the rail's only handle, and it stays when the rail goes —
+  // otherwise a folded rail has no way back. jsdom resolves no media query, so
+  // the class the desktop rule hangs on is what is asserted.
+  it("folds the rail from its strip and unfolds it again", async () => {
+    const { container } = renderBoard();
     await screen.findByText("Fix the login bug");
-    const rail = container.querySelector("aside") as HTMLElement;
-    expect(rail.className).toContain(styles.railHidden);
+    expect(railOf(container).className).not.toContain(styles.railHidden);
+    expect(strip(container).getAttribute("aria-expanded")).toBe("true");
+
+    await userEvent.click(strip(container));
+
+    expect(useAppStore.getState().boardRailOpen).toBe(false);
+    expect(railOf(container).className).toContain(styles.railHidden);
+    expect(strip(container).getAttribute("aria-expanded")).toBe("false");
+
+    await userEvent.click(strip(container));
+
+    expect(railOf(container).className).not.toContain(styles.railHidden);
   });
 
   // Default: the board opens with its projects in sight.
@@ -1343,8 +1357,7 @@ describe("Board project rail collapse", () => {
     const { container } = renderBoard();
 
     await screen.findByText("Fix the login bug");
-    const rail = container.querySelector("aside") as HTMLElement;
-    expect(rail.className).not.toContain(styles.railHidden);
+    expect(railOf(container).className).not.toContain(styles.railHidden);
   });
 });
 

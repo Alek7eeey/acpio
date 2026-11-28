@@ -215,8 +215,6 @@ export function AppShell() {
   const createBoard = useAppStore((s) => s.createBoard);
   const renameBoard = useAppStore((s) => s.renameBoard);
   const setBoardFoldersOpen = useAppStore((s) => s.setBoardFoldersOpen);
-  const boardRailOpen = useAppStore((s) => s.boardRailOpen);
-  const setBoardRailOpen = useAppStore((s) => s.setBoardRailOpen);
   const importHarnessSession = useAppStore((s) => s.importHarnessSession);
   const adapters = useAppStore((s) => s.adapters);
   const agentAvailability = useAppStore((s) => s.agentAvailability);
@@ -1953,28 +1951,6 @@ export function AppShell() {
                   stroke="currentColor"
                   strokeWidth="2"
                   strokeLinecap="round"
-                />
-              </svg>
-            </button>
-          ) : null}
-          {/* The board's left tree is its project rail, drawn by the page — the
-              chat tree above is only one panel of the board's left side. It is
-              a two-state toggle: there is no splitter to drag. */}
-          {isBoard ? (
-            <button
-              type="button"
-              className={`${styles.iconBtn} ${styles.headerTreeBtn}`}
-              aria-label={t("chat.boardProjects")}
-              title={t("chat.boardProjects")}
-              aria-expanded={boardRailOpen}
-              onClick={() => setBoardRailOpen(!boardRailOpen)}
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <path
-                  d="M4 5.5h6l1.6 2H20v11H4z"
-                  stroke="currentColor"
-                  strokeWidth="1.7"
-                  strokeLinejoin="round"
                 />
               </svg>
             </button>

@@ -390,10 +390,10 @@ type AppState = {
   boardFoldersOpen: boolean;
   setBoardFoldersOpen: (open: boolean) => void;
   /**
-   * The board's project rail is on screen. Its toggle sits in the shell header
-   * (the open board's title row, where the chat tree's own toggle lives) while
-   * the rail belongs to the board page — the same split as the folders dialog.
-   * Starts expanded: the board opens with its projects in sight.
+   * The board's project rail is on screen; the strip on its edge is the handle.
+   * It lives here rather than in the page for one reason: the page unmounts when
+   * a card's chat opens, and the reader comes back to the board they left — rail
+   * still folded. Starts expanded: the board opens with its projects in sight.
    */
   boardRailOpen: boolean;
   setBoardRailOpen: (open: boolean) => void;

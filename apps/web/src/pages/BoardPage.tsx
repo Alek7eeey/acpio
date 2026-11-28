@@ -1672,9 +1672,11 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   // opens this page's folders dialog.
   const foldersOpen = useAppStore((s) => s.boardFoldersOpen);
   const setFoldersOpen = useAppStore((s) => s.setBoardFoldersOpen);
-  // The same split again: the rail's collapse toggle lives in the shell header
-  // beside the board's name, the rail itself is this page's.
+  // The rail's fold: its strip is the only handle on it, and the flag outlives
+  // the page — a reader who opens a card's chat comes back to the board they
+  // left, rail still folded.
   const boardRailOpen = useAppStore((s) => s.boardRailOpen);
+  const setBoardRailOpen = useAppStore((s) => s.setBoardRailOpen);
   const boardFilterCwd = useAppStore((s) => s.boardFilterCwd);
   /** The toolbar's heart: the board narrowed to its starred cards. */
   const boardFavoritesOnly = useAppStore((s) => s.boardFavoritesOnly);
@@ -3669,6 +3671,30 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
             </button>
           </div>
         </aside>
+        {/* The rail's edge, in both states: folded, this strip is the only way
+            back, so the chevron stays on screen instead of a button in the
+            header. A phone keeps its bottom sheet and the action bar. */}
+        <button
+          type="button"
+          className={styles.railSplitter}
+          data-board-rail=""
+          aria-label={t("chat.boardProjects")}
+          title={t("chat.boardProjects")}
+          aria-expanded={boardRailOpen}
+          onClick={() => setBoardRailOpen(!boardRailOpen)}
+        >
+          {/* A box the arrow fills: the board's 12px strip has no room for a
+              glyph swimming in a 24-unit square. */}
+          <svg width="9" height="15" viewBox="0 0 9 15" fill="none" aria-hidden>
+            <path
+              d={boardRailOpen ? "M6.6 1.6 2 7.5l4.6 5.9" : "M2.4 1.6 7 7.5l-4.6 5.9"}
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
 
         <div ref={columnsRef} className={styles.columns} onScroll={saveScroll}>
           {boardColumns.map((column) => {
