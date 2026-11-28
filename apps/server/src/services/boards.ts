@@ -27,6 +27,7 @@ function mapColumn(row: BoardColumnRow): BoardColumnDto {
     acceptsPrompt: row.acceptsPrompt,
     instructions: row.instructions ?? "",
     keepOnRun: row.keepOnRun,
+    acceptsNewTasks: row.acceptsNewTasks,
   };
 }
 
@@ -60,6 +61,7 @@ export async function ensureBoardColumns(boardId: string): Promise<void> {
         acceptsPrompt: column.acceptsPrompt,
         instructions: column.instructions,
         keepOnRun: column.keepOnRun,
+        acceptsNewTasks: column.acceptsNewTasks,
       })),
     )
     .onConflictDoNothing();
@@ -455,6 +457,9 @@ export async function addBoardColumn(
     // A lane holds the cards the reader drops in it: a begun turn must not take
     // them back to Wait — the switch in the editor can hand them over instead.
     keepOnRun: true,
+    // A new lane parks what is put in it; writing new tasks there is the
+    // reader's call, made in the lane's own settings.
+    acceptsNewTasks: false,
   });
   const ids = board.columns.map((column) => column.id);
   const at = input.afterId ? ids.indexOf(input.afterId) : -1;
@@ -478,6 +483,7 @@ export async function updateBoardColumn(
     acceptsPrompt?: boolean;
     instructions?: string;
     keepOnRun?: boolean;
+    acceptsNewTasks?: boolean;
   },
 ): Promise<BoardColumnWrite> {
   // A write must reach a board that carries its homes already — an old board
@@ -506,6 +512,11 @@ export async function updateBoardColumn(
         ? { instructions: cleanColumnInstructions(patch.instructions) }
         : {}),
       ...(patch.keepOnRun !== undefined ? { keepOnRun: patch.keepOnRun } : {}),
+      // Writing tasks is a lane's business: a stage home writes none of its own,
+      // so its answer to the question is always no, whatever the body asked.
+      ...(patch.acceptsNewTasks !== undefined && !current.home
+        ? { acceptsNewTasks: patch.acceptsNewTasks }
+        : {}),
     })
     .where(and(eq(boardColumns.boardId, boardId), eq(boardColumns.id, columnId)));
   return { ok: true, board: (await getBoard(boardId))! };

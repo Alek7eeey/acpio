@@ -407,6 +407,7 @@ export const api = {
       acceptsPrompt?: boolean;
       instructions?: string;
       keepOnRun?: boolean;
+      acceptsNewTasks?: boolean;
     },
   ) =>
     request<BoardDto>(`/api/boards/${id}/columns/${columnId}`, {

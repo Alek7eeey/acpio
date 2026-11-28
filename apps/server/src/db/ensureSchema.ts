@@ -217,6 +217,7 @@ export async function ensureSchema() {
       accepts_prompt INTEGER NOT NULL DEFAULT 1,
       instructions TEXT NOT NULL DEFAULT '',
       keep_on_run INTEGER NOT NULL DEFAULT 1,
+      accepts_new_tasks INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
       PRIMARY KEY (board_id, id)
     )
@@ -239,6 +240,15 @@ export async function ensureSchema() {
   // them carries none, which is exactly what the empty default means.
   try {
     db.run(sql`ALTER TABLE board_columns ADD COLUMN instructions TEXT NOT NULL DEFAULT ''`);
+  } catch (err) {
+    if (!isDuplicateColumn(err)) throw err;
+  }
+
+  // A lane starts as a place to park cards, never as a place to write them:
+  // every column written before the switch carries 0 — the form appears in a
+  // lane only once its reader allows it there.
+  try {
+    db.run(sql`ALTER TABLE board_columns ADD COLUMN accepts_new_tasks INTEGER NOT NULL DEFAULT 0`);
   } catch (err) {
     if (!isDuplicateColumn(err)) throw err;
   }

@@ -426,6 +426,104 @@ describe("board columns — instructions of their own", () => {
   });
 });
 
+describe("board columns — a lane that writes tasks", () => {
+  it("keeps the allowance a lane was given, and gives none to a home", async () => {
+    const lane = (await addColumn({ title: "Бэклог" })).columns.find(
+      (c) => c.title === "Бэклог",
+    )!;
+    // A new lane parks what is put in it: writing new tasks there is a switch.
+    expect(lane.acceptsNewTasks).toBe(false);
+
+    const allowed = await app.inject({
+      method: "PATCH",
+      url: `/api/boards/${boardId}/columns/${lane.id}`,
+      payload: { acceptsNewTasks: true },
+    });
+    expect(allowed.statusCode).toBe(200);
+    expect(
+      (allowed.json() as BoardDto).columns.find((c) => c.id === lane.id)!.acceptsNewTasks,
+    ).toBe(true);
+    expect((await board()).columns.find((c) => c.id === lane.id)!.acceptsNewTasks).toBe(true);
+
+    // A stage home writes no tasks of its own — Todo's form belongs to its
+    // project groups — so its answer to the switch stays no.
+    const home = await app.inject({
+      method: "PATCH",
+      url: `/api/boards/${boardId}/columns/todo`,
+      payload: { acceptsNewTasks: true },
+    });
+    expect(home.statusCode).toBe(200);
+    expect(
+      (home.json() as BoardDto).columns.find((c) => c.id === "todo")!.acceptsNewTasks,
+    ).toBe(false);
+  });
+
+  // The task is born in the lane the form was opened in: one write, so the
+  // card never flashes in Todo on its way to its own column.
+  it("creates a task standing in the lane it was written in", async () => {
+    const lane = (await addColumn({ title: "Бэклог" })).columns.find(
+      (c) => c.title === "Бэклог",
+    )!;
+    await app.inject({
+      method: "PUT",
+      url: `/api/boards/${boardId}/folders`,
+      payload: { cwds: ["/p/app"] },
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/sessions",
+      payload: {
+        boardId,
+        cwd: "/p/app",
+        provider: "omp",
+        taskDescription: "Task",
+        boardColumnId: lane.id,
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    const created = res.json() as SessionDto;
+    expect(created.boardColumnId).toBe(lane.id);
+    expect((await card(created.id)).boardColumnId).toBe(lane.id);
+  });
+
+  it("refuses a column of another board, and a column on a plain chat", async () => {
+    const lane = (await addColumn({ title: "Бэклог" })).columns.find(
+      (c) => c.title === "Бэклог",
+    )!;
+    const other = (
+      await app.inject({ method: "POST", url: "/api/boards", payload: { name: "Other" } })
+    ).json() as BoardDto;
+    await app.inject({
+      method: "PUT",
+      url: `/api/boards/${other.id}/folders`,
+      payload: { cwds: ["/p/app"] },
+    });
+    // This board's lane, that board's task: a placement points at a column of
+    // its own board or at nothing.
+    const foreign = await app.inject({
+      method: "POST",
+      url: "/api/sessions",
+      payload: {
+        boardId: other.id,
+        cwd: "/p/app",
+        provider: "omp",
+        taskDescription: "Task",
+        boardColumnId: lane.id,
+      },
+    });
+    expect(foreign.statusCode).toBe(400);
+
+    const chat = await app.inject({
+      method: "POST",
+      url: "/api/sessions",
+      payload: { title: "Chat", provider: "shell", cwd: "/p/app", boardColumnId: "todo" },
+    });
+    expect(chat.statusCode).toBe(200);
+    expect((chat.json() as SessionDto).boardColumnId).toBeNull();
+  });
+});
+
 describe("board columns — the board row carries them", () => {
   it("hands the columns to every reader of the board list", async () => {
     await addColumn({ title: "Ревью" });

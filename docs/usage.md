@@ -216,8 +216,11 @@ something a hand decides. A lane of your own holds its cards: the turn that star
 placement alone, so «Deferred» stays deferred and «In review» never slides back to Wait
 after the agent answers. Switch the lane's **Stays here while the agent runs** off in the
 editor and it becomes a step instead of a place — a begun turn lets go of the placement the
-way a prompt drops the **Done** mark. Deleting a lane sends its cards back to the columns of
-their stages, so nothing is lost.
+way a prompt drops the **Done** mark. A lane of your own writes tasks too: the **New tasks in
+this column** switch gives it the same **+** and the same **Add task** block Todo's project
+groups carry, and the task is born in that lane — its project comes from the rail, from the
+board's only folder, or from the **+**'s own menu when the board holds several. Deleting a lane
+sends its cards back to the columns of their stages, so nothing is lost.
 
 The heart beside the board's name is a filter over the starred cards: the board shows only the
 cards you starred, each standing in its own column — there is no separate list. Its count says

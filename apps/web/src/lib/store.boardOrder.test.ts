@@ -28,6 +28,7 @@ const lane = (id: string, title: string, sortOrder: number): BoardColumnDto => (
   acceptsPrompt: true,
   instructions: "",
   keepOnRun: false,
+  acceptsNewTasks: false,
 });
 
 const board: BoardDto = {

@@ -167,5 +167,10 @@ export const boardColumns = sqliteTable("board_columns", {
   /** 1 — a begun turn leaves the card here (a lane holds what the reader put
    *  in it); 0 — the turn takes it back to the lifecycle. */
   keepOnRun: integer("keep_on_run", { mode: "boolean" }).notNull().default(true),
+  /** 1 — the lane writes new tasks, as Todo's project groups do; 0 — a lane
+   *  holds what was parked in it. A stage home never carries it. */
+  acceptsNewTasks: integer("accepts_new_tasks", { mode: "boolean" })
+    .notNull()
+    .default(false),
   createdAt: createdAt(),
 }, (table) => [primaryKey({ columns: [table.boardId, table.id] })]);

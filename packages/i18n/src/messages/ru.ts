@@ -325,6 +325,7 @@ export const ru = {
     boardColumnInstructionsMark: "Колонка добавляет инструкции к промптам своих карточек",
     boardColumnNote: "[Инструкции колонки «{{name}}»]",
     boardColumnKeepOnRun: "Остаётся на месте, когда агент работает",
+    boardColumnNewTasks: "Новые задачи в колонке",
     boardColumnDelete: "Удалить колонку",
     boardColumnHomeHint: "Колонку стадии удалить нельзя",
     boardColumnSettings: "Настроить колонку",

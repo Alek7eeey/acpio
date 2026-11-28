@@ -32,6 +32,7 @@ function column(patch: Partial<BoardColumnDto>): BoardColumnDto {
     acceptsPrompt: true,
     instructions: "",
     keepOnRun: false,
+    acceptsNewTasks: false,
     ...patch,
   };
 }
@@ -56,6 +57,17 @@ describe("boardColumnsInOrder", () => {
   // the four homes start silent.
   it("starts every home without instructions of its own", () => {
     expect(defaultBoardColumns().map((c) => c.instructions)).toEqual(["", "", "", ""]);
+  });
+
+  // Writing new tasks is a lane's own affair: a stage home's form belongs to
+  // the project groups of Todo, so no home offers one of its own.
+  it("starts every home writing no tasks of its own", () => {
+    expect(defaultBoardColumns().map((c) => c.acceptsNewTasks)).toEqual([
+      false,
+      false,
+      false,
+      false,
+    ]);
   });
 
   it("orders by sortOrder, whatever order the rows arrive in", () => {

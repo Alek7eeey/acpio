@@ -1324,6 +1324,14 @@ export interface BoardColumnDto {
    * only a step back into the workflow can hand its cards over on a turn.
    */
   keepOnRun: boolean;
+  /**
+   * Whether new tasks are written in this lane, the way Todo writes them in
+   * its project groups: the lane offers the "+" and the add-task placeholder,
+   * and the task it creates stands in the lane. Off by default — a lane holds
+   * what the reader parked in it until the reader says work starts here. A
+   * stage home never carries it: Todo's form belongs to its project groups.
+   */
+  acceptsNewTasks: boolean;
 }
 
 /** The one column per stage, in the order the spec's four lanes read in. */
@@ -1357,6 +1365,7 @@ export function defaultBoardColumns(): BoardColumnDto[] {
       acceptsPrompt: false,
       instructions: "",
       keepOnRun: false,
+      acceptsNewTasks: false,
     },
     {
       id: "progress",
@@ -1370,6 +1379,7 @@ export function defaultBoardColumns(): BoardColumnDto[] {
       acceptsPrompt: false,
       instructions: "",
       keepOnRun: false,
+      acceptsNewTasks: false,
     },
     {
       id: "wait",
@@ -1383,6 +1393,7 @@ export function defaultBoardColumns(): BoardColumnDto[] {
       acceptsPrompt: true,
       instructions: "",
       keepOnRun: false,
+      acceptsNewTasks: false,
     },
     {
       id: "done",
@@ -1396,6 +1407,7 @@ export function defaultBoardColumns(): BoardColumnDto[] {
       acceptsPrompt: true,
       instructions: "",
       keepOnRun: false,
+      acceptsNewTasks: false,
     },
   ];
 }

@@ -306,6 +306,10 @@ export async function createSession(input: {
   acpSessionId?: string;
   /** Board partition — set only for tasks created from a board. */
   boardId?: string | null;
+  /** The lane a board task is written in: the form opened in that column, so
+   *  the card stands there from its first paint instead of jumping out of
+   *  Todo a round trip later. */
+  boardColumnId?: string | null;
   /** Task description (card text / first-message prefill) for board tasks. */
   taskDescription?: string | null;
   /** Files a board task is created with — already on the server's disk, so
@@ -348,6 +352,9 @@ export async function createSession(input: {
       ...(Object.keys(pinnedParams).length ? { modelParams: pinnedParams } : {}),
       ...(input.acpSessionId?.trim() ? { acpSessionId: input.acpSessionId.trim() } : {}),
       ...(input.boardId ? { boardId: input.boardId } : {}),
+      ...(input.boardId && input.boardColumnId
+        ? { boardColumnId: input.boardColumnId }
+        : {}),
       ...(input.taskDescription != null ? { taskDescription: input.taskDescription } : {}),
       ...(input.taskAttachments?.length
         ? { taskAttachments: input.taskAttachments.slice(0, MAX_TASK_ATTACHMENTS) }

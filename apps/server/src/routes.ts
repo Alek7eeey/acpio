@@ -1425,6 +1425,8 @@ export async function registerRoutes(app: FastifyInstance) {
       // The column's own instructions; `""` is a column that adds nothing.
       instructions: z.string().max(BOARD_COLUMN_INSTRUCTIONS_MAX).optional(),
       keepOnRun: z.boolean().optional(),
+      // Whether the lane writes new tasks, the way Todo's groups do.
+      acceptsNewTasks: z.boolean().optional(),
     })
     .strict();
   app.post("/api/boards/:id/columns", async (req, reply) => {
@@ -1658,6 +1660,9 @@ export async function registerRoutes(app: FastifyInstance) {
           )
           .max(8)
           .optional(),
+        /** The lane a new task is written in (a board task only): the card
+         *  stands there from its first paint instead of jumping out of Todo. */
+        boardColumnId: z.string().min(1).max(64).optional(),
       })
       .parse(req.body ?? {});
     const settings = await getSettings();
@@ -1680,6 +1685,9 @@ export async function registerRoutes(app: FastifyInstance) {
       if (!(await boardAcceptsCwd(body.boardId, cwd))) {
         return reply.code(400).send({ error: "unknownBoardFolder" });
       }
+      if (body.boardColumnId && !(await boardHasColumn(body.boardId, body.boardColumnId))) {
+        return reply.code(400).send({ error: "unknownBoardColumn" });
+      }
     } else if (!isShellSession(provider) && harnessRefusesWork(provider, settings)) {
       return sendAgentOffline(req, reply);
     }
@@ -1693,6 +1701,7 @@ export async function registerRoutes(app: FastifyInstance) {
       model: body.model,
       modelParams: body.modelParams,
       boardId: body.boardId ?? null,
+      boardColumnId: body.boardColumnId ?? null,
       taskDescription: body.taskDescription ?? null,
       // Files picked from the server's own filesystem ride the same way
       // uploaded ones do: on the task, carried by its first turn whenever it

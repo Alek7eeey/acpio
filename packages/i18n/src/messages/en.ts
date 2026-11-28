@@ -306,6 +306,7 @@ export const en = {
     boardColumnInstructionsMark: "This column adds instructions to its cards' turns",
     boardColumnNote: "[Column “{{name}}” instructions]",
     boardColumnKeepOnRun: "Stays here while the agent runs",
+    boardColumnNewTasks: "New tasks in this column",
     boardColumnDelete: "Delete column",
     boardColumnHomeHint: "A stage column cannot be deleted",
     boardColumnSettings: "Configure column",

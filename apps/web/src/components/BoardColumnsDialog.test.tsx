@@ -29,6 +29,7 @@ const review: BoardColumnDto = {
   acceptsPrompt: true,
   instructions: "",
   keepOnRun: false,
+  acceptsNewTasks: false,
 };
 
 const board: BoardDto = {
@@ -118,7 +119,7 @@ describe("BoardColumnsDialog", () => {
 
     await userEvent.click(container.querySelector('[data-column-id="col-review"]') as HTMLElement);
     expect(settings().querySelectorAll("select").length).toBe(1);
-    expect(settings().querySelectorAll("input[type='checkbox']").length).toBe(2);
+    expect(settings().querySelectorAll("input[type='checkbox']").length).toBe(3);
 
     const addBox = container.querySelector("[data-new-column-title]")!.parentElement!;
     expect(addBox.querySelectorAll("select").length).toBe(0);
@@ -194,6 +195,43 @@ describe("BoardColumnsDialog", () => {
     fireEvent.blur(field());
     expect(apiMock.updateBoardColumn).toHaveBeenLastCalledWith("b1", "col-review", {
       instructions: "",
+    });
+  });
+
+  // A lane may be where work is written, the way Todo's project groups are:
+  // the switch lives with the lane's other behavior and writes that column.
+  it("allows a lane to write new tasks, and takes the allowance back", async () => {
+    const { container } = renderDialog();
+    const field = () =>
+      container.querySelector("[data-new-tasks-field] input") as HTMLInputElement;
+
+    // The editor opens on Todo, a home: no lane's form to offer there.
+    expect(container.querySelector("[data-new-tasks-field]")).toBeNull();
+
+    await userEvent.click(container.querySelector('[data-column-id="col-review"]') as HTMLElement);
+    expect(field().checked).toBe(false);
+    await userEvent.click(field());
+    expect(apiMock.updateBoardColumn).toHaveBeenCalledWith("b1", "col-review", {
+      acceptsNewTasks: true,
+    });
+
+    useAppStore.setState({
+      boards: [
+        {
+          ...board,
+          columns: [...defaultBoardColumns(), { ...review, acceptsNewTasks: true }],
+        },
+      ],
+    });
+    const allowed = renderDialog();
+    await userEvent.click(
+      allowed.container.querySelector('[data-column-id="col-review"]') as HTMLElement,
+    );
+    const on = allowed.container.querySelector("[data-new-tasks-field] input") as HTMLInputElement;
+    expect(on.checked).toBe(true);
+    await userEvent.click(on);
+    expect(apiMock.updateBoardColumn).toHaveBeenLastCalledWith("b1", "col-review", {
+      acceptsNewTasks: false,
     });
   });
 

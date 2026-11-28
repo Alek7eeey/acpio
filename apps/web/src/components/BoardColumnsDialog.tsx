@@ -373,18 +373,35 @@ export function BoardColumnsDialog({
                 <span>{t("chat.boardColumnPrompt")}</span>
               </label>
               {selected.home ? null : (
-                <label className={styles.toggle}>
-                  <input
-                    type="checkbox"
-                    checked={selected.keepOnRun}
-                    onChange={(e) =>
-                      void updateBoardColumn(board.id, selected.id, {
-                        keepOnRun: e.target.checked,
-                      })
-                    }
-                  />
-                  <span>{t("chat.boardColumnKeepOnRun")}</span>
-                </label>
+                <>
+                  {/* A lane may be where work is written, not only where it is
+                      parked: switched on, it offers the same "+" and the same
+                      form Todo's project groups do. */}
+                  <label className={styles.toggle} data-new-tasks-field="">
+                    <input
+                      type="checkbox"
+                      checked={selected.acceptsNewTasks}
+                      onChange={(e) =>
+                        void updateBoardColumn(board.id, selected.id, {
+                          acceptsNewTasks: e.target.checked,
+                        })
+                      }
+                    />
+                    <span>{t("chat.boardColumnNewTasks")}</span>
+                  </label>
+                  <label className={styles.toggle}>
+                    <input
+                      type="checkbox"
+                      checked={selected.keepOnRun}
+                      onChange={(e) =>
+                        void updateBoardColumn(board.id, selected.id, {
+                          keepOnRun: e.target.checked,
+                        })
+                      }
+                    />
+                    <span>{t("chat.boardColumnKeepOnRun")}</span>
+                  </label>
+                </>
               )}
             </div>
 

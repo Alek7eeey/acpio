@@ -451,6 +451,20 @@ describe("BoardPage custom columns", () => {
     acceptsPrompt: true,
     instructions: "",
     keepOnRun: false,
+    acceptsNewTasks: false,
+  };
+
+  /** A lane that writes new tasks, the way Todo's project groups do. */
+  const writing: BoardColumnDto = { ...review, acceptsNewTasks: true };
+
+  /** The lane's own strip on the board, once it is rendered. */
+  const laneOf = async (container: HTMLElement, id: string) => {
+    const lane = await waitFor(() => {
+      const el = container.querySelector(`[data-column="${id}"]`) as HTMLElement | null;
+      expect(el).toBeTruthy();
+      return el!;
+    });
+    return lane;
   };
 
   const finishedTask: SessionDto = {
@@ -460,6 +474,95 @@ describe("BoardPage custom columns", () => {
     taskDescription: "Finished task",
     startedAt: "2026-09-20T10:06:00.000Z",
   };
+
+  // A lane may be where work is written: the switch in its settings gives it
+  // the same "+" and the same form Todo's project groups write with, and the
+  // card is born in the lane rather than flashing in Todo first.
+  it("writes a new task in the lane that allows it, and the card is born there", async () => {
+    useAppStore.setState({
+      boards: [{ ...board, columns: [...defaultBoardColumns(), writing] }],
+      boardSessions: [],
+    });
+    const { container } = renderBoard();
+    const lane = await laneOf(container, "col-review");
+
+    await userEvent.click(within(lane).getByRole("button", { name: "New task" }));
+    const form = lane.querySelector("[data-column-form]") as HTMLElement;
+    expect(form).toBeTruthy();
+    // The project the card will belong to is on the form: a lane holds every
+    // project's cards and a task owns exactly one.
+    expect(within(form).getByText("app")).toBeTruthy();
+
+    await userEvent.type(
+      within(form).getByPlaceholderText("Describe the task…"),
+      "Ship the review",
+    );
+    await userEvent.click(within(form).getByRole("button", { name: "Create" }));
+
+    await waitFor(() =>
+      expect(apiMock.createSession).toHaveBeenCalledWith(
+        expect.objectContaining({ boardColumnId: "col-review", cwd: "/projects/app" }),
+      ),
+    );
+    // The card stands where it was written — no round trip through Todo.
+    await waitFor(() => expect(lane.querySelector('[data-task-id="t2"]')).toBeTruthy());
+    expect(container.querySelector('[data-column="todo"] [data-task-id="t2"]')).toBeNull();
+  });
+
+  // A lane that was not allowed to write keeps holding only what was put in
+  // it: no "+", no placeholder, no form.
+  it("offers no form in a lane that does not allow writing", async () => {
+    useAppStore.setState({
+      boards: [{ ...board, columns: [...defaultBoardColumns(), review] }],
+      boardSessions: [],
+    });
+    const { container } = renderBoard();
+    const lane = await laneOf(container, "col-review");
+
+    expect(lane.querySelector("[data-column-add]")).toBeNull();
+    expect(within(lane).queryByRole("button", { name: "Add task" })).toBeNull();
+    expect(within(lane).queryByPlaceholderText("Describe the task…")).toBeNull();
+  });
+
+  // A task belongs to a project, and a lane holds every project's cards: with
+  // more than one on the board and none narrowed to, the "+" asks which one
+  // before it opens a form that would have to guess.
+  it("asks which project a card is written for when the board holds several", async () => {
+    useAppStore.setState({
+      boards: [
+        {
+          ...board,
+          folders: ["/projects/app", "/projects/site"],
+          columns: [...defaultBoardColumns(), writing],
+        },
+      ],
+      boardSessions: [],
+    });
+    const { container } = renderBoard();
+    const lane = await laneOf(container, "col-review");
+
+    await userEvent.click(within(lane).getByRole("button", { name: "New task" }));
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).getAllByRole("menuitem").map((el) => el.textContent)).toEqual([
+      "app",
+      "site",
+    ]);
+    await userEvent.click(within(menu).getByRole("menuitem", { name: "site" }));
+
+    const form = lane.querySelector("[data-column-form]") as HTMLElement;
+    expect(within(form).getByText("site")).toBeTruthy();
+    await userEvent.type(
+      within(form).getByPlaceholderText("Describe the task…"),
+      "Take the site",
+    );
+    await userEvent.click(within(form).getByRole("button", { name: "Create" }));
+
+    await waitFor(() =>
+      expect(apiMock.createSession).toHaveBeenCalledWith(
+        expect.objectContaining({ boardColumnId: "col-review", cwd: "/projects/site" }),
+      ),
+    );
+  });
 
   it("renders a lane the reader added and keeps the card standing in it", async () => {
     useAppStore.setState({

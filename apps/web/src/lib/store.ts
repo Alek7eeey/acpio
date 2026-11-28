@@ -298,6 +298,7 @@ type AppState = {
       acceptsPrompt?: boolean;
       instructions?: string;
       keepOnRun?: boolean;
+      acceptsNewTasks?: boolean;
     },
   ) => Promise<void>;
   deleteBoardColumn: (id: string, columnId: string) => Promise<void>;
@@ -311,6 +312,8 @@ type AppState = {
     boardId: string;
     cwd: string;
     description: string;
+    /** The lane the form opened in: the card is born standing there. */
+    columnId?: string | null;
     /** Pre-start agent pick — a board task may be created for a chosen agent. */
     provider?: AgentProvider;
     /** Model the task's first turn boots on (the form's model pick). */
@@ -2336,12 +2339,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       // server offline — keep the current list
     }
   },
-  createBoardTask: async ({ boardId, cwd, description, provider, model, modelParams, files, attachments }) => {
+  createBoardTask: async ({ boardId, cwd, columnId, description, provider, model, modelParams, files, attachments }) => {
     try {
       const title = titleFromTaskDescription(description);
       const task = await api.createSession({
         boardId,
         cwd,
+        ...(columnId ? { boardColumnId: columnId } : {}),
         taskDescription: description,
         ...(provider ? { provider } : {}),
         ...(model ? { model } : {}),

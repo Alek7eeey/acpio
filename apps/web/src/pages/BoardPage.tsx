@@ -122,14 +122,21 @@ const LANE_LOAD_AHEAD = 240;
 const LANE_CARD_HEIGHT = 96;
 
 /**
- * The folder whose new-task form a board was left with. The form itself dies
- * with the page, so without this a trip to a task's chat and back shows an
- * empty lane with the half-written task nowhere in sight. In-memory like the
- * reading positions above; the text itself is the composer draft keyed by
- * `boardTaskDraftKey`, which outlives the form the way a chat's draft outlives
- * its pane.
+ * The new-task form a board was left with — its folder and, when it was written
+ * in a lane of the reader's own, that lane. The form itself dies with the page,
+ * so without this a trip to a task's chat and back shows an empty lane with the
+ * half-written task nowhere in sight. In-memory like the reading positions
+ * above; the text itself is the composer draft keyed by `boardTaskDraftKey`,
+ * which outlives the form the way a chat's draft outlives its pane.
  */
-const composerCwdByBoard: Record<string, string> = {};
+const composerFormByBoard: Record<string, NewTaskForm> = {};
+
+/**
+ * Where a new task is being written: the project folder it belongs to and the
+ * lane it will stand in — `null` for Todo's project group, the one place that
+ * writes without a lane of its own.
+ */
+type NewTaskForm = { cwd: string; columnId: string | null };
 
 /** Where a board folder's new-task text lives between visits — one per folder. */
 function boardTaskDraftKey(boardId: string | undefined, cwd: string): string {
@@ -1716,12 +1723,16 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
     setFilterCwdState(cwd);
     if (boardId) setBoardFilterCwd(boardId, cwd);
   };
-  const [addingCwd, setAddingCwd] = useState<string | null>(() => {
+  const [newTaskForm, setNewTaskForm] = useState<NewTaskForm | null>(() => {
     // The form the board was left with comes back — but only because its text
     // did: an empty form is nothing to come back to.
-    const left = boardId ? composerCwdByBoard[boardId] : undefined;
-    return left && readComposerDraft(boardTaskDraftKey(boardId, left)) ? left : null;
+    const left = boardId ? composerFormByBoard[boardId] : undefined;
+    return left && readComposerDraft(boardTaskDraftKey(boardId, left.cwd)) ? left : null;
   });
+  /** The lane whose "+" is asking which project the new card belongs to. */
+  const [laneMenu, setLaneMenu] = useState<{ x: number; y: number; columnId: string } | null>(
+    null,
+  );
   const [draft, setDraft] = useState("");
   /** Agent the form's picker shows; empty = the default agent of the settings. */
   const [draftProvider, setDraftProvider] = useState<AgentProvider | "">("");
@@ -1907,7 +1918,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
    */
   const closeNewTask = useCallback(() => {
     composerDirtyRef.current = false;
-    setAddingCwd(null);
+    setNewTaskForm(null);
     setComposerEpoch((epoch) => epoch + 1);
   }, []);
 
@@ -1918,16 +1929,37 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
    * An empty form gives way to the one asked for, as before.
    */
   const openComposer = useCallback(
-    (cwd: string) => {
+    (cwd: string, columnId: string | null = null) => {
       if (composerDirtyRef.current) {
         composerInputRef.current?.focus();
         return;
       }
       closeNewTask();
-      setAddingCwd(cwd);
+      setNewTaskForm({ cwd, columnId });
     },
     [closeNewTask],
   );
+
+  /**
+   * The new-task form in a lane of the reader's own. A task belongs to a
+   * project, and a lane holds every project's cards, so the folder is the one
+   * the rail narrows the board to, the board's only folder — or the reader's
+   * pick, offered as a menu on the lane's "+".
+   */
+  const openLaneComposer = (e: React.MouseEvent<HTMLElement>, columnId: string) => {
+    const folders = board?.folders ?? [];
+    // The rail's narrowing only names a project while that project is the
+    // board's own: a card of a folder the board dropped cannot be created.
+    const narrowed = filterCwd && folders.includes(filterCwd) ? filterCwd : null;
+    const only = narrowed ?? (folders.length === 1 ? folders[0]! : null);
+    if (only) {
+      openComposer(only, columnId);
+      return;
+    }
+    if (!folders.length) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    setLaneMenu({ x: rect.left, y: rect.bottom + 4, columnId });
+  };
 
   /** Tasks arrive over the network; the position waits for this board's list. */
   const [tasksReady, setTasksReady] = useState(false);
@@ -2059,15 +2091,16 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   // Each form starts on the default agent instead of the last agent picked.
   useEffect(() => {
     setDraftProvider("");
-  }, [addingCwd]);
+  }, [newTaskForm]);
 
   // A form left open is part of where the reader was: the board remembers the
-  // folder it belongs to, and its text waits in that folder's composer draft.
+  // folder (and the lane) it belongs to, and its text waits in that folder's
+  // composer draft.
   useEffect(() => {
     if (!boardId) return;
-    if (addingCwd) composerCwdByBoard[boardId] = addingCwd;
-    else delete composerCwdByBoard[boardId];
-  }, [addingCwd, boardId]);
+    if (newTaskForm) composerFormByBoard[boardId] = newTaskForm;
+    else delete composerFormByBoard[boardId];
+  }, [newTaskForm, boardId]);
 
   /**
    * The new-task form belongs to its group, not to the screen: a press anywhere
@@ -2078,7 +2111,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
    * The lane's placeholder opens the same form again with one click.
    */
   useEffect(() => {
-    if (!addingCwd) return;
+    if (!newTaskForm) return;
     const onDown = (e: MouseEvent) => {
       const target = e.target as Node;
       if (composerBoxRef.current?.contains(target)) return;
@@ -2096,7 +2129,27 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
     };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
-  }, [addingCwd]);
+  }, [newTaskForm]);
+
+  // The lane's project menu is a press away from the form it opens: a press
+  // outside it (or Escape) is a reader who changed their mind.
+  useEffect(() => {
+    if (!laneMenu) return;
+    const onDown = (event: globalThis.MouseEvent) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest('[role="menu"]')) return;
+      setLaneMenu(null);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setLaneMenu(null);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [laneMenu]);
 
   /**
    * The card editor and the quick-prompt form belong to their card, exactly
@@ -2200,6 +2253,28 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   );
   /** The Todo home: the lane that groups by project and feeds the folder queue. */
   const todoColumnId = boardColumnHome(boardColumns, "todo")?.id ?? "todo";
+
+  /**
+   * The lane the open new-task form stands in, `null` for Todo's project
+   * group. A column the board no longer has (deleted in another tab) falls
+   * back to the group of its folder: the half-written task must not vanish
+   * with a lane.
+   */
+  const laneFormId =
+    newTaskForm?.columnId && columnById.has(newTaskForm.columnId) ? newTaskForm.columnId : null;
+
+  /**
+   * Whether a lane may write tasks at all: a task belongs to a project of the
+   * board, so a board that has no folder yet has nowhere to put one.
+   */
+  const laneWritesTasks = (board?.folders.length ?? 0) > 0;
+
+  // A lane's form is written at the top of the lane: one scrolled to its end
+  // would otherwise open the form above the reader's view.
+  useLayoutEffect(() => {
+    const lane = laneFormId ? columnRefs.current.get(laneFormId) : null;
+    if (lane) lane.scrollTop = 0;
+  }, [laneFormId]);
 
   /**
    * The cards the board shows: all of them, or only the starred ones while the
@@ -2393,6 +2468,10 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
       const provider = taskAgentPicker ? rawProvider || defaultTaskProvider : null;
       setCreating(true);
       const created = await createBoardTask({ boardId, cwd, description,
+        // The lane the form was opened in travels with the creation itself, so
+        // the card is born standing there — a placement written after it would
+        // show the card in Todo for a round trip first.
+        columnId: laneFormId ?? null,
         ...(provider ? { provider } : {}),
         ...(taskModelPicker && rawModel ? { model: rawModel } : {}),
         ...(taskEffortPicker && Object.keys(modelParams).length ? { modelParams } : {}),
@@ -2425,12 +2504,92 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
       createBoardTask,
       creating,
       defaultTaskProvider,
+      laneFormId,
       newTaskMode,
       setComposerMode,
       taskAgentPicker,
       taskEffortPicker,
       taskModelPicker,
     ],
+  );
+
+  /**
+   * The board's new-task form, wherever it opens: Todo's project group, or a
+   * lane the reader allowed to write tasks. It is the same form either way —
+   * one draft per folder, the same agent and model picks — and only the place
+   * the card is born in differs.
+   */
+  const renderNewTaskForm = (cwd: string, key: string) => (
+    <NewTaskComposer
+      key={`${key}:${composerEpoch}`}
+      cwd={cwd}
+      busy={creating}
+      boxRef={composerBoxRef}
+      inputRef={composerInputRef}
+      dirtyRef={composerDirtyRef}
+      onSubmit={submitNewTask}
+      agentOptions={agentOptions}
+      showAgentPicker={taskAgentPicker}
+      showModelPicker={taskModelPicker}
+      showModelParams={taskEffortPicker}
+      defaultProvider={defaultTaskProvider}
+      attachSource={attachDefaultSource}
+      draftKey={boardTaskDraftKey(boardId, cwd)}
+      submitLabel={t("common.create")}
+      modePicker={{ value: newTaskMode, onChange: setNewTaskMode }}
+      // The prompt's mode is picked while the prompt is written: this form is
+      // where a task is formed. The chat's field wears this pill only when a
+      // mode is in force: agent is the absence of one, and a row that says
+      // «Агент» reads like a harness pick that is not there. The empty field's
+      // right click is where the modes are chosen.
+      modeChip={
+        newTaskMode === "agent" ? undefined : (
+          <span
+            className={styles.modeChip}
+            data-composer-mode={newTaskMode}
+            title={`${t(COMPOSER_MODE_LABEL_KEY[newTaskMode])} · ${t("chat.modeShiftHint")}`}
+          >
+            <button
+              type="button"
+              className={styles.modeChipLabel}
+              aria-haspopup="menu"
+              onClick={(e) => {
+                const rect = e.currentTarget.getBoundingClientRect();
+                setNewTaskModeMenu({
+                  x: rect.left,
+                  bottom: window.innerHeight - rect.top + 6,
+                });
+              }}
+            >
+              <span className={styles.modeDot} data-composer-mode={newTaskMode} aria-hidden />
+              {t(COMPOSER_MODE_LABEL_KEY[newTaskMode])}
+            </button>
+            <button
+              type="button"
+              className={styles.modeChipExit}
+              aria-label={t("chat.modeExit")}
+              title={t("chat.modeExit")}
+              onClick={() => setNewTaskMode("agent")}
+            >
+              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path
+                  d="M6 6l12 12M18 6 6 18"
+                  stroke="currentColor"
+                  strokeWidth="2.8"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </button>
+          </span>
+        )
+      }
+      onCancel={() => {
+        // Cancel is the way out of a half-written task: the form goes, and so
+        // does its text.
+        setComposerDraft(boardTaskDraftKey(boardId, cwd), "");
+        closeNewTask();
+      }}
+    />
   );
 
   /**
@@ -3089,7 +3248,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
     setFoldersOpen(false);
     setRailOpen(false);
     setFilterCwd(cwd);
-    setAddingCwd(cwd);
+    setNewTaskForm({ cwd, columnId: null });
     setDraft("");
   };
 
@@ -3655,7 +3814,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                     aria-label={t("chat.boardAddTask")}
                     onClick={() => {
                       setFilterCwd(group.cwd);
-                      setAddingCwd(group.cwd);
+                      setNewTaskForm({ cwd: group.cwd, columnId: null });
                       setRailOpen(false);
                     }}
                     onContextMenu={(e) => openTaskPicker(e, group.cwd)}
@@ -3781,6 +3940,32 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                     </span>
                   ) : null}
                   <span className={styles.columnCount}>{cards.length}</span>
+                  {/* A lane the reader allows to write tasks offers the same
+                      "+" Todo's project groups do. */}
+                  {column.acceptsNewTasks && laneWritesTasks ? (
+                    <>
+                      <span className={styles.groupSpacer} />
+                      <button
+                        type="button"
+                        className={styles.iconBtn}
+                        data-column-add=""
+                        // No right click here: an empty chat belongs to a
+                        // folder's "+", and this one already asks the project.
+                        title={t("chat.boardAddTask")}
+                        aria-label={t("chat.boardAddTask")}
+                        onClick={(e) => openLaneComposer(e, column.id)}
+                      >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
+                          <path
+                            d="M12 5v14M5 12h14"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                          />
+                        </svg>
+                      </button>
+                    </>
+                  ) : null}
                 </div>
                 <div
                   ref={(el) => {
@@ -3796,6 +3981,37 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                     growLane(column.id, e.currentTarget, cards.length);
                   }}
                 >
+                  {/* The lane's own new-task form: the same form Todo writes
+                      with, in the lane the reader allowed. It sits under the
+                      project the card will belong to, because a lane holds
+                      every project's cards and a task owns exactly one. */}
+                  {laneFormId === column.id && newTaskForm ? (
+                    <div className={styles.group} data-column-form={column.id}>
+                      <div className={styles.groupHead}>
+                        <span className={styles.groupName} title={newTaskForm.cwd}>
+                          {folderLabel(newTaskForm.cwd, newTaskForm.cwd)}
+                        </span>
+                        {renderFolderTag(newTaskForm.cwd, "lane")}
+                      </div>
+                      {renderNewTaskForm(newTaskForm.cwd, column.id)}
+                    </div>
+                  ) : !isTodo &&
+                    column.acceptsNewTasks &&
+                    laneWritesTasks &&
+                    boardAddCardStyle !== "hidden" ? (
+                    <button
+                      type="button"
+                      className={
+                        boardAddCardStyle === "compact"
+                          ? `${styles.addCard} ${styles.addCardCompact}`
+                          : styles.addCard
+                      }
+                      title={t("chat.boardAddTaskCard")}
+                      onClick={(e) => openLaneComposer(e, column.id)}
+                    >
+                      {t("chat.boardAddTaskCard")}
+                    </button>
+                  ) : null}
                   {isTodo
                     ? visibleGroups.map((group, groupIndex) => (
                         <div key={group.cwd} className={styles.group} data-group={group.cwd}>
@@ -3888,91 +4104,8 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                               </button>
                             </span>
                           </div>
-                          {addingCwd === group.cwd ? (
-                            <NewTaskComposer
-                              key={`${group.cwd}:${composerEpoch}`}
-                              cwd={group.cwd}
-                              busy={creating}
-                              boxRef={composerBoxRef}
-                              inputRef={composerInputRef}
-                              dirtyRef={composerDirtyRef}
-                              onSubmit={submitNewTask}
-                              agentOptions={agentOptions}
-                              showAgentPicker={taskAgentPicker}
-                              showModelPicker={taskModelPicker}
-                              showModelParams={taskEffortPicker}
-                              defaultProvider={defaultTaskProvider}
-                              attachSource={attachDefaultSource}
-                              draftKey={boardTaskDraftKey(boardId, group.cwd)}
-                              submitLabel={t("common.create")}
-                              modePicker={{ value: newTaskMode, onChange: setNewTaskMode }}
-                              // The prompt's mode is picked while the prompt is
-                              // written: this form is where a task is formed.
-                              // The chat's field wears this pill only when a mode
-                              // is in force: agent is the absence of one, and a
-                              // row that says «Агент» reads like a harness pick
-                              // that is not there. The empty field's right click
-                              // is where the modes are chosen.
-                              modeChip={
-                                newTaskMode === "agent" ? undefined : (
-                                  <span
-                                    className={styles.modeChip}
-                                    data-composer-mode={newTaskMode}
-                                    title={`${t(COMPOSER_MODE_LABEL_KEY[newTaskMode])} · ${t(
-                                      "chat.modeShiftHint",
-                                    )}`}
-                                  >
-                                    <button
-                                      type="button"
-                                      className={styles.modeChipLabel}
-                                      aria-haspopup="menu"
-                                      onClick={(e) => {
-                                        const rect = e.currentTarget.getBoundingClientRect();
-                                        setNewTaskModeMenu({
-                                          x: rect.left,
-                                          bottom: window.innerHeight - rect.top + 6,
-                                        });
-                                      }}
-                                    >
-                                      <span
-                                        className={styles.modeDot}
-                                        data-composer-mode={newTaskMode}
-                                        aria-hidden
-                                      />
-                                      {t(COMPOSER_MODE_LABEL_KEY[newTaskMode])}
-                                    </button>
-                                    <button
-                                      type="button"
-                                      className={styles.modeChipExit}
-                                      aria-label={t("chat.modeExit")}
-                                      title={t("chat.modeExit")}
-                                      onClick={() => setNewTaskMode("agent")}
-                                    >
-                                      <svg
-                                        width="9"
-                                        height="9"
-                                        viewBox="0 0 24 24"
-                                        fill="none"
-                                        aria-hidden
-                                      >
-                                        <path
-                                          d="M6 6l12 12M18 6 6 18"
-                                          stroke="currentColor"
-                                          strokeWidth="2.8"
-                                          strokeLinecap="round"
-                                        />
-                                      </svg>
-                                    </button>
-                                  </span>
-                                )
-                              }
-                              onCancel={() => {
-                                // Cancel is the way out of a half-written task:
-                                // the form goes, and so does its text.
-                                setComposerDraft(boardTaskDraftKey(boardId, group.cwd), "");
-                                closeNewTask();
-                              }}
-                            />
+                          {newTaskForm?.cwd === group.cwd && !laneFormId ? (
+                            renderNewTaskForm(group.cwd, group.cwd)
                           ) : boardAddCardStyle !== "hidden" ? (
                             <button
                               type="button"
@@ -4530,6 +4663,45 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                 <span className={styles.switchKnob} />
               </span>
             </button>
+          </div>,
+          document.body,
+        )}
+
+      {/* A lane's "+" asks which project the new card belongs to: a task owns
+          exactly one, and the lane holds them all. The pick opens the form in
+          that folder — the lane it stands in is already known. */}
+      {laneMenu &&
+        createPortal(
+          <div
+            className={styles.menu}
+            style={{ left: laneMenu.x, top: laneMenu.y }}
+            role="menu"
+            aria-label={t("chat.boardAddTask")}
+          >
+            {(board?.folders ?? []).map((cwd) => (
+              <button
+                key={cwd}
+                type="button"
+                role="menuitem"
+                className={styles.menuItem}
+                title={cwd}
+                onClick={() => {
+                  const columnId = laneMenu.columnId;
+                  setLaneMenu(null);
+                  openComposer(cwd, columnId);
+                }}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path
+                    d="M3.5 6.5h6l1.6 2h9.4v9.5a1.5 1.5 0 0 1-1.5 1.5H5a1.5 1.5 0 0 1-1.5-1.5V6.5Z"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                {folderLabel(cwd, cwd)}
+              </button>
+            ))}
           </div>,
           document.body,
         )}
