@@ -5065,8 +5065,8 @@ function ChatThread() {
   const messageEndRef = useRef<HTMLDivElement>(null);
   const userJustSentRef = useRef(false);
   const keepComposerFocus = useRef(false);
-  /** After selecting/creating a chat, focus the composer once it is empty+ready. */
-  const pendingEmptyChatFocusRef = useRef(false);
+  /** Entering a chat puts the caret in its composer, once that input is laid out. */
+  const pendingChatFocusRef = useRef(false);
   const paramsCacheRef = useRef(new Map<string, ModelParamDto[]>());
   const paramsInflightRef = useRef(new Map<string, Promise<ModelParamDto[]>>());
   const modelRef = useRef(model);
@@ -8023,33 +8023,45 @@ function ChatThread() {
     if (pinSettleTimerRef.current) window.clearTimeout(pinSettleTimerRef.current);
     pinSettleTimerRef.current = 0;
     if (!shouldAutoFocusComposer()) {
-      pendingEmptyChatFocusRef.current = false;
+      pendingChatFocusRef.current = false;
       textareaRef.current?.blur();
     } else if (keepComposerFocus.current) {
-      pendingEmptyChatFocusRef.current = false;
+      pendingChatFocusRef.current = false;
       focusComposer();
+    } else if (bind && !bind.focused) {
+      // Another pane's chat: the caret is that pane's business, not this one's.
+      pendingChatFocusRef.current = false;
     } else {
-      // New chat / empty session: focus after the centered composer mounts.
-      pendingEmptyChatFocusRef.current = Boolean(storeActiveSessionId);
+      // The reader came here to write, so the caret belongs in the input — an
+      // empty chat's centred composer and one with a history under it alike.
+      pendingChatFocusRef.current = Boolean(storeActiveSessionId);
     }
   }, [storeActiveSessionId]);
 
   useEffect(() => {
-    if (!pendingEmptyChatFocusRef.current) return;
+    if (!pendingChatFocusRef.current) return;
     if (useAppStore.getState().consoleOpen) {
-      pendingEmptyChatFocusRef.current = false;
+      pendingChatFocusRef.current = false;
       return;
     }
-    if (!storeActiveSessionId || !isEmptyChat) {
-      pendingEmptyChatFocusRef.current = false;
+    if (!storeActiveSessionId) {
+      pendingChatFocusRef.current = false;
       return;
     }
-    if (!emptyReady || composerHeld) return;
-    pendingEmptyChatFocusRef.current = false;
+    // Wait for the input itself: the skeleton keeps the composer out of the
+    // layout, and an empty chat's centred one is only ready a moment later.
+    if (composerHeld) return;
+    if (isEmptyChat && !emptyReady) return;
+    pendingChatFocusRef.current = false;
     const id = storeActiveSessionId;
     const focus = () => {
-      if (useAppStore.getState().activeSessionId !== id) return;
-      if (useAppStore.getState().consoleOpen) return;
+      const state = useAppStore.getState();
+      if (state.activeSessionId !== id) return;
+      if (state.consoleOpen) return;
+      // A card waiting for an answer (a permission, a question, a plan) owns the
+      // keyboard: the caret would take the reader's next arrow or Enter with it.
+      const parked = state.pendingQuestion ?? state.pendingPermission;
+      if (parked && parked.sessionId === id) return;
       focusComposer();
     };
     const raf = window.requestAnimationFrame(focus);
