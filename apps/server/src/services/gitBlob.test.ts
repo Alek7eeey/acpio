@@ -11,34 +11,38 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
+/** An identity for the throwaway repository. A bare runner has none, and a
+ *  commit that silently did not happen reads a few lines down as "HEAD has no
+ *  such file" — the wrong diagnosis, in a test about bytes. */
+const GIT_IDENT = {
+  GIT_AUTHOR_NAME: "Test",
+  GIT_AUTHOR_EMAIL: "test@example.com",
+  GIT_COMMITTER_NAME: "Test",
+  GIT_COMMITTER_EMAIL: "test@example.com",
+};
+
+/** Runs git in `dir` and hands back its stdout; a non-zero exit throws. */
+function gitIn(dir: string, args: string[]): string {
+  const result = spawnSync("git", args, {
+    cwd: dir,
+    encoding: "utf8",
+    env: { ...process.env, ...GIT_IDENT },
+  });
+  if (result.status !== 0) throw new Error(result.stderr || `git ${args.join(" ")} failed`);
+  return result.stdout;
+}
+
 /** A repository with one commit behind it, so HEAD and the disk can differ. */
 function repo(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "acpio-git-blob-"));
   dirs.push(dir);
-  const git = (args: string[]) => {
-    const result = spawnSync("git", args, {
-      cwd: dir,
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        GIT_AUTHOR_NAME: "Test",
-        GIT_AUTHOR_EMAIL: "test@example.com",
-        GIT_COMMITTER_NAME: "Test",
-        GIT_COMMITTER_EMAIL: "test@example.com",
-      },
-    });
-    if (result.status !== 0) throw new Error(result.stderr || `git ${args.join(" ")} failed`);
-    return result.stdout;
-  };
-  git(["init", "-q"]);
+  gitIn(dir, ["init", "-q"]);
   return dir;
 }
 
 function commit(repoDir: string) {
-  const git = (...args: string[]) =>
-    spawnSync("git", args, { cwd: repoDir, encoding: "utf8", env: process.env });
-  git("add", "-A");
-  git("commit", "-q", "-m", "one");
+  gitIn(repoDir, ["add", "-A"]);
+  gitIn(repoDir, ["commit", "-q", "-m", "one"]);
 }
 
 /** Bytes no text reader survives: NULs and high values are the point. */
