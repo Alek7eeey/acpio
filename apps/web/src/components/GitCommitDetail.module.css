@@ -292,11 +292,17 @@
   background: color-mix(in srgb, var(--accent) 12%, var(--surface));
 }
 
+.fileGlyph {
+  flex: 0 0 auto;
+}
+
+/* The change as a letter beside the file's own glyph, coloured by status — the
+   reading the changes tree gives, so both lists say the same thing. */
 .fileStatusIcon {
   flex: 0 0 auto;
-  width: 14px;
-  display: grid;
-  place-items: center;
+  width: 10px;
+  font: 600 0.62rem/1 var(--font-mono);
+  letter-spacing: 0.02em;
 }
 
 .fileStatusModified {

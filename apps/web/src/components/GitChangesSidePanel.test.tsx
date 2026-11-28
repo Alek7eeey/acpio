@@ -216,6 +216,20 @@ describe("GitChangesSidePanel", () => {
     expect(docked.parentElement).not.toBe(document.body);
   });
 
+  it("draws a changed file by its type and marks the status as a letter", async () => {
+    renderPanel();
+
+    const row = await waitFor(() => {
+      const found = fileRow("src/a.ts");
+      expect(found).toBeTruthy();
+      return found!;
+    });
+    // The glyph is the code pane's own, tinted by extension (a .ts is blue)...
+    expect(row.querySelector('svg path[stroke="#3178c6"]')).toBeTruthy();
+    // ...and the change itself is the one coloured letter an editor puts there.
+    expect(row.textContent).toContain("M");
+  });
+
   it("reads a changed file with the editor's diff, inside the panel", async () => {
     const user = userEvent.setup();
     renderPanel();

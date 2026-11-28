@@ -58,10 +58,19 @@ const BINARY_EXT = new Set([
   "mkv",
   "xls",
   "xlsx",
+  "xlsm",
   "doc",
   "docx",
+  "docm",
   "ppt",
   "pptx",
+  "pptm",
+  // OpenDocument: a zip of XML, so the code pane would show the package's own
+  // innards as text — the office preview is where these belong.
+  "odt",
+  "ods",
+  "odp",
+  "rtf",
 ]);
 
 /** Whether this build is set to open clicked files in the code pane. */

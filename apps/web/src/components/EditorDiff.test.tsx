@@ -89,12 +89,15 @@ describe("EditorDiff", () => {
     await waitFor(() => expect(second.container.querySelector(".cm-mergeView")).toBeTruthy());
   });
 
-  it("takes a deleted file's empty working copy", async () => {
+  it("reads a deleted file as one column of what it was", async () => {
     fileMock.mockRejectedValue(new Error("ENOENT"));
     const { container } = renderDiff({ deleted: true });
 
+    // Nothing on the disk to put beside the revision: one column, not a frame
+    // around the emptiness.
     await waitFor(() => expect(apiMock.gitFileText).toHaveBeenCalled());
-    await waitFor(() => expect(container.querySelector(".cm-mergeView")).toBeTruthy());
+    await waitFor(() => expect(container.querySelector(".cm-editor")).toBeTruthy());
+    expect(container.querySelector(".cm-mergeView")).toBeNull();
     expect(container.textContent).toContain("const a = 1;");
   });
 
@@ -184,6 +187,44 @@ describe("EditorDiff", () => {
     await user.click(within(inline.container).getByRole("button", { name: "Одна колонка — изменения внутри текста" }));
     await waitFor(() => expect(inline.container.querySelector(".cm-mergeView")).toBeNull());
     expect(inline.container.querySelector("[data-diff-splitter]")).toBeNull();
+  });
+
+  it("reads a new file as one column even when the reader prefers two", async () => {
+    // A file git has never seen has no other side: the second column would hold
+    // nothing but the frame, which is what the reader asked to stop seeing.
+    apiMock.gitFileText.mockResolvedValue({ text: "", exists: false });
+    fileMock.mockResolvedValue({ path: PATH, text: "const added = true;\n" });
+
+    const { container } = renderDiff();
+
+    await waitFor(() => expect(container.querySelector(".cm-editor")).toBeTruthy());
+    expect(container.querySelector(".cm-mergeView")).toBeNull();
+    expect(container.querySelector("[data-diff-splitter]")).toBeNull();
+    // The layout switch would be two buttons showing the same column.
+    expect(screen.queryByRole("button", { name: "Две колонки — было и стало" })).toBeNull();
+    // ...and the reader's own preference is still split, for the next file.
+    expect(localStorage.getItem("acpio.diffMode.v1")).toBe("split");
+    expect(container.textContent).toContain("const added = true;");
+  });
+
+  it("shows a picture as a picture and never reads it as text", async () => {
+    // The byte route is what a picture needs; the text one would send UTF-8
+    // garbage and the editor pane refuses it anyway.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({ exists: true, size: 2048, mime: "image/png" }),
+      })),
+    );
+
+    const { container } = renderDiff({ path: "assets/logo.png" });
+
+    await waitFor(() => expect(container.querySelectorAll("img")).toHaveLength(2));
+    expect(container.querySelector("[data-media-diff]")).toBeTruthy();
+    expect(screen.queryByText("Не удалось загрузить diff")).toBeNull();
+    expect(apiMock.gitFileText).not.toHaveBeenCalled();
+    expect(fileMock).not.toHaveBeenCalled();
   });
 
   it("names the pane's size limit instead of a plain failure", async () => {

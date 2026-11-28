@@ -58,6 +58,7 @@ import { syncMergeScroll } from "../lib/mergeScrollSync";
 import { TsLsp, languageIdOf, uriToRelPath, type LspLocation } from "../lib/tsLsp";
 import { MergeView, unifiedMergeView } from "@codemirror/merge";
 import type { GitChangedFileDto } from "@acpio/shared";
+import { FileGlyph } from "../components/FileGlyph";
 import { useAppStore } from "../lib/store";
 import { showToast } from "../lib/toast";
 import { useOutsidePointerClose } from "../lib/useOutsidePointerClose";
@@ -2687,22 +2688,7 @@ export function EditorPage({
   );
 }
 
-/** Tint per extension, the way an editor's file icon set keys them. */
-const EXT_TINTS: Record<string, string> = {
-  ts: "#3178c6",
-  tsx: "#4ec9b0",
-  js: "#e2c08d",
-  jsx: "#4ec9b0",
-  css: "#9d7bd8",
-  json: "#cbcf4b",
-  md: "#519aba",
-  html: "#e37933",
-  cs: "#9b6bd6",
-  svg: "#9d7bd8",
-  yml: "#cbcf4b",
-  yaml: "#cbcf4b",
-};
-
+/** Folder chevron or the shared file glyph — the same shape the git panel draws. */
 function TreeGlyph({ name, dir, open }: { name: string; dir: boolean; open: boolean }) {
   if (dir) {
     return (
@@ -2715,18 +2701,7 @@ function TreeGlyph({ name, dir, open }: { name: string; dir: boolean; open: bool
       </svg>
     );
   }
-  const tint = EXT_TINTS[name.split(".").pop()?.toLowerCase() ?? ""] ?? "var(--text-secondary)";
-  return (
-    <svg className={styles.icon} viewBox="0 0 16 16" aria-hidden>
-      <path
-        d="M4 1.5h4.6L12.5 5.4V14.5H4z M8.6 1.5v3.9h3.9"
-        fill="none"
-        stroke={tint}
-        strokeWidth="1.1"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
+  return <FileGlyph name={name} className={styles.icon} width={15} height={15} />;
 }
 
 // Exported for its own test: the reveal behaviour (open folders, ring, scroll).

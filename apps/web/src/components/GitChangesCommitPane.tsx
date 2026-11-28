@@ -25,6 +25,7 @@ import { gitStatusBadge, isGitConflictFile, isUntrackedGitFile } from "../lib/gi
 import { useFixedMenuPlacement } from "../lib/menuPosition";
 import { openFileInEditor } from "../lib/fileOpen";
 import { GitDiffStats } from "./GitDiffStats";
+import { FileGlyph } from "./FileGlyph";
 import { showToast } from "../lib/toast";
 import styles from "./GitChangesCommitPane.module.css";
 
@@ -191,50 +192,24 @@ function ChangesSection({
   );
 }
 
-function FileIcon({ file }: { file: GitChangedFileDto }) {
+/**
+ * A change as an editor marks it: the file is drawn by its own type and the
+ * status is one coloured letter beside the name — the reading a VS Code row
+ * gives, which keeps "which file" and "what happened" apart.
+ */
+function statusTone(file: GitChangedFileDto, badge: string): string {
+  if (isGitConflictFile(file) || badge === "U") return styles.fileStatusConflict;
+  if (badge === "?" || badge === "A") return styles.fileStatusAdd;
+  if (badge === "D") return styles.fileStatusDel;
+  return styles.fileStatusMod;
+}
+
+function FileStatus({ file }: { file: GitChangedFileDto }) {
   const badge = gitStatusBadge(file);
-  if (isGitConflictFile(file) || badge === "U") {
-    return (
-      <svg className={`${styles.fileIcon} ${styles.fileIconConflict}`} width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
-        <path
-          d="M12 9v4M12 16.5h.01"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-        />
-        <path
-          d="M10.3 4.5h3.4L20 19.5H4L10.3 4.5Z"
-          stroke="currentColor"
-          strokeWidth="1.6"
-          strokeLinejoin="round"
-        />
-      </svg>
-    );
-  }
-  if (badge === "?" || badge === "A") {
-    return (
-      <svg className={`${styles.fileIcon} ${styles.fileIconAdd}`} width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
-        <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      </svg>
-    );
-  }
-  if (badge === "D") {
-    return (
-      <svg className={`${styles.fileIcon} ${styles.fileIconDel}`} width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
-        <path d="M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      </svg>
-    );
-  }
   return (
-    <svg className={`${styles.fileIcon} ${styles.fileIconMod}`} width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
+    <span className={`${styles.fileStatus} ${statusTone(file, badge)}`} aria-hidden>
+      {badge}
+    </span>
   );
 }
 
@@ -325,10 +300,11 @@ function FileRow({
         }}
         title={normalizeGitPath(file.path)}
       >
-        <FileIcon file={file} />
+        <FileGlyph name={name} className={styles.fileIcon} width={13} height={13} />
         <span className={styles.fileLabel}>
           <span className={styles.fileDir}>{dirShown}</span>
           <span className={styles.fileName}>{name}</span>
+          <FileStatus file={file} />
         </span>
         {(file.additions > 0 || file.deletions > 0) && (
           <GitDiffStats

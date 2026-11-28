@@ -12,6 +12,7 @@ import { readDiffMode, writeDiffMode, type DiffMode } from "../lib/editorDiffMod
 import { syncMergeScroll } from "../lib/mergeScrollSync";
 import { useAppStore } from "../lib/store";
 import { useT } from "../lib/i18n";
+import { MediaDiff } from "./MediaDiff";
 import styles from "./EditorDiff.module.css";
 
 type Sides = { base: string; text: string };
@@ -193,8 +194,8 @@ export function EditorDiff({
         : "light"
       : settings.editorTheme;
   const [sides, setSides] = useState<{ base: string; text: string } | null>(null);
-  /** Why there is nothing to show: a limit, a binary file, or a real failure. */
-  const [failed, setFailed] = useState<null | "large" | "binary" | "error">(null);
+  /** Why there is nothing to show: the pane's limit, or a real failure. */
+  const [failed, setFailed] = useState<null | "large" | "error">(null);
   const [mode, setMode] = useState<DiffMode>(readDiffMode);
   const hostRef = useRef<HTMLDivElement | null>(null);
   /** The words a folded gap's row shows. */
@@ -235,6 +236,8 @@ export function EditorDiff({
   const fromRev = compare?.from ?? null;
   const fromPath = compare?.fromPath ?? path;
   const toRev = compare?.to ?? null;
+  /** Whether this file is even text: a picture read as UTF-8 is garbage. */
+  const text = canOpenInEditor(path);
 
   useEffect(() => {
     const key = `${sessionId}\n${path}\n${deleted}\n${signature}\n${fromRev}\n${fromPath}\n${toRev}`;
@@ -244,13 +247,7 @@ export function EditorDiff({
       setSides(cached);
       return;
     }
-    if (!canOpenInEditor(path)) {
-      // A picture read as UTF-8 is garbage on the right and megabytes on the
-      // wire: the pane has nothing to diff here.
-      setSides(null);
-      setFailed("binary");
-      return;
-    }
+    if (!text) return;
     let alive = true;
     setSides(null);
     void (async () => {
@@ -269,7 +266,15 @@ export function EditorDiff({
     return () => {
       alive = false;
     };
-  }, [deleted, fromPath, fromRev, path, root, sessionId, signature, toRev]);
+  }, [deleted, fromPath, fromRev, path, root, sessionId, signature, text, toRev]);
+
+  /**
+   * A file git never had (or has lost) has one side, and a second column would
+   * only frame the emptiness: it reads as one page whichever layout the reader
+   * chose, and the choice stays in force for the next real change.
+   */
+  const oneSided = sides !== null && (sides.base === "" || sides.text === "");
+  const layout: DiffMode = oneSided ? "inline" : mode;
 
   useEffect(() => {
     const host = hostRef.current;
@@ -283,7 +288,7 @@ export function EditorDiff({
       theme,
       languageFor(path),
     ];
-    if (mode === "inline") {
+    if (layout === "inline") {
       const view = new EditorView({
         doc: sides.text,
         extensions: [
@@ -343,7 +348,21 @@ export function EditorDiff({
       observer.disconnect();
       merge.destroy();
     };
-  }, [labels, mode, path, scheme, sides, t]);
+  }, [labels, layout, path, scheme, sides, t]);
+
+  if (!text) {
+    // Nothing to diff as text: the file is shown as what it is — a picture, a
+    // video, the browser's own viewer, or a card that hands it over.
+    return (
+      <MediaDiff
+        sessionId={sessionId}
+        root={root}
+        path={path}
+        signature={signature}
+        compare={compare}
+      />
+    );
+  }
 
   return (
     <section className={styles.diff} data-editor-diff={path} data-scheme={scheme} aria-label={path}>
@@ -351,11 +370,14 @@ export function EditorDiff({
         <span className={styles.path} title={path}>
           {path}
         </span>
+        {/* One side has nothing to arrange: the switch would be two buttons that
+            both show the same column. */}
+        {oneSided ? null : (
         <div className={styles.modes} role="group" aria-label={t("git.diffViewMode")}>
           <button
             type="button"
             className={styles.modeBtn}
-            aria-pressed={mode === "split"}
+            aria-pressed={layout === "split"}
             title={t("git.diffSplit")}
             aria-label={t("git.diffSplit")}
             onClick={() => setMode("split")}
@@ -368,7 +390,7 @@ export function EditorDiff({
           <button
             type="button"
             className={styles.modeBtn}
-            aria-pressed={mode === "inline"}
+            aria-pressed={layout === "inline"}
             title={t("git.diffInline")}
             aria-label={t("git.diffInline")}
             onClick={() => setMode("inline")}
@@ -379,14 +401,11 @@ export function EditorDiff({
             </svg>
           </button>
         </div>
+        )}
       </header>
       {failed ? (
         <div className={styles.note}>
-          {failed === "large"
-            ? t("git.diffTooLarge")
-            : failed === "binary"
-              ? t("git.diffBinary")
-              : t("git.diffLoadFailed")}
+          {failed === "large" ? t("git.diffTooLarge") : t("git.diffLoadFailed")}
         </div>
       ) : sides === null ? (
         <div className={styles.note} role="status">

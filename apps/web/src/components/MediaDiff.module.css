@@ -1,0 +1,305 @@
+/* A change with no text to diff: the file drawn as itself, in the shell the
+   text diff uses — same bar, same path line, so switching between a picture and
+   a source file does not move the panel. */
+.diff {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--surface);
+}
+
+.path {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font: 0.75rem var(--font-mono);
+  color: var(--text-secondary);
+}
+
+.note {
+  padding: 12px;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.sides {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  gap: 1px;
+  background: var(--border-soft);
+}
+
+/* One side alone (a root commit, a file the version does not have) fills the
+   pane instead of sitting in half of it. */
+.sides[data-sides="2"] {
+  grid-template-columns: 1fr 1fr;
+}
+
+/* A dock this narrow cannot show two pictures side by side: they stack, and a
+   reader comparing them scrolls instead of squinting. The dock opens around
+   460px of stage, so the pair survives there. */
+@container git-stage (max-width: 440px) {
+  .sides[data-sides="2"] {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr 1fr;
+  }
+}
+
+.side {
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.caption {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* Checkerboard behind a picture: a transparent PNG is not "loading", and its
+   edges have to be readable against something. */
+.picture {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background-color: var(--surface);
+  background-image:
+    linear-gradient(45deg, var(--bg-tertiary) 25%, transparent 25%, transparent 75%, var(--bg-tertiary) 75%),
+    linear-gradient(45deg, var(--bg-tertiary) 25%, transparent 25%, transparent 75%, var(--bg-tertiary) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 8px 8px;
+}
+
+.media {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  background: #000;
+}
+
+.frame {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: var(--bg-secondary);
+}
+
+.center {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  overflow: auto;
+}
+
+.audio {
+  width: min(100%, 320px);
+}
+
+.absent {
+  flex: 1 1 auto;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+/* A format the browser cannot draw: what the file is, and the two ways out. */
+.card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  max-width: 320px;
+  padding: 16px 18px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  background: var(--bg-secondary);
+  text-align: center;
+}
+
+.cardName {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 600 0.82rem var(--font-mono);
+  color: var(--text);
+}
+
+.cardNote {
+  font-size: 0.76rem;
+  color: var(--text-secondary);
+}
+
+.cardActions {
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.action {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  padding: 3px 10px;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.76rem;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.action:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.cardSize {
+  font: 0.7rem var(--font-mono);
+  color: var(--text-secondary);
+}
+
+/* An office file drawn by its own reader. The styles inside are the file's,
+   not ours: the frame only scrolls and keeps the drawing inside the column. */
+.office {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+  background: var(--surface);
+}
+
+/* Word: the document's own CSS is injected into this element, so nothing here
+   may restyle its typography — the padding is the only thing we add. */
+.officeDoc {
+  flex: 0 0 auto;
+  min-width: 0;
+  padding: 6px 8px 18px;
+}
+
+.officeDoc :global(img) {
+  max-width: 100%;
+  height: auto;
+}
+
+/* The document's own page, but without its paper: docx-preview paints the page
+   margins as 72pt of padding, which in a 260px diff column leaves one word per
+   line. Type, colours, borders and numbering stay the document's. */
+.officeDoc :global(.docx) {
+  padding: 4px 6px 14px !important;
+  width: auto !important;
+  min-width: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.officeDoc :global(.docx table) {
+  max-width: 100%;
+}
+
+/* ODF: the reader draws the structure, the pane the grid's lines. */
+.officeDoc :global(.odt table) {
+  max-width: 100%;
+  margin: 6px 0 10px;
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+}
+
+.officeDoc :global(.odt td) {
+  padding: 2px 8px;
+  border: 1px solid var(--border-soft);
+  vertical-align: top;
+}
+
+.officeDoc :global(.odt ul) {
+  margin: 0 0 8px;
+  padding-left: 1.4em;
+}
+
+.officeDoc :global(.odt h1),
+.officeDoc :global(.odt h2),
+.officeDoc :global(.odt h3) {
+  margin: 8px 0 6px;
+}
+
+/* A `.doc`/`.ppt` has no layout to draw: its text is shown plainly, with one
+   line above it saying so. */
+.textNote {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+}
+
+.docText {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  padding: 8px 10px 18px;
+  color: var(--text);
+  font: 0.78rem/1.5 var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Slides: drawn at their own size, then scaled as a whole, so a deck keeps the
+   arrangement its author placed. */
+.slidesZoom {
+  flex: 0 0 auto;
+  min-width: 0;
+  transform-origin: top left;
+}
+
+/* The reader frames the deck as a viewport of one slide; here every slide is
+   shown, so the frame takes the height of the stack (the inline styles it
+   writes cannot be beaten by a class rule — hence `!important`). */
+.slidesZoom :global(.pptx-preview-wrapper) {
+  height: auto !important;
+  overflow: visible !important;
+  background: transparent !important;
+}

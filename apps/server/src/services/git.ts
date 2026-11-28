@@ -50,6 +50,28 @@ async function runGit(
   };
 }
 
+/**
+ * One `git` invocation whose answer is bytes, not text: a picture, a video, a
+ * PDF. `runGit` decodes to UTF-8 and trims, which destroys every one of them.
+ */
+async function runGitBytes(cwd: string, args: string[]): Promise<{ ok: boolean; out: Buffer }> {
+  const result = await new Promise<{ ok: boolean; stdout: Buffer }>((resolve) => {
+    execFile(
+      "git",
+      args,
+      {
+        cwd: path.resolve(cwd),
+        encoding: "buffer",
+        env: process.env,
+        windowsHide: true,
+        maxBuffer: 64 * 1024 * 1024,
+      },
+      (error, stdout) => resolve({ ok: !error, stdout }),
+    );
+  });
+  return { ok: result.ok, out: result.stdout };
+}
+
 function gitFailureMessage(result: { out: string; err: string }) {
   return (result.err || result.out || "").trim();
 }
@@ -541,6 +563,42 @@ export async function getGitFileText(
   const revision = validateRevision(rev) ?? "HEAD";
   const res = await runGit(root, ["show", `${revision}:${filePath}`]);
   return { text: res.ok ? res.out : "", exists: res.ok };
+}
+
+/**
+ * The bytes of one side of a change: a revision's copy, or the working copy as
+ * it is on disk. The git panel draws a picture as a picture and a video as a
+ * player, and those need the file itself, not a decoded string.
+ *
+ * `null` means there is nothing there — a new file has no copy in the revision,
+ * a deleted one none on disk, and a path that climbs out of the repo is refused.
+ */
+export async function getGitFileBytes(
+  cwd: string,
+  filePath: string,
+  rev?: string,
+): Promise<Buffer | null> {
+  const root = await resolveGitRoot(cwd);
+  if (!root) return null;
+  if (rev) {
+    const revision = validateRevision(rev);
+    if (!revision) return null;
+    const res = await runGitBytes(root, ["show", `${revision}:${filePath}`]);
+    return res.ok ? res.out : null;
+  }
+  // The working copy is read off the disk rather than through `git show HEAD`:
+  // an untracked file has no revision at all, and the panel previews the bytes
+  // that are actually there.
+  const base = path.resolve(root);
+  const target = path.resolve(base, filePath);
+  const rel = path.relative(base, target);
+  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return null;
+  try {
+    if (!(await fs.stat(target)).isFile()) return null;
+    return await fs.readFile(target);
+  } catch {
+    return null;
+  }
 }
 
 export async function checkoutGitBranch(

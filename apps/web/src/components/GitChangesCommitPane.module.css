@@ -237,7 +237,7 @@
   box-shadow: inset 3px 0 0 #dc2626;
 }
 
-.fileIconConflict {
+.fileStatusConflict {
   color: #dc2626;
 }
 
@@ -266,15 +266,25 @@
   flex: 0 0 auto;
 }
 
-.fileIconMod {
+/* The change itself, as an editor marks it: one letter, its own colour, beside
+   the name — the tint under it says which kind of file it is. */
+.fileStatus {
+  flex: none;
+  align-self: center;
+  margin-left: 6px;
+  font: 600 0.62rem/1 var(--font-mono);
+  letter-spacing: 0.02em;
+}
+
+.fileStatusMod {
   color: #f59e0b;
 }
 
-.fileIconAdd {
+.fileStatusAdd {
   color: #22c55e;
 }
 
-.fileIconDel {
+.fileStatusDel {
   color: #ef4444;
 }
 

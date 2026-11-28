@@ -42,6 +42,7 @@ import {
 } from "./services/backgroundJobs.js";
 import { handleBackgroundMcpRequest } from "./services/bgMcp.js";
 import { IMAGE_MIME } from "./services/imageTypes.js";
+import { previewMime } from "./services/mediaTypes.js";
 import {
   checkPluginSource,
   findPluginMcpServer,
@@ -169,6 +170,7 @@ import {
   getGitCommitDetail,
   getGitDiff,
   getGitFileText,
+  getGitFileBytes,
   getGitFileLines,
   getGitLog,
   getGitShow,
@@ -1902,6 +1904,41 @@ export async function registerRoutes(app: FastifyInstance) {
     const cwd = await getSessionCwd(id);
     if (cwd === null) return reply.code(404).send({ error: "Not found" });
     return getGitFileText(cwd, q.path, q.rev);
+  });
+
+  /**
+   * One side of a change as bytes: the panel reads a picture in place of the
+   * "binary file" note it used to answer. `rev` names the revision and its
+   * absence the working copy; `info=1` answers what is there — a new file has no
+   * copy in the revision, a deleted one none on disk — without moving bytes.
+   */
+  app.get("/api/sessions/:id/git/blob", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const q = z
+      .object({
+        path: z.string().min(1).max(4096),
+        rev: z.string().max(200).optional(),
+        info: z.enum(["0", "1"]).optional(),
+      })
+      .parse(req.query ?? {});
+    const cwd = await getSessionCwd(id);
+    if (cwd === null) return reply.code(404).send({ error: "Not found" });
+    const bytes = await getGitFileBytes(cwd, q.path, q.rev);
+    const mime = previewMime(q.path);
+    if (q.info === "1") {
+      return { exists: bytes !== null, size: bytes?.length ?? 0, mime };
+    }
+    if (!bytes) return reply.code(404).send({ error: "Not found" });
+    // A revision never changes; the working copy changes on every save.
+    reply.header("Cache-Control", q.rev ? "private, max-age=600" : "no-store");
+    if (mime) return reply.type(mime).send(bytes);
+    return reply
+      .header(
+        "Content-Disposition",
+        `attachment; filename*=UTF-8''${encodeURIComponent(path.basename(q.path))}`,
+      )
+      .type("application/octet-stream")
+      .send(bytes);
   });
 
   app.get("/api/sessions/:id/git/diff", async (req, reply) => {

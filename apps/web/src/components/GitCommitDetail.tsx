@@ -6,6 +6,7 @@ import { useFixedMenuPlacement } from "../lib/menuPosition";
 import { openFileInEditor } from "../lib/fileOpen";
 import { api } from "../lib/api";
 import { GitDiffStats } from "./GitDiffStats";
+import { FileGlyph } from "./FileGlyph";
 import { showToast } from "../lib/toast";
 import styles from "./GitCommitDetail.module.css";
 
@@ -50,37 +51,22 @@ function revealPath(root: string, rel: string, deleted: boolean) {
 
 type FileMenuState = { x: number; y: number; path: string; deleted: boolean };
 
-function FileStatusIcon({ status }: { status: GitCommitFileDto["status"] }) {
-  if (status === "added" || status === "copied") {
-    return (
-      <span className={`${styles.fileStatusIcon} ${styles.fileStatusAdded}`} aria-hidden>
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
-          <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-        </svg>
-      </span>
-    );
-  }
-  if (status === "deleted") {
-    return (
-      <span className={`${styles.fileStatusIcon} ${styles.fileStatusDeleted}`} aria-hidden>
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
-          <path d="M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-        </svg>
-      </span>
-    );
-  }
+/**
+ * A changed file the way the changes tree draws it: the glyph of its own type,
+ * and the status as one coloured letter. A commit's files and the working
+ * copy's must not read as two different kinds of list.
+ */
+function FileStatus({ name, status }: { name: string; status: GitCommitFileDto["status"] }) {
+  const added = status === "added" || status === "copied";
+  const deleted = status === "deleted";
+  const tone = added ? styles.fileStatusAdded : deleted ? styles.fileStatusDeleted : styles.fileStatusModified;
   return (
-    <span className={`${styles.fileStatusIcon} ${styles.fileStatusModified}`} aria-hidden>
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
-        <path
-          d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z"
-          stroke="currentColor"
-          strokeWidth="1.8"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    </span>
+    <>
+      <FileGlyph name={name} className={styles.fileGlyph} width={13} height={13} />
+      <span className={`${styles.fileStatusIcon} ${tone}`} aria-hidden>
+        {added ? "A" : deleted ? "D" : "M"}
+      </span>
+    </>
   );
 }
 
@@ -105,7 +91,7 @@ function CommitFileRow({
       onContextMenu={onContextMenu}
       title={label}
     >
-      <FileStatusIcon status={file.status} />
+      <FileStatus name={path} status={file.status} />
       <span className={styles.filePath}>{truncateMiddlePath(label)}</span>
       {(file.additions > 0 || file.deletions > 0) && (
         <GitDiffStats additions={file.additions} deletions={file.deletions} className={styles.fileStats} />
@@ -134,7 +120,7 @@ function WipFileRow({
       onContextMenu={onContextMenu}
       title={path}
     >
-      <FileStatusIcon status={file.unstaged || !file.staged ? "modified" : "added"} />
+      <FileStatus name={path} status={file.unstaged || !file.staged ? "modified" : "added"} />
       <span className={styles.filePath}>{truncateMiddlePath(path)}</span>
       {(file.additions > 0 || file.deletions > 0) && (
         <GitDiffStats additions={file.additions} deletions={file.deletions} className={styles.fileStats} />
